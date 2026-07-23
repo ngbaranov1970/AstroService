@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from kerykeion import AstrologicalSubject, NatalAspects
+from kerykeion import AspectsFactory, AstrologicalSubjectFactory
 
 SIGNS_RU = {
     "Ari": "Овен",
@@ -84,22 +84,25 @@ _HOUSE_ATTRS = [
     "twelfth_house",
 ]
 
-_HOUSE_NUM = {name: i + 1 for i, name in enumerate(
-    [
-        "First_House",
-        "Second_House",
-        "Third_House",
-        "Fourth_House",
-        "Fifth_House",
-        "Sixth_House",
-        "Seventh_House",
-        "Eighth_House",
-        "Ninth_House",
-        "Tenth_House",
-        "Eleventh_House",
-        "Twelfth_House",
-    ]
-)}
+_HOUSE_NUM = {
+    name: i + 1
+    for i, name in enumerate(
+        [
+            "First_House",
+            "Second_House",
+            "Third_House",
+            "Fourth_House",
+            "Fifth_House",
+            "Sixth_House",
+            "Seventh_House",
+            "Eighth_House",
+            "Ninth_House",
+            "Tenth_House",
+            "Eleventh_House",
+            "Twelfth_House",
+        ]
+    )
+}
 
 
 def _point(p: Any) -> dict:
@@ -123,7 +126,7 @@ def compute_natal(birth_dt: datetime, lat: float, lon: float, tz: str) -> dict:
     birth_dt — локальное время рождения (naive), tz — имя зоны IANA.
     Дома — Placidus, зодиак тропический (дефолты kerykeion/swisseph).
     """
-    subject = AstrologicalSubject(
+    subject = AstrologicalSubjectFactory.from_birth_data(
         name="natal",
         year=birth_dt.year,
         month=birth_dt.month,
@@ -141,8 +144,10 @@ def compute_natal(birth_dt: datetime, lat: float, lon: float, tz: str) -> dict:
     planets = [_point(getattr(subject, attr)) for attr in _PLANET_ATTRS]
 
     angles = {
-        "asc": _point(subject.first_house) | {"name": "Ascendant", "name_ru": PLANETS_RU["Ascendant"]},
-        "mc": _point(subject.tenth_house) | {"name": "Medium_Coeli", "name_ru": PLANETS_RU["Medium_Coeli"]},
+        "asc": _point(subject.first_house)
+        | {"name": "Ascendant", "name_ru": PLANETS_RU["Ascendant"]},
+        "mc": _point(subject.tenth_house)
+        | {"name": "Medium_Coeli", "name_ru": PLANETS_RU["Medium_Coeli"]},
     }
 
     houses = [
@@ -166,7 +171,7 @@ def compute_natal(birth_dt: datetime, lat: float, lon: float, tz: str) -> dict:
             "type_ru": ASPECTS_RU.get(a.aspect, a.aspect),
             "orb": round(a.orbit, 2),
         }
-        for a in NatalAspects(subject).relevant_aspects
+        for a in AspectsFactory.single_chart_aspects(subject).aspects
         if a.aspect in ASPECTS_RU and a.p1_name in PLANETS_RU and a.p2_name in PLANETS_RU
     ]
 

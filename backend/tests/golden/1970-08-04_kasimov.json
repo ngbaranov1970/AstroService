@@ -1,0 +1,495 @@
+{
+  "meta": {
+    "birth_local": "1970-08-04T01:00:00",
+    "tz": "Europe/Moscow",
+    "lat": 54.94377,
+    "lon": 41.40341,
+    "julian_day": 2440802.4166666665,
+    "houses_system": "Placidus",
+    "zodiac": "tropical"
+  },
+  "planets": [
+    {
+      "name": "Sun",
+      "name_ru": "Солнце",
+      "sign": "Leo",
+      "sign_ru": "Лев",
+      "deg_in_sign": 11.1314,
+      "abs_deg": 131.1314,
+      "house": 3,
+      "retrograde": false
+    },
+    {
+      "name": "Moon",
+      "name_ru": "Луна",
+      "sign": "Leo",
+      "sign_ru": "Лев",
+      "deg_in_sign": 29.2301,
+      "abs_deg": 149.2301,
+      "house": 4,
+      "retrograde": false
+    },
+    {
+      "name": "Mercury",
+      "name_ru": "Меркурий",
+      "sign": "Vir",
+      "sign_ru": "Дева",
+      "deg_in_sign": 5.439,
+      "abs_deg": 155.439,
+      "house": 4,
+      "retrograde": false
+    },
+    {
+      "name": "Venus",
+      "name_ru": "Венера",
+      "sign": "Vir",
+      "sign_ru": "Дева",
+      "deg_in_sign": 25.1126,
+      "abs_deg": 175.1126,
+      "house": 5,
+      "retrograde": false
+    },
+    {
+      "name": "Mars",
+      "name_ru": "Марс",
+      "sign": "Leo",
+      "sign_ru": "Лев",
+      "deg_in_sign": 10.6824,
+      "abs_deg": 130.6824,
+      "house": 3,
+      "retrograde": false
+    },
+    {
+      "name": "Jupiter",
+      "name_ru": "Юпитер",
+      "sign": "Lib",
+      "sign_ru": "Весы",
+      "deg_in_sign": 28.5171,
+      "abs_deg": 208.5171,
+      "house": 5,
+      "retrograde": false
+    },
+    {
+      "name": "Saturn",
+      "name_ru": "Сатурн",
+      "sign": "Tau",
+      "sign_ru": "Телец",
+      "deg_in_sign": 21.7439,
+      "abs_deg": 51.7439,
+      "house": 12,
+      "retrograde": false
+    },
+    {
+      "name": "Uranus",
+      "name_ru": "Уран",
+      "sign": "Lib",
+      "sign_ru": "Весы",
+      "deg_in_sign": 5.8272,
+      "abs_deg": 185.8272,
+      "house": 5,
+      "retrograde": false
+    },
+    {
+      "name": "Neptune",
+      "name_ru": "Нептун",
+      "sign": "Sco",
+      "sign_ru": "Скорпион",
+      "deg_in_sign": 28.1317,
+      "abs_deg": 238.1317,
+      "house": 6,
+      "retrograde": true
+    },
+    {
+      "name": "Pluto",
+      "name_ru": "Плутон",
+      "sign": "Vir",
+      "sign_ru": "Дева",
+      "deg_in_sign": 25.5865,
+      "abs_deg": 175.5865,
+      "house": 5,
+      "retrograde": false
+    },
+    {
+      "name": "True_North_Lunar_Node",
+      "name_ru": "Северный узел",
+      "sign": "Pis",
+      "sign_ru": "Рыбы",
+      "deg_in_sign": 2.8031,
+      "abs_deg": 332.8031,
+      "house": 10,
+      "retrograde": true
+    },
+    {
+      "name": "Chiron",
+      "name_ru": "Хирон",
+      "sign": "Ari",
+      "sign_ru": "Овен",
+      "deg_in_sign": 10.1771,
+      "abs_deg": 10.1771,
+      "house": 11,
+      "retrograde": true
+    }
+  ],
+  "angles": {
+    "asc": {
+      "name": "Ascendant",
+      "name_ru": "Асцендент",
+      "sign": "Can",
+      "sign_ru": "Рак",
+      "deg_in_sign": 1.4903,
+      "abs_deg": 91.4903,
+      "house": null,
+      "retrograde": false
+    },
+    "mc": {
+      "name": "Medium_Coeli",
+      "name_ru": "Середина неба",
+      "sign": "Aqu",
+      "sign_ru": "Водолей",
+      "deg_in_sign": 21.0787,
+      "abs_deg": 321.0787,
+      "house": null,
+      "retrograde": false
+    }
+  },
+  "houses": [
+    {
+      "num": 1,
+      "sign": "Can",
+      "sign_ru": "Рак",
+      "deg_in_sign": 1.4903,
+      "abs_deg": 91.4903
+    },
+    {
+      "num": 2,
+      "sign": "Can",
+      "sign_ru": "Рак",
+      "deg_in_sign": 16.171,
+      "abs_deg": 106.171
+    },
+    {
+      "num": 3,
+      "sign": "Leo",
+      "sign_ru": "Лев",
+      "deg_in_sign": 1.5305,
+      "abs_deg": 121.5305
+    },
+    {
+      "num": 4,
+      "sign": "Leo",
+      "sign_ru": "Лев",
+      "deg_in_sign": 21.0787,
+      "abs_deg": 141.0787
+    },
+    {
+      "num": 5,
+      "sign": "Vir",
+      "sign_ru": "Дева",
+      "deg_in_sign": 21.0483,
+      "abs_deg": 171.0483
+    },
+    {
+      "num": 6,
+      "sign": "Sco",
+      "sign_ru": "Скорпион",
+      "deg_in_sign": 11.0087,
+      "abs_deg": 221.0087
+    },
+    {
+      "num": 7,
+      "sign": "Cap",
+      "sign_ru": "Козерог",
+      "deg_in_sign": 1.4903,
+      "abs_deg": 271.4903
+    },
+    {
+      "num": 8,
+      "sign": "Cap",
+      "sign_ru": "Козерог",
+      "deg_in_sign": 16.171,
+      "abs_deg": 286.171
+    },
+    {
+      "num": 9,
+      "sign": "Aqu",
+      "sign_ru": "Водолей",
+      "deg_in_sign": 1.5305,
+      "abs_deg": 301.5305
+    },
+    {
+      "num": 10,
+      "sign": "Aqu",
+      "sign_ru": "Водолей",
+      "deg_in_sign": 21.0787,
+      "abs_deg": 321.0787
+    },
+    {
+      "num": 11,
+      "sign": "Pis",
+      "sign_ru": "Рыбы",
+      "deg_in_sign": 21.0483,
+      "abs_deg": 351.0483
+    },
+    {
+      "num": 12,
+      "sign": "Tau",
+      "sign_ru": "Телец",
+      "deg_in_sign": 11.0087,
+      "abs_deg": 41.0087
+    }
+  ],
+  "aspects": [
+    {
+      "p1": "Sun",
+      "p1_ru": "Солнце",
+      "p2": "Mars",
+      "p2_ru": "Марс",
+      "type": "conjunction",
+      "type_ru": "соединение",
+      "orb": 0.45
+    },
+    {
+      "p1": "Sun",
+      "p1_ru": "Солнце",
+      "p2": "Uranus",
+      "p2_ru": "Уран",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 5.3
+    },
+    {
+      "p1": "Sun",
+      "p1_ru": "Солнце",
+      "p2": "Chiron",
+      "p2_ru": "Хирон",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 0.95
+    },
+    {
+      "p1": "Sun",
+      "p1_ru": "Солнце",
+      "p2": "Medium_Coeli",
+      "p2_ru": "Середина неба",
+      "type": "opposition",
+      "type_ru": "оппозиция",
+      "orb": 9.95
+    },
+    {
+      "p1": "Moon",
+      "p1_ru": "Луна",
+      "p2": "Mercury",
+      "p2_ru": "Меркурий",
+      "type": "conjunction",
+      "type_ru": "соединение",
+      "orb": 6.21
+    },
+    {
+      "p1": "Moon",
+      "p1_ru": "Луна",
+      "p2": "Jupiter",
+      "p2_ru": "Юпитер",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 0.71
+    },
+    {
+      "p1": "Moon",
+      "p1_ru": "Луна",
+      "p2": "Neptune",
+      "p2_ru": "Нептун",
+      "type": "square",
+      "type_ru": "квадрат",
+      "orb": 1.1
+    },
+    {
+      "p1": "Moon",
+      "p1_ru": "Луна",
+      "p2": "True_North_Lunar_Node",
+      "p2_ru": "Северный узел",
+      "type": "opposition",
+      "type_ru": "оппозиция",
+      "orb": 3.57
+    },
+    {
+      "p1": "Moon",
+      "p1_ru": "Луна",
+      "p2": "Ascendant",
+      "p2_ru": "Асцендент",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 2.26
+    },
+    {
+      "p1": "Moon",
+      "p1_ru": "Луна",
+      "p2": "Medium_Coeli",
+      "p2_ru": "Середина неба",
+      "type": "opposition",
+      "type_ru": "оппозиция",
+      "orb": 8.15
+    },
+    {
+      "p1": "Mercury",
+      "p1_ru": "Меркурий",
+      "p2": "True_North_Lunar_Node",
+      "p2_ru": "Северный узел",
+      "type": "opposition",
+      "type_ru": "оппозиция",
+      "orb": 2.64
+    },
+    {
+      "p1": "Mercury",
+      "p1_ru": "Меркурий",
+      "p2": "Ascendant",
+      "p2_ru": "Асцендент",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 3.95
+    },
+    {
+      "p1": "Venus",
+      "p1_ru": "Венера",
+      "p2": "Saturn",
+      "p2_ru": "Сатурн",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 3.37
+    },
+    {
+      "p1": "Venus",
+      "p1_ru": "Венера",
+      "p2": "Neptune",
+      "p2_ru": "Нептун",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 3.02
+    },
+    {
+      "p1": "Venus",
+      "p1_ru": "Венера",
+      "p2": "Pluto",
+      "p2_ru": "Плутон",
+      "type": "conjunction",
+      "type_ru": "соединение",
+      "orb": 0.47
+    },
+    {
+      "p1": "Mars",
+      "p1_ru": "Марс",
+      "p2": "Uranus",
+      "p2_ru": "Уран",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 4.86
+    },
+    {
+      "p1": "Mars",
+      "p1_ru": "Марс",
+      "p2": "Chiron",
+      "p2_ru": "Хирон",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 0.51
+    },
+    {
+      "p1": "Jupiter",
+      "p1_ru": "Юпитер",
+      "p2": "True_North_Lunar_Node",
+      "p2_ru": "Северный узел",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 4.29
+    },
+    {
+      "p1": "Jupiter",
+      "p1_ru": "Юпитер",
+      "p2": "Ascendant",
+      "p2_ru": "Асцендент",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 2.97
+    },
+    {
+      "p1": "Jupiter",
+      "p1_ru": "Юпитер",
+      "p2": "Medium_Coeli",
+      "p2_ru": "Середина неба",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 7.44
+    },
+    {
+      "p1": "Saturn",
+      "p1_ru": "Сатурн",
+      "p2": "Neptune",
+      "p2_ru": "Нептун",
+      "type": "opposition",
+      "type_ru": "оппозиция",
+      "orb": 6.39
+    },
+    {
+      "p1": "Saturn",
+      "p1_ru": "Сатурн",
+      "p2": "Pluto",
+      "p2_ru": "Плутон",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 3.84
+    },
+    {
+      "p1": "Saturn",
+      "p1_ru": "Сатурн",
+      "p2": "Medium_Coeli",
+      "p2_ru": "Середина неба",
+      "type": "square",
+      "type_ru": "квадрат",
+      "orb": 0.67
+    },
+    {
+      "p1": "Uranus",
+      "p1_ru": "Уран",
+      "p2": "Chiron",
+      "p2_ru": "Хирон",
+      "type": "opposition",
+      "type_ru": "оппозиция",
+      "orb": 4.35
+    },
+    {
+      "p1": "Uranus",
+      "p1_ru": "Уран",
+      "p2": "Ascendant",
+      "p2_ru": "Асцендент",
+      "type": "square",
+      "type_ru": "квадрат",
+      "orb": 4.34
+    },
+    {
+      "p1": "Neptune",
+      "p1_ru": "Нептун",
+      "p2": "Pluto",
+      "p2_ru": "Плутон",
+      "type": "sextile",
+      "type_ru": "секстиль",
+      "orb": 2.55
+    },
+    {
+      "p1": "Neptune",
+      "p1_ru": "Нептун",
+      "p2": "True_North_Lunar_Node",
+      "p2_ru": "Северный узел",
+      "type": "square",
+      "type_ru": "квадрат",
+      "orb": 4.67
+    },
+    {
+      "p1": "True_North_Lunar_Node",
+      "p1_ru": "Северный узел",
+      "p2": "Ascendant",
+      "p2_ru": "Асцендент",
+      "type": "trine",
+      "type_ru": "трин",
+      "orb": 1.31
+    }
+  ]
+}
