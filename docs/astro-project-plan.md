@@ -1,4 +1,4 @@
-# План проекта: астро-сервис (VK-first)
+# План проекта: астро-сервис (целевая платформа — VK, обкатка в Telegram)
 
 Рабочая гипотеза: аудитория ВК платит за персональные астрологические разборы (подтверждено ручным рынком «300 ₽ за совместимость»). Продукт — мгновенный AI-разбор по точному расчёту, красивее и глубже ручного, по той же цене.
 
@@ -27,9 +27,9 @@
 
 | Таблица | Ключевые поля |
 |---|---|
-| `users` | id, vk_user_id, tg_user_id (nullable), name, created_at |
+| `users` | id, platform + external_id (уникальная пара — см. платформенный адаптер в astro-context.md), name, is_tester, free_reports_used, created_at |
 | `charts` | id, user_id, kind (self/partner/relative), name, birth_date, birth_time, time_known, city, lat, lon, tz, calc JSONB |
-| `reports` | id, chart_id, pair_chart_id (nullable), type (free_summary / full_natal / compatibility), status, content, prompt_version, created_at |
+| `reports` | id, chart_id, pair_chart_id (nullable), type (free_summary / full_natal / compatibility), status, content, prompt_version, model, temperature, usage — последние три для корпуса генераций, из которого строится пост-фильтр текста |
 | `orders` | id, user_id, report_type, chart_ids, amount, provider_id, status, paid_at |
 | `events` | id, user_id, name, props JSONB, ts — своя аналитика воронки |
 
@@ -80,7 +80,7 @@
 ## 9. План по неделям
 
 ### Неделя 1 — ядро и фундамент
-- [ ] Создать VK-приложение, 2 вечера на Bridge + vk-tunnel (пощупать GetUserInfo, ShowStoryBox)
+- [ ] Создать VK-приложение, 2 вечера на Bridge (пощупать GetUserInfo, ShowStoryBox). Туннель — `localhost.run`, не vk-tunnel: он мёртв с октября 2025
 - [ ] Оформить самозанятость, подать заявку в ЮKassa
 - [ ] Репозиторий, Docker Compose, Postgres, скелет FastAPI
 - [ ] Расчётное ядро: планеты/дома/аспекты + тест на эталонных картах
