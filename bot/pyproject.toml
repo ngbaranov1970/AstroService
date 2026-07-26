@@ -1,0 +1,45 @@
+[project]
+name = "astro-bot"
+version = "0.1.0"
+description = "Telegram-бот AstroService: гороскопы по знакам, рассылка, натальные разборы"
+requires-python = ">=3.13"
+
+dependencies = [
+    # Сам фреймворк бота.
+    "aiogram>=3.13",
+
+    # Планировщик ежедневной рассылки (в 08:00 МСК, см. main.py).
+    # Верхняя граница <4 стоит с прошлого проекта не зря: в 4.x у
+    # APScheduler полностью переделан API планировщика.
+    "apscheduler>=3.10,<4",
+
+    # Настройки бота (BOT_TOKEN) — тем же способом, что и в backend.
+    "pydantic-settings>=2.6",
+
+    # Наш же backend: модели, сессия БД, сервисы, клиент DeepSeek.
+    # Версию не указываем — её берём не из интернета, а из соседней
+    # папки, см. [tool.uv.sources] ниже.
+    "astro-backend",
+]
+
+# Откуда брать astro-backend. Без этой секции uv пошёл бы искать пакет
+# с таким именем на PyPI (и, скорее всего, нашёл бы чужой).
+# workspace = true означает «это сосед по монорепо, ставь его из
+# backend/ в editable-режиме».
+[tool.uv.sources]
+astro-backend = { workspace = true }
+
+[tool.uv]
+# Бот — приложение, а не библиотека: его никто не импортирует, его
+# запускают. Поэтому собирать из него wheel не нужно, и build-system
+# здесь отсутствует намеренно. Код находится по рабочей директории:
+# запускать из папки bot/ (uv run python main.py).
+package = false
+
+# Чего в зависимостях больше НЕТ (было в requirements.txt старого бота):
+#
+#   aiosqlite — SQLite заменён общим Postgres, работаем через SQLAlchemy
+#               из backend (asyncpg);
+#   redis     — кеш поверх Postgres для десятка строк не нужен; убрана
+#               заодно и ветка «а если Redis недоступен» в коде;
+#   openai    — клиент DeepSeek у нас свой, на httpx: app/llm/client.py.

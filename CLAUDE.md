@@ -18,8 +18,13 @@ B2C-сервис астрологических AI-разборов для ру�
 
 ## Планируемая архитектура
 
-Монорепо:
+Монорепо, связано в **uv workspace** (корневой `pyproject.toml`, общее
+окружение и `uv.lock` в корне):
 - `/backend` — FastAPI, SQLAlchemy 2 + Alembic, Postgres 16
+- `/bot` — Telegram-бот на aiogram; импортирует backend как пакет и дёргает
+  `app/services/*` напрямую. Правило границы: **`bot/` знает про Telegram,
+  `app/services/` знает про наши данные, пересечения нет** (в сервисах не
+  должно быть ни одного объекта aiogram — те же сервисы обслужат Mini App)
 - `/frontend` — Vue 3 + Vite + VK Bridge (VKUI не используем — он React-only; визуал свой)
 - `/site` — лендинг + страница оплаты
 

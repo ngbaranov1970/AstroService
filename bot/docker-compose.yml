@@ -1,0 +1,32 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    # Секреты (BOT_TOKEN, DEEPSEEK_*) — из .env рядом с этим файлом;
+    # в образ они не попадают (.env в .dockerignore).
+    env_file: .env
+    environment:
+      # Имя сервиса вместо localhost: внутри контейнера бота localhost —
+      # это сам контейнер, Redis живёт в соседнем.
+      REDIS_URL: redis://redis:6379/0
+      # База — в volume, а не в /app: файловая система контейнера
+      # стирается при каждом пересоздании (docker compose up --build).
+      DB_PATH: /data/bot.db
+    volumes:
+      - bot_data:/data
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Портов наружу нет намеренно: Redis доступен только по внутренней
+    # сети compose; открытый в интернет Redis — типовая уязвимость VPS.
+    volumes:
+      # Образ по умолчанию снапшотит данные в /data — кеш гороскопов
+      # переживает пересоздание контейнера.
+      - redis_data:/data
+
+volumes:
+  bot_data:
+  redis_data:

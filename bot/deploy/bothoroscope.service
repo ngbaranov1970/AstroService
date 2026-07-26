@@ -1,0 +1,31 @@
+# Systemd-юнит для запуска бота на VPS.
+#
+# Установка (пути ниже — пример, поправь под своё расположение):
+#   1. Скопировать проект в /opt/bothoroscope (без .venv и bot.db)
+#   2. cd /opt/bothoroscope && python3 -m venv .venv
+#      && .venv/bin/pip install -r requirements.lock.txt
+#   3. Создать /opt/bothoroscope/.env с ключами (см. config.py)
+#   4. sudo cp deploy/bothoroscope.service /etc/systemd/system/
+#   5. sudo systemctl daemon-reload && sudo systemctl enable --now bothoroscope
+#
+# Логи: journalctl -u bothoroscope -f
+
+[Unit]
+Description=Telegram horoscope bot (BotHoroscope)
+# Redis опционален (бот переживает его отсутствие), поэтому After,
+# а не Requires: при недоступном Redis бот всё равно стартует.
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+# Рабочая директория важна: DB_PATH по умолчанию относительный ("bot.db"),
+# файл базы создастся именно здесь.
+WorkingDirectory=/opt/bothoroscope
+ExecStart=/opt/bothoroscope/.venv/bin/python main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -20,6 +20,7 @@ dist/
 
 # Alembic / DB
 *.sqlite3
+*.db
 
 # Данные: исходные архивы GeoNames и кеш страниц astro-seek
 # (сам backend/data/cities.txt коммитим — он нужен для работы и тестов)
