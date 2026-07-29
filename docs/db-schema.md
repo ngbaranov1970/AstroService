@@ -32,6 +32,8 @@ erDiagram
 
     charts {
         bigint   id PK
+        varchar  token UK      "публичный адрес /r/<token>, 24 сл. байта"
+        varchar  person_name   "чья карта, необязательно; в промпт НЕ идёт"
         bigint   user_id FK
         timestamp birth_local  "БЕЗ таймзоны — локальные часы"
         bool     time_known    "нет времени → 12:00, домов нет"
@@ -125,6 +127,7 @@ erDiagram
 |---|---|---|
 | `users` | UQ `(platform, external_id)` | 12345 в Telegram и 12345 во ВКонтакте — разные люди |
 | `charts` | UQ `(user_id, input_hash)` | «Посчитай ещё раз» не плодит дубли карт (а с ними — лишние походы в LLM) |
+| `charts` | UQ `token` | Ссылка `/r/<token>` на разбор: по соседнему id читалась бы чужая дата и место рождения |
 | `reports` | UQ `(chart_id, type, prompt_version)` | Адрес кеша: один текст на карту + продукт + версию промпта |
 | `reports` | IDX `(user_id, type)` | `COUNT` перед каждым разбором — иначе полный проход по таблице |
 | `orders` | UQ `token` | Публичная ссылка, которую нельзя подобрать перебором соседнего id |
