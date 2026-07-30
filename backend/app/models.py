@@ -31,7 +31,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    Enum as SAEnum,
     Float,
     ForeignKey,
     Index,
@@ -40,6 +39,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
+)
+from sqlalchemy import (
     # Под именем sql_text, потому что в Report есть колонка text (текст
     # разбора) — она затенила бы функцию внутри тела класса.
     text as sql_text,
@@ -231,9 +235,7 @@ class User(Base):
     # ни delete-orphan — за это отвечает ondelete="RESTRICT" в orders.
     # То есть пользователя со списанными деньгами база просто не даст
     # удалить, и это правильно (см. комментарий в Order.user_id).
-    orders: Mapped[list[Order]] = relationship(
-        back_populates="user", lazy="raise_on_sql"
-    )
+    orders: Mapped[list[Order]] = relationship(back_populates="user", lazy="raise_on_sql")
 
     def __repr__(self) -> str:
         return f"<User id={self.id} {self.platform.value}:{self.external_id}>"
@@ -315,9 +317,7 @@ class Chart(Base):
     # время, отменённые переводы стрелок), чем и занимается astro_core/geo.
     # Хранить сразу UTC значило бы выбросить исходные показания часов
     # и потерять возможность пересчитать карту, если tzdata уточнится.
-    birth_local: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), nullable=False
-    )
+    birth_local: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
 
     # Время рождения знают далеко не все. Без него нельзя считать дома,
     # Асцендент и MC — а это половина натальной карты. Договорённость:
@@ -697,9 +697,7 @@ class Order(Base):
         return f"{self.amount / 100:.2f}"
 
     user: Mapped[User] = relationship(back_populates="orders", lazy="raise_on_sql")
-    chart: Mapped[Chart | None] = relationship(
-        back_populates="orders", lazy="raise_on_sql"
-    )
+    chart: Mapped[Chart | None] = relationship(back_populates="orders", lazy="raise_on_sql")
 
     def __repr__(self) -> str:
         return (
@@ -720,7 +718,6 @@ class Event(Base):
 
     Почему не Яндекс.Метрика: она живёт в браузере и видит клики по страницам.
     Половина нашей воронки — переписка с ботом в Telegram, где никакого
-    браузера нет вовсе, а вторая половина размазана между Mini App и сайтом
     оплаты. Метрика не соберёт это в один путь одного человека, а join
     по user_id — соберёт.
 

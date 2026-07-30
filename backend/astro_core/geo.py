@@ -76,8 +76,7 @@ class GeoDB:
     def __init__(self, path: Path = DATA_PATH):
         if not path.exists():
             raise FileNotFoundError(
-                f"База городов не найдена: {path}. "
-                "Соберите её: python scripts/build_cities.py"
+                f"База городов не найдена: {path}. Соберите её: python scripts/build_cities.py"
             )
         self.cities: list[City] = []
         keys: list[tuple[str, int]] = []

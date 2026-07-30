@@ -39,6 +39,17 @@ async def _find(
     return await session.scalar(stmt)
 
 
+async def get_by_id(session: AsyncSession, user_id: int) -> User | None:
+    """Пользователь по внутреннему id. None, если такого нет.
+
+    Нужен там, где пользователь уже опознан раньше, а работа идёт в ДРУГОЙ
+    сессии: фоновая задача генерации получает id, а не объект. Тащить объект
+    между сессиями нельзя — он остаётся привязан к своей, уже закрытой, и
+    обращение к нему выстреливает в самом неудобном месте.
+    """
+    return await session.get(User, user_id)
+
+
 async def get_or_create(
     session: AsyncSession,
     *,

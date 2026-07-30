@@ -194,6 +194,47 @@ async def list_reports(session: AsyncSession, chart_id: int) -> list[Report]:
     return list(await session.scalars(stmt))
 
 
+@dataclass(frozen=True, slots=True)
+class Section:
+    """Кусок готового разбора: заголовок (может отсутствовать) и текст.
+
+    Единая форма для всех типов отчётов. Бесплатный разбор — сплошной текст,
+    то есть одна секция без заголовка; полный приходит от модели готовым
+    списком секций, потому что пейволл открывает первую и закрывает
+    остальные, а резать сплошной текст по границам смысла нельзя.
+    """
+
+    title: str | None
+    body: str
+
+
+def sections(report: Report) -> list[Section]:
+    """Разложить готовый отчёт на секции для показа.
+
+    Живёт здесь, а не в веб-слое, по той же причине, что и реестр _PROMPTS:
+    знание «какой тип отчёта чем разбирается» должно быть в одном месте.
+    Страница просто рисует то, что ей дали, и не обязана знать, что
+    full_natal отвечает JSON'ом, а free_natal — обычным текстом.
+
+    Если разбор не удался (модель вернула не JSON или обрезала его на
+    середине), отдаём весь текст одной секцией: показать оплаченный, пусть
+    и кривой, ответ полезнее, чем страницу с ошибкой.
+    """
+    module = _PROMPTS.get(report.type)
+    parser = getattr(module, "parse", None)
+    if parser is not None:
+        parsed = parser(report.text)
+        if parsed is not None:
+            return [Section(title=s["title"], body=s["body"]) for s in parsed]
+        # WARNING, а не DEBUG: за этот ответ уже заплачено, и если такое
+        # случается регулярно — виноват промпт, и это надо чинить.
+        logger.warning(
+            "Ответ %s/%s (отчёт %s) не разобрался на секции — показываю как есть",
+            report.type.value, report.prompt_version, report.id,
+        )
+    return [Section(title=None, body=report.text)]
+
+
 async def count_generated(
     session: AsyncSession, user_id: int, report_type: ReportType
 ) -> int:
