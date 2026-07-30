@@ -6,6 +6,13 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    # Шаблонизатор: HTML лежит файлами с дырками ({{ chart.sun }}), Python
+    # подставляет значения. Нужен веб-стенду и будущей странице оплаты.
+    "jinja2>=3.1",
+    # Разбор данных HTML-формы. FastAPI сам по себе понимает только JSON,
+    # а браузер шлёт форму как multipart/form-data; без этого пакета любой
+    # обработчик с Form(...) роняет приложение ещё на старте.
+    "python-multipart>=0.0.20",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "asyncpg>=0.30",

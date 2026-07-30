@@ -57,6 +57,8 @@ Report). Человек открыл разбор второй раз — отд
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -69,6 +71,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm import client
 from app.llm.prompts import free_natal, full_natal
 from app.models import Chart, Report, ReportType, User
+
+# Логи здесь важнее, чем в соседних модулях: генерацию запускает фоновая
+# задача, которую никто не ждёт, а колонки «статус» у отчёта нет намеренно
+# (см. шапку). Значит по базе «идёт генерация» и «генерация упала»
+# неразличимы — единственный след аварии остаётся в логе.
+logger = logging.getLogger(__name__)
 
 # --- Какой промпт отвечает за какой тип отчёта ---------------------------
 #
@@ -310,6 +318,10 @@ async def get_or_create_report(
     # секунд, а текст пишется один раз.
     cached = await _find(session, chart.id, report_type, version)
     if cached is not None:
+        # DEBUG, а не INFO: страница перечитывает себя каждые пять секунд,
+        # на INFO это залило бы лог одинаковыми строками.
+        logger.debug("Кеш: отчёт %s/%s для карты %s уже есть", report_type.value,
+                     version, chart.id)
         return cached
 
     # Шаг 2: очередь за замком. Ключ — тот самый адрес отчёта: генерации
@@ -343,13 +355,40 @@ async def get_or_create_report(
             # стенда; аргумент name перекрывает его, когда имя приходит
             # от платформы (профиль VK).
             user_message = module.build_user(natal, name or chart.person_name)
-            result = await client.chat(
-                module.SYSTEM,
-                user_message,
-                temperature=temperature,
-                max_tokens=max_tokens,
+            logger.info(
+                "Генерирую отчёт %s/%s для карты %s (пользователь %s, temperature=%s)",
+                report_type.value, version, chart.id, chart.user_id, temperature,
+            )
+            started = time.perf_counter()
+            try:
+                result = await client.chat(
+                    module.SYSTEM,
+                    user_message,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception:
+                # Клиент уже написал в лог, ЧТО случилось, но не знает, для
+                # какой карты: без этой строки авария не привязывается к
+                # человеку, который смотрит на вечное «готовим разбор».
+                logger.exception(
+                    "Генерация %s/%s для карты %s провалилась через %.1f с",
+                    report_type.value, version, chart.id, time.perf_counter() - started,
+                )
+                raise
+            logger.info(
+                "Отчёт %s/%s для карты %s готов за %.1f с, %d ток. ответа",
+                report_type.value, version, chart.id,
+                time.perf_counter() - started, result.usage.completion_tokens,
             )
             slot.result = result
+        else:
+            # Замок сработал: пока мы стояли в очереди, текст оплатил и
+            # получил конкурент. Второго вызова DeepSeek не будет.
+            logger.info(
+                "Беру текст %s/%s для карты %s у параллельного запроса — в LLM не идём",
+                report_type.value, version, chart.id,
+            )
 
         # Шаг 4: сохраняем текст ВМЕСТЕ с паспортом генерации (модель,
         # temperature, токены). Токены — прямая себестоимость разбора; модель
@@ -384,6 +423,14 @@ async def get_or_create_report(
         except IntegrityError:
             existing = await _find(session, chart.id, report_type, version)
             if existing is not None:
+                # Нормальный исход, не авария: другой процесс закоммитил тот
+                # же отчёт раньше нас. Видеть это в логе полезно — частые
+                # такие строки означают, что замок процесса не справляется и
+                # генерацию пора выносить в общую очередь задач.
+                logger.info(
+                    "Отчёт %s/%s для карты %s записал другой процесс — беру его строку",
+                    report_type.value, version, chart.id,
+                )
                 return existing
             # Сюда попадаем, если конфликт был не про дубль отчёта (например,
             # карту успели удалить). Глушить нельзя — это ошибка в коде
@@ -406,6 +453,10 @@ async def _check_allowed(
         return
 
     if report_type in _TESTERS_ONLY:
+        logger.info(
+            "Отказ пользователю %s: «%s» доступен только тестерам",
+            user.id, report_type.value,
+        )
         raise ReportForbiddenError(
             f"Отчёт «{report_type.value}» пока доступен только тестерам: "
             f"оплата ещё не подключена"
@@ -417,6 +468,12 @@ async def _check_allowed(
 
     used = await count_generated(session, user.id, report_type)
     if used >= limit:
+        # INFO, а не WARNING: это штатная работа лимита, а не сбой. Но видеть
+        # её надо — если в лимит упираются все подряд, значит он мал.
+        logger.info(
+            "Отказ пользователю %s: лимит «%s» исчерпан (%d из %d)",
+            user.id, report_type.value, used, limit,
+        )
         raise ReportLimitError(
             f"Исчерпан лимит бесплатных разборов «{report_type.value}»: "
             f"{used} из {limit}"

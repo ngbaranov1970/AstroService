@@ -17,12 +17,18 @@ httpx без SDK: меньше зависимостей, видно каждый
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
 import httpx
 
 from app.config import get_settings
+
+# Пишем в лог, но НЕ настраиваем его: настройка — дело точки входа
+# (app/main.py), см. app/logging_setup.py.
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.deepseek.com"
 
@@ -124,23 +130,66 @@ async def chat(
     if not thinking:
         payload["temperature"] = temperature
 
+    # В лог идут только размеры, не содержимое: в промпте лежит натальная
+    # карта человека — дата, время и место рождения, то есть персональные
+    # данные. Логи оседают в файлах и бэкапах, ПДн там быть не должно.
+    logger.debug(
+        "Запрос к %s: system=%d симв., user=%d симв., temperature=%s, thinking=%s",
+        model,
+        len(system),
+        len(user),
+        "n/a" if thinking else temperature,
+        thinking,
+    )
+    started = time.perf_counter()
+
     last_error: Exception | None = None
     for attempt in (1, 2):
         try:
             resp = await _client().post("/chat/completions", json=payload)
         except httpx.HTTPError as e:
             last_error = e
+            logger.warning(
+                "Попытка %d/2: сеть недоступна (%s: %s)", attempt, type(e).__name__, e
+            )
         else:
             if resp.status_code == 200:
-                return _parse(resp, requested_model=model)
+                result = _parse(resp, requested_model=model)
+                # Главная строка лога: по ней видно и скорость, и деньги.
+                # cached — токены промпта, отданные из кеша DeepSeek: они в
+                # ~10 раз дешевле, и по ним видно, работает ли стабильный
+                # системный префикс промпта.
+                logger.info(
+                    "%s ответил за %.1f с: %d ток. промпт (%d из кеша) + %d ток. ответ",
+                    result.model,
+                    time.perf_counter() - started,
+                    result.usage.prompt_tokens,
+                    result.usage.cached_prompt_tokens,
+                    result.usage.completion_tokens,
+                )
+                return result
             # Тело ошибки DeepSeek полезно в логах, но обрезаем: там может
             # быть эхо промпта.
             last_error = LLMError(f"DeepSeek HTTP {resp.status_code}: {resp.text[:300]}")
             if resp.status_code not in RETRY_STATUS:
+                logger.warning("DeepSeek вернул %d — не повторяем", resp.status_code)
                 break
+            logger.warning(
+                "Попытка %d/2: DeepSeek вернул %d, повтор через %.0f с",
+                attempt,
+                resp.status_code,
+                RETRY_DELAY_S,
+            )
         if attempt == 1:
             await asyncio.sleep(RETRY_DELAY_S)
 
+    # ERROR, а не просто исключение: вызывать нас будет фоновая задача, и без
+    # этой строки причина провала не дойдёт ни до кого.
+    logger.error(
+        "DeepSeek не ответил за 2 попытки (%.1f с): %s",
+        time.perf_counter() - started,
+        last_error,
+    )
     raise LLMError(f"DeepSeek недоступен: {last_error}") from last_error
 
 
@@ -162,6 +211,12 @@ def _parse(resp: httpx.Response, *, requested_model: str) -> LLMResult:
     # finish_reason == "length" значит, что текст обрезан по max_tokens:
     # для платного отчёта это брак — пусть вызывающий решает, что делать.
     if choice.get("finish_reason") == "length":
+        # Отдельная строка про деньги: токены уже оплачены, а текст в брак.
+        # Частое повторение = пора поднимать max_tokens или резать промпт.
+        logger.warning(
+            "Ответ обрезан по max_tokens: %d ток. сгенерировано и потрачено впустую",
+            usage.completion_tokens,
+        )
         raise LLMError(
             f"Ответ обрезан по max_tokens (сгенерировано {usage.completion_tokens} ток.)"
         )
