@@ -1,0 +1,40 @@
+{# Каркас всех страниц стенда. Наследники переопределяют title и content. #}
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  {# Без viewport мобильный браузер отрисует страницу в 980px и уменьшит её —
+     а тестеры открывают ссылку с телефона. #}
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  {# Стенд открыт по ссылке, но в выдаче ему делать нечего: на страницах
+     даты и места рождения живых людей. #}
+  <meta name="robots" content="noindex, nofollow">
+
+  <title>{% block title %}Астропрогноз{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-title" href="/">Астропрогноз</a>
+    {% if user is defined and user.is_tester %}
+      {# Метка нужна самому тестеру: полный разбор открыт только ему, и без
+         неё непонятно, почему у знакомого кнопки нет. #}
+      <span class="badge" title="Открыт полный разбор">тестер</span>
+    {% endif %}
+  </header>
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    {# Границу ответственности держим утвердительно («решения за вами»),
+       а не перечнем «не является консультацией»: отказ в подвале
+       обесценивает то, за что человек заплатил. #}
+    Разбор составлен по вашей натальной карте. Это повод подумать о себе —
+    решения о здоровье, деньгах и отношениях остаются за вами.
+  </footer>
+</body>
+</html>

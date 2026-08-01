@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Выбор города{% endblock %}
+
+{% block content %}
+  <h1>Какой из этих городов?</h1>
+  <p class="lead">
+    От города зависит часовой пояс, а от него — вся карта. «Ростов» это два
+    города в тысяче километров друг от друга, поэтому выбираем вручную.
+  </p>
+
+  {# Данные первого шага показываем до расчёта: опечатка в дате иначе всплывёт
+     только в готовом разборе, где её никто не свяжет с формой. #}
+  <p class="summary">
+    {% if person_name %}{{ person_name }} · {% endif %}
+    {{ birth_local.strftime("%d.%m.%Y") }}
+    {% if time_known %}
+      в {{ birth_local.strftime("%H:%M") }}
+    {% else %}
+      <span class="muted">время неизвестно</span>
+    {% endif %}
+    <a href="/">изменить</a>
+  </p>
+
+  <ul class="places">
+    {% for place in places %}
+      <li>
+        {# Форма на каждый город, а не радиокнопки с общей кнопкой «далее»:
+           выбор в один клик, и нельзя отметить город и уйти, не нажав. #}
+        <form method="post" action="/chart">
+          <input type="hidden" name="person_name" value="{{ person_name }}">
+          <input type="hidden" name="birth_date" value="{{ birth_date }}">
+          <input type="hidden" name="birth_time" value="{{ birth_time }}">
+          <input type="hidden" name="time_known" value="{{ 'true' if time_known else 'false' }}">
+          <input type="hidden" name="lat" value="{{ place.lat }}">
+          <input type="hidden" name="lon" value="{{ place.lon }}">
+          <input type="hidden" name="place_label" value="{{ place.label }}">
+          <button type="submit" class="place">
+            <span class="place-name">{{ place.label }}</span>
+            {# Часовой пояс — единственный различитель для двух одноимённых
+               городов в одной стране. #}
+            <span class="place-meta">
+              {{ place.tz }} · {{ "%.2f"|format(place.lat) }}, {{ "%.2f"|format(place.lon) }}
+            </span>
+          </button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <p class="muted">
+    Нужного города нет? Вернитесь и укажите ближайший крупный — в справочнике
+    только населённые пункты от 5000 жителей.
+  </p>
+{% endblock %}

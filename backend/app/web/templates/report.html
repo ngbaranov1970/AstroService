@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}{{ chart.person_name or "Натальная карта" }}{% endblock %}
+
+{% block head_extra %}
+  {% if refresh %}
+    {# Перезагрузка страницы, пока текст готовится. Meta, а не JS: стенд
+       обязан работать во встроенном браузере VK и Telegram, где скрипты
+       иногда режутся политикой безопасности. Значение снимается в router.py,
+       как только все разборы готовы. #}
+    <meta http-equiv="refresh" content="{{ refresh }}">
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <h1>{{ chart.person_name or "Без имени" }}</h1>
+  <p class="lead">
+    {{ chart.birth_local.strftime("%d.%m.%Y") }}
+    {% if chart.time_known %}
+      в {{ chart.birth_local.strftime("%H:%M") }}
+    {% else %}
+      · время неизвестно
+    {% endif %}
+    · {{ chart.place_name }}
+  </p>
+
+  {% if not chart.time_known %}
+    <p class="note">
+      Без времени рождения не считаются дома и Асцендент — разбор получится
+      о характере, но не о жизненных сферах.
+    </p>
+  {% endif %}
+
+  {% if thanks %}
+    <p class="note">Спасибо! Оценка записана.</p>
+  {% endif %}
+
+  {# --- Разборы -------------------------------------------------------- #}
+
+  {% for block in blocks %}
+    <section class="report">
+      <h2>{{ block.title }}</h2>
+
+      {% if block.sections %}
+        {% for part in block.sections %}
+          {% if part.title %}<h3>{{ part.title }}</h3>{% endif %}
+          {# Модель отдаёт сплошной текст с пустой строкой между абзацами;
+             без разбивки он слипается в нечитаемое полотно. #}
+          {% for para in part.body.split("\n\n") %}
+            {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+          {% endfor %}
+        {% endfor %}
+
+        {# Отзыв — ради него стенд и существует: сравнить два текста и сказать,
+           какой лучше. Спрашиваем и у того, кому переслали ссылку. #}
+        <form class="feedback" method="post" action="/r/{{ chart.token }}/feedback">
+          <input type="hidden" name="report_type" value="{{ block.type }}">
+          <fieldset class="rating">
+            <legend>Насколько похоже на правду?</legend>
+            {% for n in [1, 2, 3, 4, 5] %}
+              <label class="rating-item">
+                <input type="radio" name="rating" value="{{ n }}" required>
+                {{ n }}
+              </label>
+            {% endfor %}
+          </fieldset>
+          <label>
+            Что не так
+            <input type="text" name="comment" maxlength="500"
+                   placeholder="Можно не заполнять">
+          </label>
+          <button type="submit" class="secondary">Отправить оценку</button>
+        </form>
+
+      {% elif block.running %}
+        {# Автообновление уже включено в head — кнопки «обновить» не нужно. #}
+        <p class="waiting">Готовим текст, это занимает до минуты…</p>
+
+      {% elif block.error %}
+        <p class="error" role="alert">{{ block.error }}</p>
+        {% if is_owner %}
+          <form method="post" action="/r/{{ chart.token }}/report">
+            <input type="hidden" name="report_type" value="{{ block.type }}">
+            <button type="submit">Попробовать ещё раз</button>
+          </form>
+        {% endif %}
+
+      {% elif is_owner %}
+        <form method="post" action="/r/{{ chart.token }}/report">
+          <input type="hidden" name="report_type" value="{{ block.type }}">
+          <button type="submit">Получить {{ block.title | lower }}</button>
+        </form>
+
+      {% else %}
+        {# Кнопки нет: генерация тратит лимиты владельца карты. #}
+        <p class="muted">Этот разбор ещё не заказан.</p>
+      {% endif %}
+    </section>
+  {% endfor %}
+
+  {# --- Расчёт --------------------------------------------------------- #}
+
+  {# Свёрнуто: предмет обкатки — тексты, а таблица на сорок строк отодвинула бы
+     их за нижний край экрана. Нужна она для сверки с astro-seek, когда текст
+     выглядит подозрительно. #}
+  <details class="calc">
+    <summary>Данные расчёта</summary>
+
+    <h3>Планеты</h3>
+    <table>
+      {% for p in natal.planets %}
+        <tr>
+          <td>{{ p.name_ru }}</td>
+          <td>{{ p.deg_in_sign | int }}° {{ p.sign_ru }}</td>
+          <td class="muted">
+            {% if p.retrograde %}R{% endif %}
+            {% if chart.time_known and p.house %}{{ p.house }} дом{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+
+    {% if chart.time_known %}
+      <h3>Углы и дома</h3>
+      <table>
+        {% for angle in [natal.angles.asc, natal.angles.mc] %}
+          <tr>
+            <td>{{ angle.name_ru }}</td>
+            <td>{{ angle.deg_in_sign | int }}° {{ angle.sign_ru }}</td>
+            <td></td>
+          </tr>
+        {% endfor %}
+        {% for h in natal.houses %}
+          <tr>
+            <td class="muted">{{ h.num }} дом</td>
+            <td>{{ h.deg_in_sign | int }}° {{ h.sign_ru }}</td>
+            <td></td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+
+    <h3>Аспекты</h3>
+    <table>
+      {% for a in natal.aspects %}
+        <tr>
+          <td>{{ a.p1_ru }} — {{ a.p2_ru }}</td>
+          <td>{{ a.type_ru }}</td>
+          <td class="muted">орб {{ a.orb }}°</td>
+        </tr>
+      {% endfor %}
+    </table>
+
+    <p class="muted">
+      Дома по Placidus, зодиак тропический. Часовой пояс {{ natal.meta.tz }}.
+    </p>
+  </details>
+
+  <p><a href="/">← Посчитать ещё одну карту</a></p>
+{% endblock %}

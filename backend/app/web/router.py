@@ -102,7 +102,9 @@ async def choose_place(
     found = charts.search_places(city)
     if not found:
         return await _index_with_error(
-            request, user, session,
+            request,
+            user,
+            session,
             "Город не найден. Попробуйте другое написание или ближайший крупный город.",
         )
 
@@ -163,8 +165,11 @@ async def create_chart(
         chart.person_name = name
 
     await events.log(
-        session, events.CHART_CREATED,
-        user_id=user.id, chart_id=chart.id, time_known=time_known,
+        session,
+        events.CHART_CREATED,
+        user_id=user.id,
+        chart_id=chart.id,
+        time_known=time_known,
     )
     await session.commit()
 
@@ -179,9 +184,7 @@ async def create_chart(
 
 
 @router.get("/r/{token}")
-async def report_page(
-    request: Request, token: str, user: UserDep, session: SessionDep
-) -> Response:
+async def report_page(request: Request, token: str, user: UserDep, session: SessionDep) -> Response:
     """Страница карты: расчёт готов сразу, тексты догружаются.
 
     Обработчик только читает. Генерация здесь держала бы ответ минуту, и
@@ -240,11 +243,14 @@ async def request_report(
     if await reports.get_report(session, chart.id, rtype) is not None:
         return RedirectResponse(f"/r/{token}", status_code=status.HTTP_303_SEE_OTHER)
 
-    # Пишем «попросил» ДО генерации: разница с report_ready и есть доля
+    # Пишем «попросил» ДО генерации: разница Не вижу тут ничего про админ секциюс report_ready и есть доля
     # неудач, которую иначе не увидеть.
     await events.log(
-        session, events.REPORT_REQUESTED,
-        user_id=user.id, chart_id=chart.id, type=rtype.value,
+        session,
+        events.REPORT_REQUESTED,
+        user_id=user.id,
+        chart_id=chart.id,
+        type=rtype.value,
     )
     await session.commit()
 
@@ -275,7 +281,8 @@ async def leave_feedback(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Оценка вне диапазона 1–5")
 
     await events.log(
-        session, events.FEEDBACK,
+        session,
+        events.FEEDBACK,
         user_id=user.id,
         chart_id=chart.id,
         type=report_type,

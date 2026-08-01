@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.db import dispose_engine
 from app.logging_setup import setup_logging
+from app.web.deps import install_session_cookie
+from app.web.router import router as web_router
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +80,10 @@ def create_app() -> FastAPI:
     # здесь, а не внутри web/.
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    # Веб-стенд (Jinja2, HTML) подключается здесь же — строка появится
-    # вместе с app/web/router.py.
+    # Веб-стенд: cookie-сессия обязана стоять до роутера — по ней deps.py
+    # узнаёт, кто пришёл, а без неё каждый запрос был бы новым человеком.
+    install_session_cookie(app)
+    app.include_router(web_router)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:
