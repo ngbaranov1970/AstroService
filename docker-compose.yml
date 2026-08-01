@@ -1,0 +1,86 @@
+# Стенд целиком: база, приложение, HTTPS-прокси.
+# Секреты и домен — в корневом .env (образец: .env.example).
+#
+#   docker compose up -d --build
+#   docker compose run --rm api alembic upgrade head
+
+services:
+  db:
+    # Версия зафиксирована намеренно. На latest мажорное обновление (16 → 17)
+    # однажды приедет само, а Postgres откажется читать чужой формат PGDATA:
+    # база просто не поднимется, лечится только dump/restore.
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Данные — в named volume: файловая система контейнера стирается при
+      # каждом пересоздании (docker compose up --build).
+      - pg_data:/var/lib/postgresql/data
+    # Портов наружу нет намеренно: база доступна только по внутренней сети
+    # compose. Postgres, торчащий в интернет, — типовой способ отдать чужие
+    # даты и места рождения. Для psql с ноутбука — ssh-туннель.
+    healthcheck:
+      # pg_isready внутри контейнера: без этого api и миграции стартуют,
+      # пока initdb ещё создаёт кластер.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      # Контекст — корень репозитория: в backend/Dockerfile нужен uv.lock,
+      # который лежит здесь (uv workspace).
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Перекрывает значение из env_file (в compose секция environment
+      # приоритетнее). Хост — имя сервиса `db`: внутри контейнера api
+      # localhost это он сам.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      APP_ENV: prod
+      DEBUG: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Порт наружу не публикуем: снаружи только Caddy. Иначе стенд с чужими
+    # персональными данными открыт по http://<ip>:8000 в обход HTTPS.
+    healthcheck:
+      # Через python, а не curl: в slim-образе curl нет, и ставить его ради
+      # одной проверки — лишние пакеты в проде.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Адрес сайта подставляется в Caddyfile. Домен → автоматический
+      # сертификат Let's Encrypt; ":80" → обычный http для проверки по IP.
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pg_data:
+  # Здесь лежат выпущенные сертификаты. Потерять этот volume — значит
+  # перевыпускать их при каждом старте и упереться в недельный лимит
+  # Let's Encrypt (5 штук на домен), то есть остаться без HTTPS.
+  caddy_data:
+  caddy_config:

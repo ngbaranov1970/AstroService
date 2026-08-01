@@ -20,7 +20,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Каталог backend/ — на уровень выше пакета app/.
@@ -97,6 +97,18 @@ class Settings(BaseSettings):
     # пароль не задан — админка отвечает 503 и не пускает никого. Забытая
     # переменная должна закрывать дверь, а не распахивать.
     admin_password: SecretStr | None = None
+
+    @field_validator("web_tester_token", "admin_password", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v: str | None) -> str | None:
+        """Пустая строка = переменная не задана.
+
+        Без этого `ADMIN_PASSWORD=` (пустое значение в .env, который compose
+        отдаёт контейнеру через env_file) превращается в SecretStr(""), а
+        проверка в web/deps.py смотрит `is None` — и админка пускает по
+        пустому паролю вместо 503. Проверено на живом стенде.
+        """
+        return None if isinstance(v, str) and not v.strip() else v
 
     @property
     def is_prod(self) -> bool:

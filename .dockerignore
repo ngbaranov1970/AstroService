@@ -1,0 +1,44 @@
+# Контекст сборки — корень репозитория (см. backend/Dockerfile), поэтому
+# файл лежит здесь, а не в backend/. Всё перечисленное не должно попасть ни
+# в контекст (это трафик демону на каждую сборку), ни тем более в образ.
+
+# Окружение и кеши: .venv — сотни мегабайт под хостовый Linux, в образе
+# собирается своё.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# История и служебное
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+.claude/
+
+# Секреты: ключ DeepSeek и пароль базы попадут в слой образа навсегда —
+# `docker history` покажет их любому, у кого есть образ.
+.env
+.env.*
+!.env.example
+
+# Не нужно backend'у
+frontend/
+site/
+docs/
+bot/
+!bot/pyproject.toml
+backend/tests/
+backend/data/*.zip
+backend/data/seek_cache/
+
+# Прочее
+*.log
+*.md
+.DS_Store
+.directory
