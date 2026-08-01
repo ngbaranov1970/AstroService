@@ -243,7 +243,7 @@ async def request_report(
     if await reports.get_report(session, chart.id, rtype) is not None:
         return RedirectResponse(f"/r/{token}", status_code=status.HTTP_303_SEE_OTHER)
 
-    # Пишем «попросил» ДО генерации: разница Не вижу тут ничего про админ секциюс report_ready и есть доля
+    # Пишем «попросил» ДО генерации: разница с report_ready и есть доля
     # неудач, которую иначе не увидеть.
     await events.log(
         session,
@@ -280,12 +280,23 @@ async def leave_feedback(
     if not 1 <= rating <= 5:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Оценка вне диапазона 1–5")
 
+    # Оценивают конкретную редакцию текста, а не карту: без report_id звёзды
+    # после смены VERSION молча переехали бы на новый разбор, которого человек
+    # не видел, — и админка сравнивала бы версии по чужим оценкам.
+    report = None
+    try:
+        report = await reports.get_report(session, chart.id, ReportType(report_type))
+    except ValueError:
+        pass
+
     await events.log(
         session,
         events.FEEDBACK,
         user_id=user.id,
         chart_id=chart.id,
         type=report_type,
+        report_id=report.id if report is not None else None,
+        prompt_version=report.prompt_version if report is not None else None,
         rating=rating,
         comment=comment.strip()[:MAX_COMMENT],
         # Мнение владельца и мнение того, кому переслали ссылку, в отчётах

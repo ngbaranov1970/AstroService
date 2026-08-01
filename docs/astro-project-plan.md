@@ -29,7 +29,7 @@
 |---|---|
 | `users` | id, platform + external_id (уникальная пара — см. платформенный адаптер в astro-context.md), name, is_tester, free_reports_used, created_at |
 | `charts` | id, user_id, kind (self/partner/relative), name, birth_date, birth_time, time_known, city, lat, lon, tz, calc JSONB |
-| `reports` | id, chart_id, pair_chart_id (nullable), type (free_summary / full_natal / compatibility), status, content, prompt_version, model, temperature, usage — последние три для корпуса генераций, из которого строится пост-фильтр текста |
+| `reports` | id, chart_id, pair_chart_id (nullable), type (free_natal / full_natal / matrix / eastern), status, content, prompt_version, model, temperature, usage — последние три для корпуса генераций, из которого строится пост-фильтр текста |
 | `orders` | id, user_id, report_type, chart_ids, amount, provider_id, status, paid_at |
 | `events` | id, user_id, name, props JSONB, ts — своя аналитика воронки |
 
@@ -81,7 +81,8 @@
 ## 6. LLM-слой
 
 - DeepSeek; вход — JSON расчёта, выход — структурированный разбор по секциям
-- Версионирование промптов (prompt_version в reports)
+- Промпт на тип отчёта — Python-модуль в `app/llm/prompts/` (`VERSION`, `SYSTEM`, `build_user()`, у полного разбора ещё `parse()`); правятся в коде, из админки не редактируются
+- Версионирование промптов (prompt_version в reports); `VERSION` бампается руками — без этого кеш отдаст старый текст под новой редакцией
 - Тон: развлекательно-рефлексивный, без медицинских и фатальных предсказаний — важно и для модерации ВК, и по существу
 
 ## 7. Экраны Mini App
@@ -118,10 +119,10 @@
 текстам — значит верстать дважды. Подробности в
 [progress.md](progress.md), «Следующие шаги».
 
-- [ ] `services/users.py` (`get_or_create`), `services/reports.py` (кеш + лимит)
-- [ ] `app/web/` на Jinja2: форма → выбор города → страница разбора
-- [ ] `/admin` и `/admin/compare?ids=3,7` — два разбора в колонках рядом (то, ради чего стенд и делается)
-- [ ] Домен + Caddy (HTTPS), Basic Auth на админку, потолок расходов на DeepSeek
+- [x] `services/users.py` (`get_or_create`), `services/reports.py` (кеш + лимит)
+- [x] `app/web/` на Jinja2: форма → выбор города → страница разбора
+- [x] `/admin` и `/admin/compare?ids=3,7` — тексты в колонках рядом (то, ради чего стенд и делается; `ids` — отчётов, не карт)
+- [ ] Домен + Caddy (HTTPS), потолок расходов на DeepSeek (Basic Auth на админке — [x])
 - [ ] Раздать ссылку тестерам, собрать оценки, переписать промпты по фидбеку
 
 ### Неделя 2 — Mini App

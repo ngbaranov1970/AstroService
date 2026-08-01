@@ -346,3 +346,143 @@ button.secondary {
 /* Первая колонка фиксированной ширины — иначе длинное «Ретроградный Меркурий»
    растягивает её и градусы прыгают от строки к строке. */
 .calc td:first-child { width: 45%; }
+
+/* --- Админка ----------------------------------------------------------- */
+
+/* Колонка под чтение здесь мешает: в таблице девять столбцов. Не 100% —
+   строка во всю ширину монитора превращает список в лес пробелов. */
+body.admin .site-header,
+body.admin .page,
+body.admin .site-footer { max-width: 1200px; }
+
+/* Таблица не сжимается, а уезжает вбок: на телефоне девять колонок иначе
+   схлопываются в нечитаемые столбики по букве. */
+.table-wrap {
+  overflow-x: auto;
+  margin-bottom: 24px;
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.grid th,
+.grid td {
+  padding: 8px 12px 8px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grid th {
+  position: sticky;
+  top: 0;
+  /* Непрозрачный фон обязателен: строки проезжают под шапкой насквозь. */
+  background: var(--bg);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.grid tbody tr:hover { background: var(--bg-card); }
+
+/* Числа сравнивают глазами по столбцу — вразнобой это не читается. */
+.grid .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.grid .nowrap { white-space: nowrap; }
+
+/* Дата рождения и город — второй строкой под именем, мелким. */
+.grid .sub {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.grid .badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  vertical-align: 1px;
+}
+
+.grid input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+/* Кнопка по умолчанию во всю ширину — в панели ей нужна ширина по тексту. */
+.toolbar button { width: auto; }
+
+/* --- Сравнение разборов ------------------------------------------------ */
+
+/* Число колонок приходит из шаблона переменной --cols: два текста должны
+   занять ширину пополам, четыре — сжаться, но не уже 300px, иначе строка
+   в шесть слов не читается. */
+.compare {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(300px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+/* Ниже этой ширины колонки всё равно не помещаются рядом — ставим их
+   друг под друга, чтобы текст не превращался в столбик по два слова. */
+@media (max-width: 900px) {
+  .compare { grid-template-columns: 1fr; }
+}
+
+.column {
+  min-width: 0;
+  padding: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.column p { margin: 0 0 14px; }
+.column h2 { margin: 0 0 4px; font-size: 18px; }
+.column h2 a { text-decoration: none; }
+.column h3 { font-size: 15px; margin: 20px 0 8px; }
+
+.column-head {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.column-head .sub {
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+
+/* Подпись и значение в строку: вертикальный список из восьми строк
+   отодвинул бы сам текст за нижний край экрана. */
+.meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; }
+
+/* Расчёт внутри колонки: отступ в 40px разрывал бы карточку пополам. */
+.column .calc { margin-top: 24px; font-size: 13px; }

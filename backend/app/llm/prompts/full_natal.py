@@ -214,8 +214,7 @@ def _strip_fence(text: str) -> str:
     if "\n" in t:  # отрезаем строку с открывающим забором («```» или «```json»)
         t = t.split("\n", 1)[1]
     t = t.rstrip()
-    if t.endswith("```"):
-        t = t[:-3]
+    t = t.removesuffix("```")
     return t.strip()
 
 

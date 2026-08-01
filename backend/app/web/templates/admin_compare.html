@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Сравнение разборов{% endblock %}
+
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  <h1>Сравнение</h1>
+
+  {% if missing %}
+    <p class="note">
+      Не найдено отчётов: {{ missing }}. Скорее всего, id в адресе устарел.
+    </p>
+  {% endif %}
+
+  {% if items %}
+    {# Число колонок приходит из данных: жёсткой сетки нет, две колонки
+       должны занять всю ширину, а четыре — сжаться до минимума. #}
+    <div class="compare" style="--cols: {{ items | length }}">
+      {% for entry in items %}
+        {% set report = entry.item.report %}
+        {% set chart = entry.item.chart %}
+        <article class="column">
+          <header class="column-head">
+            <h2>
+              <a href="/r/{{ chart.token }}">
+                {{ chart.person_name or "Без имени" }}
+              </a>
+            </h2>
+            <p class="muted sub">
+              {{ chart.birth_local.strftime("%d.%m.%Y") }}
+              {% if chart.time_known %}
+                {{ chart.birth_local.strftime("%H:%M") }}
+              {% else %}
+                время неизвестно
+              {% endif %}
+              · {{ chart.place_name }}
+            </p>
+
+            {# Метаданные генерации — то, ради чего страницу и открывают:
+               без версии промпта рядом с текстом сравнивать нечего. #}
+            <dl class="meta">
+              <dt>Разбор</dt>
+              <dd>{{ report.type.value }} · {{ report.prompt_version }}</dd>
+              <dt>Модель</dt>
+              <dd>{{ report.model }} · t={{ report.temperature }}</dd>
+              <dt>Объём</dt>
+              <dd>
+                {{ report.text | length }} знаков
+                <span class="muted">/ {{ report.tokens_completion }} токенов</span>
+              </dd>
+              <dt>Оценка</dt>
+              <dd>
+                {% if entry.item.rating %}
+                  {{ "%.1f" | format(entry.item.rating) }}
+                {% else %}
+                  <span class="muted">нет</span>
+                {% endif %}
+              </dd>
+            </dl>
+          </header>
+
+          {% for part in entry.sections %}
+            {% if part.title %}<h3>{{ part.title }}</h3>{% endif %}
+            {% for para in part.body.split("\n\n") %}
+              {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+            {% endfor %}
+          {% endfor %}
+
+          {# Свёрнуто, но рядом: главная проверка промпта — стоят ли за
+             тезисами конкретные позиции планет, а не общие слова. #}
+          <details class="calc">
+            <summary>Данные расчёта</summary>
+            {% set natal = chart.calc["natal"] %}
+            <table>
+              {% for p in natal.planets %}
+                <tr>
+                  <td>{{ p.name_ru }}</td>
+                  <td>{{ p.deg_in_sign | int }}° {{ p.sign_ru }}</td>
+                  <td class="muted">
+                    {% if p.retrograde %}R{% endif %}
+                    {% if chart.time_known and p.house %}{{ p.house }} дом{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+              {% if chart.time_known %}
+                {% for angle in [natal.angles.asc, natal.angles.mc] %}
+                  <tr>
+                    <td>{{ angle.name_ru }}</td>
+                    <td>{{ angle.deg_in_sign | int }}° {{ angle.sign_ru }}</td>
+                    <td></td>
+                  </tr>
+                {% endfor %}
+              {% endif %}
+            </table>
+          </details>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">Нечего показывать: ни один из отчётов не найден.</p>
+  {% endif %}
+
+  <p><a href="/admin">← К списку разборов</a></p>
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Ссылку не пересылать: на ней данные рождения тестеров.
+{% endblock %}

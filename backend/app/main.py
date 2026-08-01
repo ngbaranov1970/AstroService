@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.db import dispose_engine
 from app.logging_setup import setup_logging
+from app.web.admin import router as admin_router
 from app.web.deps import install_session_cookie
 from app.web.router import router as web_router
 
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     # узнаёт, кто пришёл, а без неё каждый запрос был бы новым человеком.
     install_session_cookie(app)
     app.include_router(web_router)
+    app.include_router(admin_router)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:

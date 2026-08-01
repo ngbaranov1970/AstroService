@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Админка стенда{% endblock %}
+
+{# Таблице нужна вся ширина экрана, а не колонка под чтение в 680px. #}
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  <h1>Разборы</h1>
+  <p class="lead">
+    Карт посчитано: {{ charts_count }} · отчётов в таблице: {{ rows | length }}
+    {% if rows | length == limit %}
+      (показаны последние {{ limit }})
+    {% endif %}
+  </p>
+
+  {# --- Версии промптов ------------------------------------------------- #}
+
+  <h2>Версии промптов</h2>
+  {% if versions %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Тип</th>
+            <th>Версия</th>
+            <th class="num">Текстов</th>
+            <th class="num">Знаков в среднем</th>
+            <th class="num">Оценка</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in versions %}
+            <tr>
+              <td>{{ v.type.value }}</td>
+              <td>{{ v.prompt_version }}</td>
+              <td class="num">{{ v.count }}</td>
+              <td class="num">{{ v.avg_chars }}</td>
+              <td class="num">
+                {% if v.rating %}
+                  {{ "%.1f" | format(v.rating) }}
+                  <span class="muted">/ {{ v.ratings_count }}</span>
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Пока ничего не сгенерировано.</p>
+  {% endif %}
+
+  {# --- Отчёты ---------------------------------------------------------- #}
+
+  <h2>Все тексты</h2>
+
+  {% if rows %}
+    {# GET, а не POST: адрес сравнения с ?ids=… можно переслать и сохранить,
+       а сама выборка ничего не меняет. #}
+    <form method="get" action="/admin/compare">
+      <p class="toolbar">
+        <button type="submit" class="secondary">Сравнить отмеченные</button>
+        <span class="muted">Рядом помещается до четырёх, лишние отброшены.</span>
+      </p>
+
+      <div class="table-wrap">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Когда</th>
+              <th>Чья карта</th>
+              <th>Тип</th>
+              <th>Версия</th>
+              <th>Модель</th>
+              <th class="num">Знаков</th>
+              <th class="num">Токенов</th>
+              <th class="num">Оценка</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td>
+                  <input type="checkbox" name="ids" value="{{ row.report_id }}"
+                         aria-label="Отчёт {{ row.report_id }}">
+                </td>
+                <td class="nowrap">{{ row.created_at.strftime("%d.%m %H:%M") }}</td>
+                <td>
+                  <a href="/r/{{ row.chart_token }}">
+                    {{ row.person_name or "Без имени" }}
+                  </a>
+                  {% if row.is_tester %}<span class="badge">тестер</span>{% endif %}
+                  <span class="muted sub">
+                    {{ row.birth_local.strftime("%d.%m.%Y") }}
+                    {% if row.time_known %}
+                      {{ row.birth_local.strftime("%H:%M") }}
+                    {% else %}
+                      время неизвестно
+                    {% endif %}
+                    · {{ row.place_name }}
+                  </span>
+                </td>
+                <td>{{ row.type.value }}</td>
+                <td>{{ row.prompt_version }}</td>
+                <td class="nowrap">
+                  {{ row.model }}
+                  <span class="muted">t={{ row.temperature }}</span>
+                </td>
+                <td class="num">{{ row.chars }}</td>
+                <td class="num">{{ row.tokens_completion }}</td>
+                <td class="num">
+                  {% if row.rating %}
+                    {{ "%.1f" | format(row.rating) }}
+                    {% if row.ratings_count > 1 %}
+                      <span class="muted">/ {{ row.ratings_count }}</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  {% else %}
+    <p class="muted">Ни одного отчёта ещё нет.</p>
+  {% endif %}
+{% endblock %}
+
+{% block footer %}
+  {# Дисклеймер разбора здесь неуместен, а предупреждение — по делу: на
+     странице имена, даты и места рождения живых людей. #}
+  Служебная страница. Ссылку не пересылать: на ней данные рождения тестеров.
+{% endblock %}
