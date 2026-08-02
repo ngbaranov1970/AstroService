@@ -47,7 +47,13 @@ HMAC от `initData`, той же формы, что VK-шный `sign`.
 - **Авторизация**: проверка HMAC-SHA256-подписи `sign` из launch params VK → JWT. Регистрации нет.
 - **Платежи**: ЮKassa, всегда на внешнем сайте (внутри Mini App цифровые товары — только за «голоса» с большой комиссией, на iOS запрещены). Вебхук ЮKassa разблокирует отчёт.
 
-Таблицы: `users`, `charts` (calc JSONB), `reports`, `orders`, `events` (своя аналитика воронки). Деплой: Docker Compose (api, статика за Caddy/nginx, postgres) на VPS.
+Таблицы: `users`, `charts` (calc JSONB), `reports`, `orders`, `events` (своя аналитика воронки).
+
+Деплой: `docker-compose.yml` в корне — `db` (postgres:16), `api`
+(`backend/Dockerfile`), `caddy` (HTTPS). Портов наружу нет ни у базы, ни у
+приложения. Контекст сборки образа — корень репозитория (там `uv.lock`),
+секреты — в корневом `.env`. Подробности и обоснование — в
+[docs/astro-context.md](docs/astro-context.md), раздел «Деплой: что решено».
 
 ## Жёсткие ограничения (не нарушать)
 

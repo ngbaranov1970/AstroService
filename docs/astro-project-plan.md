@@ -122,7 +122,8 @@
 - [x] `services/users.py` (`get_or_create`), `services/reports.py` (кеш + лимит)
 - [x] `app/web/` на Jinja2: форма → выбор города → страница разбора
 - [x] `/admin` и `/admin/compare?ids=3,7` — тексты в колонках рядом (то, ради чего стенд и делается; `ids` — отчётов, не карт)
-- [ ] Домен + Caddy (HTTPS), потолок расходов на DeepSeek (Basic Auth на админке — [x])
+- [x] Docker: `backend/Dockerfile` + `docker-compose.yml` (db + api + caddy), проверено локально
+- [ ] VPS + домен в `SITE_ADDRESS` (HTTPS Caddy выпустит сам), бэкап базы по cron (Basic Auth на админке — [x]; потолок расходов на DeepSeek отменён 2026-08-01)
 - [ ] Раздать ссылку тестерам, собрать оценки, переписать промпты по фидбеку
 
 ### Неделя 2 — Mini App
