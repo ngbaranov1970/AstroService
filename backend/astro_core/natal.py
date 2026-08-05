@@ -45,6 +45,24 @@ PLANETS_RU = {
     "Medium_Coeli": "Середина неба",
 }
 
+# Классический управитель знака и, где он есть, современный. Классику держим
+# первой и никогда не выкидываем: у Марса и Сатурна традиция толкования домов
+# на тысячу лет длиннее, чем у Плутона и Урана.
+SIGN_RULERS = {
+    "Ari": ("Mars",),
+    "Tau": ("Venus",),
+    "Gem": ("Mercury",),
+    "Can": ("Moon",),
+    "Leo": ("Sun",),
+    "Vir": ("Mercury",),
+    "Lib": ("Venus",),
+    "Sco": ("Mars", "Pluto"),
+    "Sag": ("Jupiter",),
+    "Cap": ("Saturn",),
+    "Aqu": ("Saturn", "Uranus"),
+    "Pis": ("Jupiter", "Neptune"),
+}
+
 ASPECTS_RU = {
     "conjunction": "соединение",
     "opposition": "оппозиция",
@@ -150,6 +168,9 @@ def compute_natal(birth_dt: datetime, lat: float, lon: float, tz: str) -> dict:
         | {"name": "Medium_Coeli", "name_ru": PLANETS_RU["Medium_Coeli"]},
     }
 
+    # Управителя ищем среди уже посчитанных планет: нужны его знак и дом,
+    # а не только имя — без позиции толковать управителя нечем.
+    by_name = {p["name"]: p for p in planets}
     houses = [
         {
             "num": i + 1,
@@ -157,6 +178,15 @@ def compute_natal(birth_dt: datetime, lat: float, lon: float, tz: str) -> dict:
             "sign_ru": SIGNS_RU[h.sign],
             "deg_in_sign": round(h.position, 4),
             "abs_deg": round(h.abs_pos, 4),
+            "rulers": [
+                {
+                    "name": name,
+                    "name_ru": PLANETS_RU[name],
+                    "sign_ru": by_name[name]["sign_ru"],
+                    "house": by_name[name]["house"],
+                }
+                for name in SIGN_RULERS[h.sign]
+            ],
         }
         for i, h in enumerate(getattr(subject, attr) for attr in _HOUSE_ATTRS)
     ]
