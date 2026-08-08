@@ -98,7 +98,33 @@ class Settings(BaseSettings):
     # переменная должна закрывать дверь, а не распахивать.
     admin_password: SecretStr | None = None
 
-    @field_validator("web_tester_token", "admin_password", mode="before")
+    # --- VK Mini App ------------------------------------------------------
+    # Идентификатор приложения из настроек VK. Нужен не для проверки подписи
+    # (её достаточно ключа ниже), а чтобы сверить vk_app_id из параметров
+    # запуска: расхождение означает, что ключ и приложение разъехались —
+    # ошибка конфигурации, которую иначе видно только по «подпись неверна».
+    vk_app_id: int | None = None
+
+    # «Защищённый ключ» приложения (Разработка → Ключи доступа) — им VK
+    # подписывает параметры запуска, им же мы проверяем подпись. Не задан —
+    # VK-ветка выключена целиком, тот же дефолт-«закрыто», что у секретов
+    # стенда выше.
+    vk_secure_key: SecretStr | None = None
+
+    # Ключ, которым подписываются НАШИ сессионные JWT (?s=... в адресе).
+    # Отдельный от vk_secure_key намеренно: у них разные роли и разные
+    # владельцы — тем проверяем чужие утверждения о личности, этим
+    # подписываем свои. Смена ключа разлогинивает всех разом.
+    session_secret: SecretStr | None = None
+
+    @field_validator(
+        "web_tester_token",
+        "admin_password",
+        "vk_app_id",
+        "vk_secure_key",
+        "session_secret",
+        mode="before",
+    )
     @classmethod
     def _blank_is_unset(cls, v: str | None) -> str | None:
         """Пустая строка = переменная не задана.
@@ -107,12 +133,25 @@ class Settings(BaseSettings):
         отдаёт контейнеру через env_file) превращается в SecretStr(""), а
         проверка в web/deps.py смотрит `is None` — и админка пускает по
         пустому паролю вместо 503. Проверено на живом стенде.
+
+        Для vk_app_id причина другая: `VK_APP_ID=` роняет валидацию на
+        int(""), то есть приложение не стартует вовсе.
         """
         return None if isinstance(v, str) and not v.strip() else v
 
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @property
+    def vk_enabled(self) -> bool:
+        """Настроена ли VK-ветка: проверить подпись И выпустить свою сессию.
+
+        Полконфигурации хуже, чем никакой: с ключом VK, но без session_secret
+        подпись сойдётся, а JWT выпустить не из чего — человек упрётся в
+        ошибку уже после успешного входа.
+        """
+        return self.vk_secure_key is not None and self.session_secret is not None
 
 
 @lru_cache

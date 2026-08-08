@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
@@ -26,7 +27,7 @@ from app.db import get_session
 from app.models import Chart, ReportType, User
 from app.services import charts, events, reports
 from app.web import forms, generation
-from app.web.deps import TESTER_QUERY_PARAM, current_user
+from app.web.deps import TESTER_QUERY_PARAM, current_user, with_session
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -34,6 +35,21 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 # Автоэкранирование .html включено по умолчанию — имя и город из формы
 # попадают в страницу безопасно.
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+
+@pass_context
+def _url(context, path: str) -> str:
+    """Jinja-глобал `url()`: внутренний адрес с токеном сессии, если он есть.
+
+    Глобал, а не переменная контекста: переменную забыли бы передать в один
+    из шаблонов, и в VK ровно эта страница стала бы тупиком. `pass_context`
+    даёт доступ к `request`, который Jinja2Templates кладёт в контекст сам.
+    """
+    return with_session(context["request"], path)
+
+
+# Виден и админке: она рендерит через этот же объект и наследует base.html.
+templates.env.globals["url"] = _url
 
 router = APIRouter(
     # /docs описывает JSON-API для Mini App, а здесь HTML-страницы для людей.
@@ -63,7 +79,7 @@ async def index(request: Request, user: UserDep, session: SessionDep) -> Respons
     # тестера: иначе он осядет в истории браузера и уедет в заголовке Referer
     # на первый же внешний сайт.
     if request.query_params.get(TESTER_QUERY_PARAM):
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        return _redirect(request, "/")
 
     my_charts = await charts.list_charts(session, user.id)
     await events.log(session, events.FORM_OPENED, user_id=user.id)
@@ -178,9 +194,7 @@ async def create_chart(
     if await reports.get_report(session, chart.id, ReportType.FREE_NATAL) is None:
         generation.schedule(background, chart, ReportType.FREE_NATAL)
 
-    # 303, а не 302: браузер обязан перейти GET'ом, тогда «обновить» перечитает
-    # разбор, а не переотправит форму.
-    return RedirectResponse(f"/r/{chart.token}", status_code=status.HTTP_303_SEE_OTHER)
+    return _redirect(request, f"/r/{chart.token}")
 
 
 @router.get("/r/{token}")
@@ -220,6 +234,7 @@ async def report_page(request: Request, token: str, user: UserDep, session: Sess
 
 @router.post("/r/{token}/report")
 async def request_report(
+    request: Request,
     token: str,
     user: UserDep,
     session: SessionDep,
@@ -241,7 +256,7 @@ async def request_report(
     # Повторное нажатие не должно ни платить второй раз, ни тревожить
     # фоновую задачу.
     if await reports.get_report(session, chart.id, rtype) is not None:
-        return RedirectResponse(f"/r/{token}", status_code=status.HTTP_303_SEE_OTHER)
+        return _redirect(request, f"/r/{token}")
 
     # Пишем «попросил» ДО генерации: разница с report_ready и есть доля
     # неудач, которую иначе не увидеть.
@@ -255,11 +270,12 @@ async def request_report(
     await session.commit()
 
     generation.schedule(background, chart, rtype)
-    return RedirectResponse(f"/r/{token}", status_code=status.HTTP_303_SEE_OTHER)
+    return _redirect(request, f"/r/{token}")
 
 
 @router.post("/r/{token}/feedback")
 async def leave_feedback(
+    request: Request,
     token: str,
     user: UserDep,
     session: SessionDep,
@@ -305,10 +321,22 @@ async def leave_feedback(
     )
     await session.commit()
 
-    return RedirectResponse(f"/r/{token}?thanks=1", status_code=status.HTTP_303_SEE_OTHER)
+    return _redirect(request, f"/r/{token}?thanks=1")
 
 
 # --- Внутренние помощники --------------------------------------------------
+
+
+def _redirect(request: Request, path: str) -> RedirectResponse:
+    """Редирект на внутренний адрес с токеном сессии.
+
+    303, а не 302: браузер обязан перейти GET'ом, тогда «обновить» перечитает
+    страницу, а не переотправит форму. Токен здесь обязателен — без него
+    пришедший из VK после первого же POST теряет личность и получает 403.
+    """
+    return RedirectResponse(
+        with_session(request, path), status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 async def _chart_or_404(session: AsyncSession, token: str) -> Chart:

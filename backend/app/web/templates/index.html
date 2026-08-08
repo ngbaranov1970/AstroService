@@ -15,7 +15,7 @@
     <p class="error" role="alert">{{ error }}</p>
   {% endif %}
 
-  <form class="card" method="post" action="/places">
+  <form class="card" method="post" action="{{ url('/places') }}">
     <label>
       Чья карта
       <input type="text" name="person_name" maxlength="64"
@@ -66,7 +66,7 @@
     <ul class="charts">
       {% for chart in charts %}
         <li>
-          <a href="/r/{{ chart.token }}">
+          <a href="{{ url('/r/' ~ chart.token) }}">
             {{ chart.person_name or "Без имени" }}
           </a>
           <span class="muted">

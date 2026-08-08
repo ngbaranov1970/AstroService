@@ -53,7 +53,8 @@
 
         {# Отзыв — ради него стенд и существует: сравнить два текста и сказать,
            какой лучше. Спрашиваем и у того, кому переслали ссылку. #}
-        <form class="feedback" method="post" action="/r/{{ chart.token }}/feedback">
+        <form class="feedback" method="post"
+              action="{{ url('/r/' ~ chart.token ~ '/feedback') }}">
           <input type="hidden" name="report_type" value="{{ block.type }}">
           <fieldset class="rating">
             <legend>Насколько похоже на правду?</legend>
@@ -79,14 +80,14 @@
       {% elif block.error %}
         <p class="error" role="alert">{{ block.error }}</p>
         {% if is_owner %}
-          <form method="post" action="/r/{{ chart.token }}/report">
+          <form method="post" action="{{ url('/r/' ~ chart.token ~ '/report') }}">
             <input type="hidden" name="report_type" value="{{ block.type }}">
             <button type="submit">Попробовать ещё раз</button>
           </form>
         {% endif %}
 
       {% elif is_owner %}
-        <form method="post" action="/r/{{ chart.token }}/report">
+        <form method="post" action="{{ url('/r/' ~ chart.token ~ '/report') }}">
           <input type="hidden" name="report_type" value="{{ block.type }}">
           <button type="submit">Получить {{ block.title | lower }}</button>
         </form>
@@ -156,5 +157,5 @@
     </p>
   </details>
 
-  <p><a href="/">← Посчитать ещё одну карту</a></p>
+  <p><a href="{{ url('/') }}">← Посчитать ещё одну карту</a></p>
 {% endblock %}

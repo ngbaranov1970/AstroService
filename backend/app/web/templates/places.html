@@ -19,7 +19,7 @@
     {% else %}
       <span class="muted">время неизвестно</span>
     {% endif %}
-    <a href="/">изменить</a>
+    <a href="{{ url('/') }}">изменить</a>
   </p>
 
   <ul class="places">
@@ -27,7 +27,7 @@
       <li>
         {# Форма на каждый город, а не радиокнопки с общей кнопкой «далее»:
            выбор в один клик, и нельзя отметить город и уйти, не нажав. #}
-        <form method="post" action="/chart">
+        <form method="post" action="{{ url('/chart') }}">
           <input type="hidden" name="person_name" value="{{ person_name }}">
           <input type="hidden" name="birth_date" value="{{ birth_date }}">
           <input type="hidden" name="birth_time" value="{{ birth_time }}">

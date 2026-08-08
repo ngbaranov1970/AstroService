@@ -1,11 +1,11 @@
-"""Кто пришёл на страницу стенда: cookie → `User`, плюс охрана админки.
+"""Кто пришёл на страницу стенда: VK или cookie → `User`, плюс охрана админки.
 
 Единственное место веб-слоя, где выясняется, чей это запрос: хендлеры
-router.py получают готового пользователя и про cookie не знают. Рядом
-встанут Telegram Web App (подпись `initData`) и VK Mini App (`sign`) —
-проверка подлинности у каждой своя, результат один и тот же, строка в
-`users`. Общий слой авторизации намеренно не проектируется, пока платформа
-одна (решение 2026-07-29, docs/astro-context.md).
+router.py получают готового пользователя и не знают ни про cookie, ни про
+подписи. Две ветки опознания, независимые намеренно: у VK носитель личности
+— подписанный токен в адресе (`?s=`), потому что в iframe cookie не доходит
+(docs/astro-context.md, «В VK личность едет в URL»); у веба — cookie.
+Третьей встанет Telegram Web App с подписью `initData`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import get_settings
 from app.db import get_session
 from app.models import Platform, User
-from app.services import events
+from app.services import auth, events
 from app.services import users as users_service
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,22 @@ _STATE_UID = "web_uid"
 
 # Значение users.source для пришедших на стенд.
 SOURCE_WEB_TESTER = "web_tester"
+
+# --- VK --------------------------------------------------------------------
+
+# Имя параметра с нашим сессионным токеном: /r/abc?s=<JWT>. Короткое
+# намеренно — оно поедет в каждой ссылке и каждой форме приложения.
+SESSION_QUERY_PARAM = "s"
+
+# Параметр с подписью VK; его наличие и означает «это запуск мини-приложения».
+VK_SIGN_PARAM = "sign"
+
+# Значение users.source для пришедших из VK.
+SOURCE_VK = "vk"
+
+# Ключ в request.state: зависимость кладёт свежий токен, шаблоны забирают
+# его через session_token() и подставляют в ссылки.
+_STATE_TOKEN = "session_token"
 
 
 def _read_uid(request: Request) -> str | None:
@@ -69,29 +85,18 @@ async def current_user(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    """Зависимость FastAPI: пользователь стенда по cookie, незнакомого — заводит.
+    """Зависимость FastAPI: пользователь VK или веба, незнакомого — заводит.
 
-    Возвращает всегда, отказа нет: регистрации в сервисе нет по замыслу.
+    Отказ ровно один — 403, когда запрос пришёл из VK, но опознать его не
+    удалось (подпись не сошлась, токен протух). Во всех остальных случаях
+    возвращает пользователя: регистрации в сервисе нет по замыслу.
     Коммитит сама, в обход общего правила «транзакцией управляет вызывающий»
     (app/db.py): на обычном `GET /` хендлеру коммитить нечего, и новая
     строка откатилась бы вместе с сессией.
     """
-    uid = _read_uid(request)
-    if uid is None:
-        # uuid4 — случайные 122 бита: чужой не угадать перебором, а
-        # координация между процессами (в отличие от счётчика) не нужна.
-        uid = str(uuid.uuid4())
-
-    # Кладём ВСЕГДА, не только для новых: middleware перевыставит cookie, и
-    # срок её жизни продлевается на год при каждом визите.
-    setattr(request.state, _STATE_UID, uid)
-
-    user = await users_service.get_or_create(
-        session,
-        platform=Platform.WEB,
-        external_id=uid,
-        source=SOURCE_WEB_TESTER,
-    )
+    user = await _vk_user(request, session)
+    if user is None:
+        user = await _web_user(request, session)
 
     # Проверяем на каждом запросе, а не только на «/»: стоит это один разбор
     # query string, а забыть подключить проверку к маршруту — легко.
@@ -103,6 +108,106 @@ async def current_user(
 
     await session.commit()
     return user
+
+
+async def _vk_user(request: Request, session: AsyncSession) -> User | None:
+    """Пользователь VK по подписи запуска или по нашему токену из адреса.
+
+    None означает «запрос не из VK» — дальше работает cookie-ветка. Если из
+    VK пришли, но опознать не удалось, бросает 403: молча заводить веб-строку
+    нельзя, внутри VK cookie не доходит и каждый запрос плодил бы нового
+    пользователя.
+    """
+    if not get_settings().vk_enabled:
+        return None
+
+    if request.query_params.get(VK_SIGN_PARAM):
+        try:
+            vk_id = auth.verify_vk_launch(dict(request.query_params))
+        except auth.LaunchError as err:
+            # Не отказ сразу: ниже может лежать живой `?s=`. Параметры
+            # запуска протухают за час, а страница «готовим разбор»
+            # перезагружает себя сама — иначе она однажды отдала бы 403.
+            logger.info("Параметры запуска VK отклонены: %s", err)
+        else:
+            user = await users_service.get_or_create(
+                session,
+                platform=Platform.VK,
+                external_id=vk_id,
+                source=SOURCE_VK,
+            )
+            _remember_session(request, user.id)
+            return user
+
+    raw = request.query_params.get(SESSION_QUERY_PARAM)
+    if raw:
+        user_id = auth.read_session(raw)
+        # Пользователя могли удалить между выпуском токена и запросом —
+        # подпись при этом остаётся верной, поэтому проверяем и строку.
+        user = await users_service.get_by_id(session, user_id) if user_id else None
+        if user is not None:
+            _remember_session(request, user.id)
+            return user
+
+    if request.query_params.get(VK_SIGN_PARAM) or raw:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Сессия недействительна — откройте приложение заново",
+        )
+    return None
+
+
+async def _web_user(request: Request, session: AsyncSession) -> User:
+    """Пользователь стенда по cookie; незнакомому выдаётся новый UUID."""
+    uid = _read_uid(request)
+    if uid is None:
+        # uuid4 — случайные 122 бита: чужой не угадать перебором, а
+        # координация между процессами (в отличие от счётчика) не нужна.
+        uid = str(uuid.uuid4())
+
+    # Кладём ВСЕГДА, не только для новых: middleware перевыставит cookie, и
+    # срок её жизни продлевается на год при каждом визите.
+    setattr(request.state, _STATE_UID, uid)
+
+    return await users_service.get_or_create(
+        session,
+        platform=Platform.WEB,
+        external_id=uid,
+        source=SOURCE_WEB_TESTER,
+    )
+
+
+def _remember_session(request: Request, user_id: int) -> None:
+    """Выпустить свежий токен и положить его в request.state для шаблонов.
+
+    Выпускается на КАЖДОМ запросе, а не только при входе: так суточный срок
+    жизни отсчитывается от последнего действия, и активный человек сессию не
+    теряет. HMAC на это дешевле, чем поход в базу.
+    """
+    setattr(request.state, _STATE_TOKEN, auth.issue_session(user_id))
+
+
+def session_token(request: Request) -> str | None:
+    """Токен текущей сессии для подстановки в ссылки; None у веб-ветки.
+
+    None означает «личность несёт cookie, дописывать к адресу нечего».
+    """
+    return getattr(request.state, _STATE_TOKEN, None)
+
+
+def with_session(request: Request, path: str) -> str:
+    """Внутренний адрес с токеном сессии в query; у веб-ветки — без изменений.
+
+    Через неё обязаны проходить ВСЕ внутренние адреса — ссылки, `action`
+    форм, `Location` редиректов: в VK токен и есть личность, и адрес без
+    него отдаёт 403. Алфавит JWT (base64url и точки) в query безопасен,
+    поэтому экранирования нет.
+    """
+    token = session_token(request)
+    if token is None:
+        return path
+    sep = "&" if "?" in path else "?"
+    return f"{path}{sep}{SESSION_QUERY_PARAM}={token}"
 
 
 def _tester_token_matches(request: Request) -> bool:

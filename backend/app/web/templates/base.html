@@ -19,7 +19,9 @@
    таблица во всю ширину экрана (см. .admin в style.css). #}
 <body class="{% block body_class %}{% endblock %}">
   <header class="site-header">
-    <a class="site-title" href="/">Астропрогноз</a>
+    {# url() — не голый путь: в VK личность едет в адресе, и ссылка без
+       токена уводит на 403 (см. deps.with_session). #}
+    <a class="site-title" href="{{ url('/') }}">Астропрогноз</a>
     {% if user is defined and user.is_tester %}
       {# Метка нужна самому тестеру: у него не кончаются генерации, и без неё
          непонятно, почему у знакомого разборы упёрлись в лимит, а у него нет. #}
