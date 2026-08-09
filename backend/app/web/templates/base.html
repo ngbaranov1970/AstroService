@@ -42,5 +42,13 @@
       решения о здоровье, деньгах и отношениях остаются за вами.
     {% endblock %}
   </footer>
+
+  {# Единственный JS стенда. Без VKWebAppInit приложение висит под крутилкой
+     VK: страница загружена, но платформа не знает об этом и прелоадер не
+     снимает. Вне VK вызов уходит в никуда, ветки по платформе не нужно. #}
+  <script src="/static/vk-bridge.min.js"></script>
+  <script>
+    window.vkBridge && vkBridge.send('VKWebAppInit').catch(function () {});
+  </script>
 </body>
 </html>
