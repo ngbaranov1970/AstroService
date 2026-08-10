@@ -8,8 +8,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   {# Стенд открыт по ссылке, но в выдаче ему делать нечего: на страницах
-     даты и места рождения живых людей. #}
-  <meta name="robots" content="noindex, nofollow">
+     даты и места рождения живых людей. Публичные страницы (оферта, цены)
+     блок переопределяют — их, наоборот, надо находить. #}
+  {% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
   <title>{% block title %}Астропрогноз{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
@@ -41,6 +42,19 @@
       Разбор составлен по вашей натальной карте. Это повод подумать о себе —
       решения о здоровье, деньгах и отношениях остаются за вами.
     {% endblock %}
+
+    <nav class="footer-links">
+      <a href="{{ url('/pricing') }}">Услуги и цены</a>
+      <a href="{{ url('/offer') }}">Оферта</a>
+      <a href="{{ url('/privacy') }}">Обработка данных</a>
+      <a href="{{ url('/contacts') }}">Контакты</a>
+    </nav>
+
+    {# Реквизиты в подвале, а не только на /contacts: ЮKassa принимает
+       ссылку на любую страницу, если ИНН напечатан на всех. #}
+    <p class="footer-legal">
+      {{ merchant.name }} · ИНН {{ merchant.inn }} · {{ merchant.email }}
+    </p>
   </footer>
 
   {# Единственный JS стенда. Без VKWebAppInit приложение висит под крутилкой

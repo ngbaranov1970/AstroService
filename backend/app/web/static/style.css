@@ -88,6 +88,63 @@ h2 { font-size: 20px; margin: 32px 0 12px; }
   background: rgba(255, 155, 155, 0.08);
 }
 
+/* Ссылки на оферту и реквизиты в подвале каждой страницы — требование
+   ЮKassa и модерации VK, а не украшение. */
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 12px;
+}
+
+.footer-legal {
+  margin: 10px 0 0;
+  /* Реквизиты не должны спорить с содержимым страницы, но должны читаться:
+     ниже 12px модерация просто не разглядит ИНН. */
+  font-size: 12px;
+}
+
+/* --- Публичные страницы (цены, оферта, политика, контакты) ------------ */
+
+.page ul,
+.page ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.page li { margin-bottom: 6px; }
+
+/* Карточка услуги: название сверху, цена крупно под ним. */
+.offer-name { margin: 0 0 4px; font-size: 18px; }
+
+.price {
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.card + .card { margin-top: 16px; }
+
+/* Подпись и значение в строку — как .meta в админке, но крупнее: это
+   единственное содержимое страницы контактов. */
+.requisites {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.requisites dt { color: var(--muted); }
+.requisites dd { margin: 0; }
+
+/* На узком экране две колонки схлопываются в кашу из переносов. */
+@media (max-width: 420px) {
+  .requisites { grid-template-columns: 1fr; gap: 0 0; }
+  .requisites dd { margin-bottom: 10px; }
+}
+
 /* --- Форма ----------------------------------------------------------- */
 
 .card {

@@ -21,6 +21,7 @@ from app.db import dispose_engine
 from app.logging_setup import setup_logging
 from app.web.admin import router as admin_router
 from app.web.deps import install_session_cookie
+from app.web.legal import router as legal_router
 from app.web.router import router as web_router
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,10 @@ def create_app() -> FastAPI:
     install_session_cookie(app)
     app.include_router(web_router)
     app.include_router(admin_router)
+    # Оферта, цены и реквизиты. Подключать обязательно, даже если стенд
+    # выключат: импорт этого модуля кладёт `merchant` в шаблоны, а он
+    # печатается в подвале КАЖДОЙ страницы.
+    app.include_router(legal_router)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:

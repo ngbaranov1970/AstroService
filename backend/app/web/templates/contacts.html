@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Контакты и реквизиты{% endblock %}
+
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+
+{% block content %}
+  <h1>Контакты и реквизиты</h1>
+  <p class="lead">
+    По любым вопросам — об оплате, разборе или ваших данных — пишите на
+    почту. Отвечаем в течение суток.
+  </p>
+
+  <div class="card">
+    <dl class="requisites">
+      <dt>Наименование</dt><dd>{{ merchant.name }}</dd>
+      <dt>Статус</dt><dd>{{ merchant.status }}</dd>
+      <dt>ИНН</dt><dd>{{ merchant.inn }}</dd>
+      <dt>Электронная почта</dt>
+      <dd><a href="mailto:{{ merchant.email }}">{{ merchant.email }}</a></dd>
+      <dt>Телефон</dt>
+      <dd><a href="tel:{{ merchant.phone | replace(' ', '') | replace('-', '') }}">{{ merchant.phone }}</a></dd>
+      <dt>Сайт</dt><dd>{{ merchant.site }}</dd>
+    </dl>
+  </div>
+
+  <h2>Документы</h2>
+  <ul>
+    <li><a href="{{ url('/offer') }}">Публичная оферта</a> — условия оказания услуг, оплата и возврат</li>
+    <li><a href="{{ url('/privacy') }}">Политика обработки персональных данных</a></li>
+    <li><a href="{{ url('/pricing') }}">Услуги и цены</a></li>
+  </ul>
+
+  <h2>Если что-то пошло не так</h2>
+  <p>
+    Оплата прошла, а разбор не открылся — напишите на почту и укажите время
+    оплаты. Проверим и либо откроем доступ, либо вернём деньги по правилам
+    раздела 5 <a href="{{ url('/offer') }}">оферты</a>.
+  </p>
+  <p>
+    Хотите удалить свои данные рождения и все разборы — тоже напишите на
+    почту, удалим.
+  </p>
+{% endblock %}
