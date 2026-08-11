@@ -318,6 +318,26 @@ h3 { font-size: 16px; margin: 24px 0 8px; }
 
 .report p { margin: 0 0 14px; }
 
+/* Состав платного разбора: не список дел, а витрина — маркеры убраны,
+   пункты в строку, чтобы шесть секций читались одним взглядом и не занимали
+   пол-экрана на телефоне. */
+.teaser {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.teaser li {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
 /* Точки-многоточие в «готовим текст» неподвижны, а страница сама
    перезагружается — без этого непонятно, идёт работа или всё зависло. */
 .waiting {

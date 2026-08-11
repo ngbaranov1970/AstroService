@@ -104,17 +104,19 @@ _PROMPTS: dict[ReportType, ModuleType] = {
 # нет, счётчиком не ограничен.
 _LIMITS: dict[ReportType, int] = {
     ReportType.FREE_NATAL: 3,
-    # Полный разбор по замыслу ограничивается оплатой, а не счётчиком, но
-    # платежей ещё нет и на стенде он открыт всем — без числа тут каждый
-    # зашедший жёг бы DeepSeek без предела. Когда появится
-    # services/orders.py, строка уходит, а проверкой станет «есть ли
-    # оплаченный заказ на этот отчёт».
+    # Сейчас недостижимо: тип лежит в _TESTERS_ONLY, отказ случается раньше,
+    # а тестеру лимиты не считают вовсе. Строка оставлена страховкой на
+    # случай, если полный разбор откроют раньше services/orders.py — тогда
+    # без неё каждый зашедший жёг бы DeepSeek без предела. Вместе с оплатой
+    # уходят обе записи разом, и проверкой станет оплаченный заказ.
     ReportType.FULL_NATAL: 3,
 }
 
-# Типы, которые до появления платежей доступны только тестерам. Пусто: на
-# время обкатки промптов полный разбор открыт всем, кто пришёл на стенд.
-_TESTERS_ONLY: frozenset[ReportType] = frozenset()
+# Типы, которые до появления платежей доступны только тестерам. Полный разбор
+# закрыт с 2026-08-11: в каталоге VK трафик холодный, и «бесплатно всем» на
+# платном товаре — это счёт от DeepSeek без выручки. Когда появится
+# services/orders.py, тип уходит отсюда, а проверкой станет оплаченный заказ.
+_TESTERS_ONLY: frozenset[ReportType] = frozenset({ReportType.FULL_NATAL})
 
 
 class ReportError(RuntimeError):
@@ -248,6 +250,31 @@ def sections(report: Report) -> list[Section]:
             report.type.value, report.prompt_version, report.id,
         )
     return [Section(title=None, body=report.text)]
+
+
+def needs_purchase(user: User, report_type: ReportType) -> bool:
+    """Закрыт ли этот тип для этого человека до оплаты (тестеру — открыт).
+
+    Нужна интерфейсу: страница обязана ЗАРАНЕЕ знать, показывать кнопку или
+    анонс с ценой. Без неё веб-слой либо повторял бы у себя список закрытых
+    типов, либо звал генерацию ради того, чтобы поймать ReportForbiddenError,
+    то есть выяснял бы доступ отказом.
+
+    Про уже написанный текст ничего не говорит: он открывается независимо
+    (проверки доступа стоят после кеша) — спрашивать надо только там, где
+    текста ещё нет.
+    """
+    return report_type in _TESTERS_ONLY and not user.is_tester
+
+
+def section_titles(report_type: ReportType) -> list[str]:
+    """Из чего состоит отчёт этого типа — для анонса до генерации.
+
+    Пусто, если промпт состава не объявляет (free_natal отвечает сплошным
+    текстом): вызывающий тогда просто не рисует список.
+    """
+    module = _PROMPTS.get(report_type)
+    return list(getattr(module, "SECTION_TITLES", ()))
 
 
 async def count_generated(
@@ -387,7 +414,7 @@ async def get_or_create_report(
     # ни замка, ни лимитов, ни DeepSeek. По этому пути идёт большинство
     # запросов, потому что страница разбора перечитывает себя раз в пять
     # секунд, а текст пишется один раз.
-    cached = await _find(session, chart.id, report_type, version)
+    cached = await _find(session, chart.id, report_type, v каких файлахersion)
     if cached is not None:
         # DEBUG, а не INFO: страница перечитывает себя каждые пять секунд,
         # на INFO это залило бы лог одинаковыми строками.

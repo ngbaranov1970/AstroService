@@ -211,8 +211,12 @@ async def report_page(request: Request, token: str, user: UserDep, session: Sess
     is_owner = chart.user_id == user.id
 
     blocks = [
-        await _report_block(session, chart, ReportType.FREE_NATAL, "Бесплатный разбор"),
-        await _report_block(session, chart, ReportType.FULL_NATAL, "Полный разбор"),
+        await _report_block(
+            session, chart, ReportType.FREE_NATAL, "Бесплатный разбор", user
+        ),
+        await _report_block(
+            session, chart, ReportType.FULL_NATAL, "Полный разбор", user
+        ),
     ]
 
     return templates.TemplateResponse(
@@ -352,7 +356,11 @@ async def _chart_or_404(session: AsyncSession, token: str) -> Chart:
 
 
 async def _report_block(
-    session: AsyncSession, chart: Chart, report_type: ReportType, title: str
+    session: AsyncSession,
+    chart: Chart,
+    report_type: ReportType,
+    title: str,
+    user: User,
 ) -> dict:
     """Всё, что шаблону нужно знать про один разбор, одним словарём.
 
@@ -371,6 +379,11 @@ async def _report_block(
         "report": report,
         "running": report is None and state is not None and state.running,
         "error": None if report is not None or state is None else state.error,
+        # Кнопки не будет — будет анонс с ценой. Спрашиваем только при
+        # отсутствии текста: уже написанный разбор открыт всегда, в том
+        # числе тому, кому переслали ссылку.
+        "locked": report is None and reports.needs_purchase(user, report_type),
+        "titles": reports.section_titles(report_type),
     }
 
 

@@ -86,6 +86,17 @@
           </form>
         {% endif %}
 
+      {% elif block.locked %}
+        {# Анонс вместо кнопки: текста ещё нет и генерировать его до оплаты
+           мы не будем. Состав секций приходит из промпта, цена — из оферты. #}
+        <p class="muted">Разбор карты целиком — {{ price_rub }} ₽.</p>
+        {% if block.titles %}
+          <ul class="teaser">
+            {% for name in block.titles %}<li>{{ name }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        <p class="muted">Оплата подключается — разбор станет доступен в ближайшие дни.</p>
+
       {% elif is_owner %}
         <form method="post" action="{{ url('/r/' ~ chart.token ~ '/report') }}">
           <input type="hidden" name="report_type" value="{{ block.type }}">
