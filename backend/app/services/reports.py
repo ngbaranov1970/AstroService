@@ -62,12 +62,14 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from types import ModuleType
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.llm import client
 from app.llm.prompts import free_natal, full_natal
 from app.models import Chart, Report, ReportType, User
@@ -125,6 +127,16 @@ class ReportLimitError(ReportError):
     Отдельный класс, а не общая ошибка: это НЕ поломка, а нормальный исход,
     на который интерфейс отвечает человеческим текстом («бесплатные разборы
     закончились»), а не страницей 500.
+    """
+
+
+class ReportBudgetError(ReportError):
+    """Сервис выбрал дневной потолок генераций — не этот человек, а все сразу.
+
+    От ReportLimitError отличается адресатом: там «ваши разборы кончились»,
+    здесь «сегодня мы уже не считаем», и человек ни в чём не виноват. Разные
+    классы нужны, чтобы страница не сказала невиновному, что он исчерпал
+    свой лимит, а в логе было видно, во что мы упёрлись.
     """
 
 
@@ -252,6 +264,21 @@ async def count_generated(
     stmt = select(func.count()).where(
         Report.user_id == user_id, Report.type == report_type
     )
+    return await session.scalar(stmt) or 0
+
+
+async def count_generated_last_day(session: AsyncSession) -> int:
+    """Сколько отчётов сервис сгенерировал за последние 24 часа — всего.
+
+    Сутки скользящие, а не календарные: календарные обнуляются в полночь и
+    дают всплеск трат сразу после неё, а нам нужен именно ровный расход.
+
+    Считается по строкам reports, то есть по успешным генерациям. Упавшие
+    (деньги потрачены, строки нет) сюда не попадают — они редки, а их след
+    остаётся в логе как ERROR.
+    """
+    since = datetime.now(UTC) - timedelta(days=1)
+    stmt = select(func.count()).where(Report.created_at >= since)
     return await session.scalar(stmt) or 0
 
 
@@ -491,6 +518,24 @@ async def _check_allowed(
     уже написанный (то есть уже оплаченный нами) текст человек может
     открывать сколько угодно раз — лимит про деньги, а не про просмотры.
     """
+    # Дневной потолок идёт ПЕРВЫМ и не снимается ничем — ни is_tester, ни
+    # оплатой. Личные лимиты про справедливость к одному человеку, потолок
+    # про счёт от DeepSeek, а счёту всё равно, кто именно потратил.
+    cap = get_settings().daily_generation_limit
+    today = await count_generated_last_day(session)
+    if today >= cap:
+        # WARNING, а не INFO: в отличие от личного лимита это не штатная
+        # работа, а остановка сервиса для всех — её надо заметить сегодня,
+        # а не найти потом в статистике.
+        logger.warning(
+            "Дневной потолок генераций выбран: %d из %d за сутки, отказываю всем",
+            today, cap,
+        )
+        raise ReportBudgetError(
+            "Сегодня сервис подготовил слишком много разборов — "
+            "новые будут доступны завтра"
+        )
+
     # Тестеру открыто всё: он для того и заведён, чтобы вычитывать десятки
     # текстов подряд, включая платный разбор до подключения оплаты.
     if user.is_tester:

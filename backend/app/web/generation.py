@@ -180,4 +180,8 @@ def _human_error(exc: reports.ReportError) -> str:
         return "Бесплатные разборы закончились."
     if isinstance(exc, reports.ReportForbiddenError):
         return "Полный разбор пока открыт только тестерам."
+    if isinstance(exc, reports.ReportBudgetError):
+        # Про потолок и деньги человеку не рассказываем: он ни при чём, ему
+        # нужен срок. Текст самой ошибки в интерфейс не отдаём намеренно.
+        return "Сегодня разборы закончились. Возвращайтесь завтра."
     return "Этот вид разбора ещё не готов."
