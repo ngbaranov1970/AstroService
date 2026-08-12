@@ -414,7 +414,7 @@ async def get_or_create_report(
     # ни замка, ни лимитов, ни DeepSeek. По этому пути идёт большинство
     # запросов, потому что страница разбора перечитывает себя раз в пять
     # секунд, а текст пишется один раз.
-    cached = await _find(session, chart.id, report_type, v каких файлахersion)
+    cached = await _find(session, chart.id, report_type, version)
     if cached is not None:
         # DEBUG, а не INFO: страница перечитывает себя каждые пять секунд,
         # на INFO это залило бы лог одинаковыми строками.
