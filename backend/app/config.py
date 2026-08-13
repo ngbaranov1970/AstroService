@@ -3,9 +3,9 @@
 Два принципа, по которым сделан этот файл:
 
 1. Описываем ТОЛЬКО те переменные, которые уже используются: ключ DeepSeek,
-   Postgres, секреты стенда, ключи VK. ЮKassa появится здесь тогда же, когда
-   появится читающий её код, — иначе обязательное поле без значения роняет
-   валидацию на пустом месте.
+   Postgres, секреты стенда, ключи VK и ЮKassa. Настройка заводится вместе
+   с читающим её кодом, не раньше, — иначе обязательное поле без значения
+   роняет валидацию на пустом месте.
 
 2. Настройки создаются лениво, через get_settings(), а не как переменная
    уровня модуля. Разница принципиальная: `settings = Settings()` в теле
@@ -128,12 +128,30 @@ class Settings(BaseSettings):
     # подписываем свои. Смена ключа разлогинивает всех разом.
     session_secret: SecretStr | None = None
 
+    # --- ЮKassa -----------------------------------------------------------
+    # Идентификатор магазина и секретный ключ из личного кабинета: вместе они
+    # HTTP Basic Auth к api.yookassa.ru. shop_id строкой, хотя значение
+    # числовое, — оно идёт в заголовок как есть, а int только отнимал бы
+    # ведущие нули, если их однажды добавят.
+    yookassa_shop_id: str | None = None
+    yookassa_secret_key: SecretStr | None = None
+
+    # Внешний адрес сайта («https://ngbaranov.top»), от которого строятся
+    # return_url для ЮKassa и ссылка /pay/<token>. Обе обязаны быть
+    # абсолютными: из Mini App человек уходит платить во внешний браузер, а
+    # туда путь без домена не годится. Дефолта нет намеренно — зашитый
+    # ngbaranov.top увёл бы платежи с чужого стенда на прод.
+    public_base_url: str | None = None
+
     @field_validator(
         "web_tester_token",
         "admin_password",
         "vk_app_id",
         "vk_secure_key",
         "session_secret",
+        "yookassa_shop_id",
+        "yookassa_secret_key",
+        "public_base_url",
         mode="before",
     )
     @classmethod
@@ -163,6 +181,20 @@ class Settings(BaseSettings):
         ошибку уже после успешного входа.
         """
         return self.vk_secure_key is not None and self.session_secret is not None
+
+    @property
+    def payments_enabled(self) -> bool:
+        """Можно ли принимать деньги: нужны оба ключа И адрес возврата.
+
+        Требование public_base_url здесь не формальность: без него платёж
+        создастся, а вернуться человеку будет некуда — и это выяснится уже
+        после того, как он заплатил.
+        """
+        return (
+            self.yookassa_shop_id is not None
+            and self.yookassa_secret_key is not None
+            and self.public_base_url is not None
+        )
 
 
 @lru_cache
