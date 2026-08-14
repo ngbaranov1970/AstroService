@@ -271,17 +271,21 @@ def _page_context(
     }
 
 
-def payment_url(chart_token: str, report_type: ReportType) -> str:
+def payment_url(chart_token: str, report_type: ReportType) -> str | None:
     """Адрес страницы оплаты для кнопки на странице карты.
 
-    С доменом, если PUBLIC_BASE_URL задан: из VK человек уходит платить во
-    внешний браузер, а туда путь без домена не годится. Без настройки
-    отдаём относительный — на локальной машине домена нет, а стенд работать
-    обязан.
+    None, когда приём платежей не настроен: кнопка привела бы человека на
+    страницу, которая честно скажет «не получилось перейти к оплате».
+    Лучше не звать вовсе, чем звать в тупик.
+
+    Адрес абсолютный: из VK человек уходит платить во внешний браузер, а
+    туда путь без домена не годится.
     """
-    path = f"/pay/{chart_token}?type={report_type.value}"
-    base = get_settings().public_base_url
-    return f"{base.rstrip('/')}{path}" if base else path
+    settings = get_settings()
+    base = settings.public_base_url
+    if not settings.payments_enabled or base is None:
+        return None
+    return f"{base.rstrip('/')}/pay/{chart_token}?type={report_type.value}"
 
 
 def _absolute(path: str) -> str:
