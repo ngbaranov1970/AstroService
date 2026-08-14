@@ -1,0 +1,59 @@
+{# Витрина заказа: единственный экран между кнопкой «купить» и формой ЮKassa.
+   Открывается во ВНЕШНЕМ браузере (в Mini App платить нельзя), поэтому здесь
+   нет ни личности, ни ссылок вглубь стенда — только товар, цена и кнопка. #}
+{% extends "base.html" %}
+
+{% block title %}Оплата разбора — Астропрогноз{% endblock %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+
+  {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if paid %}
+    {# Второй раз за тот же разбор денег не берём. Ссылка внутренняя: сюда
+       попадают, вернувшись по старой ссылке уже после оплаты. #}
+    <p>Этот разбор уже оплачен.</p>
+    <p><a href="{{ url('/r/' ~ chart_token) }}">Открыть разбор</a></p>
+
+  {% else %}
+    <p class="muted">
+      Карта{% if person_name %} на имя {{ person_name }}{% endif %}:
+      {{ chart.birth_local.strftime("%d.%m.%Y") }}
+      {%- if chart.time_known %} в {{ chart.birth_local.strftime("%H:%M") }}{% endif %}
+      · {{ chart.place_name }}
+    </p>
+
+    {% if titles %}
+      <ul class="teaser">
+        {% for name in titles %}<li>{{ name }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+
+    <p class="price">{{ price }} ₽</p>
+
+    <form method="post" action="/pay/{{ chart_token }}">
+      {# Тип отчёта в скрытом поле: адрес построен на карте, а разборов у
+         одной карты со временем станет несколько. #}
+      <input type="hidden" name="report_type" value="{{ report_type }}">
+      <button type="submit">Перейти к оплате</button>
+    </form>
+
+    <p class="muted small">
+      Нажимая кнопку, вы принимаете условия
+      <a href="/offer">оферты</a> и согласны с
+      <a href="/privacy">обработкой данных</a>.
+      Оплата проходит на стороне ЮKassa — карта вводится там, нам её данные
+      не передаются.
+    </p>
+
+    {# Чек НПД выписывается вручную в «Мой налог» (решение 2026-08-13):
+       ЮKassa самозанятым чеки больше не формирует, и человек должен знать,
+       что письмо об оплате — это не чек. #}
+    <p class="muted small">
+      Разбор откроется сразу после оплаты. Чек самозанятого придёт отдельно.
+    </p>
+  {% endif %}
+{% endblock %}

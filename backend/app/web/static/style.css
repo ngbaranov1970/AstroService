@@ -213,7 +213,11 @@ small {
 
 .checkbox small { grid-column: 2; margin-top: 4px; }
 
-button {
+/* .button — ссылка, выглядящая кнопкой. Нужна там, где переход обязан быть
+   ссылкой, а не формой: покупка уводит во внешний браузер (target=_blank),
+   а форму так не отправить. */
+button,
+.button {
   width: 100%;
   padding: 13px;
   background: var(--accent);
@@ -225,7 +229,15 @@ button {
   cursor: pointer;
 }
 
-button:hover { filter: brightness(1.08); }
+.button {
+  display: block;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+}
+
+button:hover,
+.button:hover { filter: brightness(1.08); }
 
 /* --- Выбор города ----------------------------------------------------- */
 

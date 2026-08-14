@@ -15,7 +15,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from starlette.responses import Response
 
-from app.web.router import templates
+from app.models import ReportType
+from app.services import orders
+from app.web.templating import templates
 
 MERCHANT = {
     "name": "Баранов Николай Геннадьевич",
@@ -31,10 +33,14 @@ MERCHANT = {
 # руками, и первый же новый шаблон вышел бы без ИНН.
 templates.env.globals["merchant"] = MERCHANT
 
-# Цена платного разбора в рублях. Фиксированная цифра — требование ЮKassa:
-# «работаю без фиксированных цен» уводит на приём платежей по счетам, где
-# вебхука нет и открывать отчёт автоматически нечем.
-PRICE_RUB = 290
+# Цена платного разбора в рублях — из прайса services/orders.py, а не своя
+# константа: по этой же цифре выставляется счёт в ЮKassa, и разойдись они,
+# человек увидит в оферте одно, а в форме оплаты другое.
+#
+# Фиксированная цена — требование ЮKassa: «работаю без фиксированных цен»
+# уводит на приём платежей по счетам, где вебхука нет и открывать отчёт
+# автоматически нечем.
+PRICE_RUB = orders.price_rub(ReportType.FULL_NATAL)
 
 # Тоже глобал: цену называет не только /pricing, но и анонс полного разбора
 # на странице карты. Разойдись они — на модерации это читается как «цена на

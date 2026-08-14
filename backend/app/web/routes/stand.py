@@ -2,8 +2,10 @@
 
 Слой тонкий по замыслу: принять запрос, позвать `app/services/*`, отдать
 шаблон. Ни расчётов, ни SQL здесь нет — те же сервисы позже дёрнут бот и
-Mini App, и поведение должно совпасть. Соседи по папке: `deps.py` — кто
-пришёл, `forms.py` — проверка ввода, `generation.py` — фоновая генерация.
+Mini App, и поведение должно совпасть. Соседи по папке `routes/`: `pay.py`
+— оплата, `admin.py` — админка, `legal.py` — оферта и политика. Этажом
+выше: `deps.py` — кто пришёл, `forms.py` — проверка ввода, `generation.py`
+— фоновая генерация, `templating.py` — общий Jinja2.
 
 Форма маршрутов продиктована тем, что LLM отвечает 30–60 с: генерацию
 ставит фоновая задача, POST отвечает 303, GET только читает базу, а
@@ -13,43 +15,20 @@ docs/backend-structure.md, раздел про `app/web/`.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
-from jinja2 import pass_context
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
 from app.db import get_session
 from app.models import Chart, ReportType, User
-from app.services import charts, events, reports
+from app.services import charts, events, orders, reports
 from app.web import forms, generation
 from app.web.deps import TESTER_QUERY_PARAM, current_user, with_session
-
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
-
-# Один объект на процесс: внутри него кеш скомпилированных шаблонов.
-# Автоэкранирование .html включено по умолчанию — имя и город из формы
-# попадают в страницу безопасно.
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
-
-
-@pass_context
-def _url(context, path: str) -> str:
-    """Jinja-глобал `url()`: внутренний адрес с токеном сессии, если он есть.
-
-    Глобал, а не переменная контекста: переменную забыли бы передать в один
-    из шаблонов, и в VK ровно эта страница стала бы тупиком. `pass_context`
-    даёт доступ к `request`, который Jinja2Templates кладёт в контекст сам.
-    """
-    return with_session(context["request"], path)
-
-
-# Виден и админке: она рендерит через этот же объект и наследует base.html.
-templates.env.globals["url"] = _url
+from app.web.routes import pay
+from app.web.templating import templates
 
 router = APIRouter(
     # /docs описывает JSON-API для Mini App, а здесь HTML-страницы для людей.
@@ -219,6 +198,14 @@ async def report_page(request: Request, token: str, user: UserDep, session: Sess
         ),
     ]
 
+    # Показ цены — первая ступень воронки покупки; без неё непонятно, что
+    # именно теряется: интерес к платному разбору или сама оплата.
+    if any(b["locked"] for b in blocks):
+        await events.log(
+            session, events.PAYWALL_SHOWN, user_id=user.id, chart_id=chart.id
+        )
+        await session.commit()
+
     return templates.TemplateResponse(
         request,
         "report.html",
@@ -371,6 +358,12 @@ async def _report_block(
     report = await reports.get_report(session, chart.id, report_type)
     state = generation.state(chart.id, report_type)
 
+    # Спрашиваем про оплату только при отсутствии текста: уже написанный
+    # разбор открыт всегда, в том числе тому, кому переслали ссылку.
+    locked = report is None and await reports.needs_purchase(
+        session, user=user, chart=chart, report_type=report_type
+    )
+
     return {
         "type": report_type.value,
         "title": title,
@@ -379,11 +372,12 @@ async def _report_block(
         "report": report,
         "running": report is None and state is not None and state.running,
         "error": None if report is not None or state is None else state.error,
-        # Кнопки не будет — будет анонс с ценой. Спрашиваем только при
-        # отсутствии текста: уже написанный разбор открыт всегда, в том
-        # числе тому, кому переслали ссылку.
-        "locked": report is None and reports.needs_purchase(user, report_type),
+        "locked": locked,
         "titles": reports.section_titles(report_type),
+        # Адрес кнопки «купить». Абсолютный, потому что из VK платить уходят
+        # во внешний браузер (см. routes/pay.py).
+        "pay_url": pay.payment_url(chart.token, report_type) if locked else None,
+        "price": orders.price_rub(report_type) if locked else None,
     }
 
 

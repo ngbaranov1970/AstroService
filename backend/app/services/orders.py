@@ -202,9 +202,10 @@ async def start_payment(
     if order.status is not OrderStatus.PENDING:
         raise OrderError(f"Заказ {order.id} не ждёт оплаты (статус {order.status.value})")
 
-    if order.confirmation_url:
+    saved_url = order.confirmation_url
+    if saved_url:
         logger.info("Заказ %s уже ведёт в ЮKassa, ссылку не пересоздаём", order.id)
-        return order.confirmation_url
+        return saved_url
 
     payment = await yookassa.create_payment(
         amount_rub=order.amount_rub,
@@ -219,15 +220,16 @@ async def start_payment(
         metadata={"order_id": str(order.id)},
     )
 
+    # Идентификатор платежа сохраняем первым делом: платёж у них уже создан,
+    # и без этой связи его не найдёт ни вебхук, ни разбор спора.
     order.provider_payment_id = payment.id
-    order.confirmation_url = payment.confirmation_url
     order.provider_data = payment.raw
 
-    if not payment.confirmation_url:
-        # Платёж создан, а вести человека некуда: платить он не сможет, но
-        # идентификатор мы уже сохранили — иначе платёж остался бы висеть
-        # у них без связи с нашим заказом.
+    confirmation_url = payment.confirmation_url
+    if confirmation_url is None:
+        # Платёж создан, а вести человека некуда — платить он не сможет.
         raise OrderError("ЮKassa не вернула ссылку на оплату")
+    order.confirmation_url = confirmation_url
 
     await events.log(
         session,
@@ -237,7 +239,7 @@ async def start_payment(
         report_type=order.report_type.value,
         amount=order.amount,
     )
-    return order.confirmation_url
+    return confirmation_url
 
 
 async def apply_notification(session: AsyncSession, payment_id: str) -> Order | None:

@@ -18,11 +18,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import dispose_engine
+from app.llm import client as llm_client
 from app.logging_setup import setup_logging
-from app.web.admin import router as admin_router
+from app.payments import yookassa
 from app.web.deps import install_session_cookie
-from app.web.legal import router as legal_router
-from app.web.router import router as web_router
+from app.web.routes.admin import router as admin_router
+from app.web.routes.legal import router as legal_router
+from app.web.routes.pay import router as pay_router
+from app.web.routes.stand import router as stand_router
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # жалобы на соединения, брошенные при закрытии event loop.
     logger.info("Остановка: закрываю пул соединений с базой")
     await dispose_engine()
+    # HTTP-клиенты держат открытые TCP/TLS-соединения к DeepSeek и ЮKassa.
+    # Оба закрываются молча, если ни одного запроса не было.
+    await llm_client.close_client()
+    await yookassa.close_client()
 
 
 def create_app() -> FastAPI:
@@ -85,8 +92,11 @@ def create_app() -> FastAPI:
     # Веб-стенд: cookie-сессия обязана стоять до роутера — по ней deps.py
     # узнаёт, кто пришёл, а без неё каждый запрос был бы новым человеком.
     install_session_cookie(app)
-    app.include_router(web_router)
+    app.include_router(stand_router)
     app.include_router(admin_router)
+    # Страницы оплаты и вебхук ЮKassa. Своей авторизации у них нет
+    # намеренно: платят из внешнего браузера, где нашей cookie не бывает.
+    app.include_router(pay_router)
     # Оферта, цены и реквизиты. Подключать обязательно, даже если стенд
     # выключат: импорт этого модуля кладёт `merchant` в шаблоны, а он
     # печатается в подвале КАЖДОЙ страницы.

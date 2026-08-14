@@ -87,15 +87,25 @@
         {% endif %}
 
       {% elif block.locked %}
-        {# Анонс вместо кнопки: текста ещё нет и генерировать его до оплаты
-           мы не будем. Состав секций приходит из промпта, цена — из оферты. #}
-        <p class="muted">Разбор карты целиком — {{ price_rub }} ₽.</p>
+        {# Анонс с ценой: текста ещё нет и до оплаты мы его не генерируем.
+           Состав секций приходит из промпта, цена — из прайса services/orders.py. #}
+        <p class="muted">Разбор карты целиком — {{ block.price }} ₽.</p>
         {% if block.titles %}
           <ul class="teaser">
             {% for name in block.titles %}<li>{{ name }}</li>{% endfor %}
           </ul>
         {% endif %}
-        <p class="muted">Оплата подключается — разбор станет доступен в ближайшие дни.</p>
+
+        {% if is_owner %}
+          {# Ссылка, а не форма: платить уходят на сайт во внешний браузер —
+             внутри Mini App продавать цифровые товары нельзя. target=_blank
+             с rel=noopener, иначе открытая вкладка получает доступ к нашей
+             через window.opener. #}
+          <a class="button" href="{{ block.pay_url }}"
+             target="_blank" rel="noopener">Купить за {{ block.price }} ₽</a>
+        {% else %}
+          <p class="muted">Заказать разбор может владелец карты.</p>
+        {% endif %}
 
       {% elif is_owner %}
         <form method="post" action="{{ url('/r/' ~ chart.token ~ '/report') }}">

@@ -18,7 +18,7 @@ from app.db import get_session
 from app.services import admin as admin_service
 from app.services import reports
 from app.web.deps import require_admin
-from app.web.router import templates
+from app.web.templating import templates
 
 router = APIRouter(
     prefix="/admin",
