@@ -73,6 +73,7 @@ from app.config import get_settings
 from app.llm import client
 from app.llm.prompts import free_natal, full_natal
 from app.models import Chart, Report, ReportType, User
+from app.services import orders
 
 # Логи здесь важнее, чем в соседних модулях: генерацию запускает фоновая
 # задача, которую никто не ждёт, а колонки «статус» у отчёта нет намеренно
@@ -104,19 +105,14 @@ _PROMPTS: dict[ReportType, ModuleType] = {
 # нет, счётчиком не ограничен.
 _LIMITS: dict[ReportType, int] = {
     ReportType.FREE_NATAL: 3,
-    # Сейчас недостижимо: тип лежит в _TESTERS_ONLY, отказ случается раньше,
-    # а тестеру лимиты не считают вовсе. Строка оставлена страховкой на
-    # случай, если полный разбор откроют раньше services/orders.py — тогда
-    # без неё каждый зашедший жёг бы DeepSeek без предела. Вместе с оплатой
-    # уходят обе записи разом, и проверкой станет оплаченный заказ.
-    ReportType.FULL_NATAL: 3,
+    # Полного разбора здесь нет: он платный (_PAID_TYPES), и ограничивает
+    # его оплата, а не счётчик. Купил второй раз — получил второй текст.
 }
 
-# Типы, которые до появления платежей доступны только тестерам. Полный разбор
-# закрыт с 2026-08-11: в каталоге VK трафик холодный, и «бесплатно всем» на
-# платном товаре — это счёт от DeepSeek без выручки. Когда появится
-# services/orders.py, тип уходит отсюда, а проверкой станет оплаченный заказ.
-_TESTERS_ONLY: frozenset[ReportType] = frozenset({ReportType.FULL_NATAL})
+# Платные типы: сгенерировать можно после оплаты этой карты (или тестеру).
+# Проверка — оплаченный заказ в services/orders.py, а не галочка в отчёте:
+# заказов на один текст бывает несколько, и каждый денежный факт нужен целым.
+_PAID_TYPES: frozenset[ReportType] = frozenset({ReportType.FULL_NATAL})
 
 
 class ReportError(RuntimeError):
@@ -252,19 +248,28 @@ def sections(report: Report) -> list[Section]:
     return [Section(title=None, body=report.text)]
 
 
-def needs_purchase(user: User, report_type: ReportType) -> bool:
-    """Закрыт ли этот тип для этого человека до оплаты (тестеру — открыт).
+async def needs_purchase(
+    session: AsyncSession, *, user: User, chart: Chart, report_type: ReportType
+) -> bool:
+    """Надо ли этому человеку заплатить за этот разбор этой карты.
 
-    Нужна интерфейсу: страница обязана ЗАРАНЕЕ знать, показывать кнопку или
-    анонс с ценой. Без неё веб-слой либо повторял бы у себя список закрытых
-    типов, либо звал генерацию ради того, чтобы поймать ReportForbiddenError,
-    то есть выяснял бы доступ отказом.
+    Нужна интерфейсу: страница обязана ЗАРАНЕЕ знать, показывать кнопку
+    «купить» или готовый текст. Без неё веб-слой либо повторял бы у себя
+    список платных типов, либо звал генерацию ради того, чтобы поймать
+    ReportForbiddenError, то есть выяснял бы доступ отказом.
+
+    Карта в аргументах потому, что платят за текст, а не за подписку:
+    купленный полный разбор одной карты не открывает разбор второй.
 
     Про уже написанный текст ничего не говорит: он открывается независимо
     (проверки доступа стоят после кеша) — спрашивать надо только там, где
     текста ещё нет.
     """
-    return report_type in _TESTERS_ONLY and not user.is_tester
+    if report_type not in _PAID_TYPES or user.is_tester:
+        return False
+    return not await orders.has_paid(
+        session, user_id=user.id, chart_id=chart.id, report_type=report_type
+    )
 
 
 def section_titles(report_type: ReportType) -> list[str]:
@@ -432,7 +437,9 @@ async def get_or_create_report(
         if cached is not None:
             return cached
 
-        await _check_allowed(session, user=user, report_type=report_type)
+        await _check_allowed(
+            session, user=user, chart=chart, report_type=report_type
+        )
 
         # Необязательные настройки промпта. getattr с дефолтом из client.py,
         # а не обязательное поле в каждом модуле: у большинства промптов
@@ -537,7 +544,7 @@ async def get_or_create_report(
 
 
 async def _check_allowed(
-    session: AsyncSession, *, user: User, report_type: ReportType
+    session: AsyncSession, *, user: User, chart: Chart, report_type: ReportType
 ) -> None:
     """Можно ли этому человеку сгенерировать ещё один отчёт этого типа.
 
@@ -568,15 +575,14 @@ async def _check_allowed(
     if user.is_tester:
         return
 
-    if report_type in _TESTERS_ONLY:
+    if report_type in _PAID_TYPES and not await orders.has_paid(
+        session, user_id=user.id, chart_id=chart.id, report_type=report_type
+    ):
         logger.info(
-            "Отказ пользователю %s: «%s» доступен только тестерам",
-            user.id, report_type.value,
+            "Отказ пользователю %s: «%s» для карты %s не оплачен",
+            user.id, report_type.value, chart.id,
         )
-        raise ReportForbiddenError(
-            f"Отчёт «{report_type.value}» пока доступен только тестерам: "
-            f"оплата ещё не подключена"
-        )
+        raise ReportForbiddenError(f"Разбор «{report_type.value}» ещё не оплачен")
 
     limit = _LIMITS.get(report_type)
     if limit is None:
