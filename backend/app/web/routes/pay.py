@@ -110,8 +110,13 @@ async def pay_start(
     except (orders.OrderError, yookassa.PaymentError) as e:
         # Заказ мог успеть записаться, а платёж — нет; откатываем, чтобы не
         # копить строки, за которые никто не платил.
+        chart_id = chart.id
         await session.rollback()
-        logger.warning("Оплата карты %s не началась: %s", chart.id, e)
+        logger.warning("Оплата карты %s не началась: %s", chart_id, e)
+        # Перечитываем карту: откат помечает объекты устаревшими, а её поля
+        # дальше читает шаблон — там async-контекста уже нет, и догрузка
+        # падает с MissingGreenlet, то есть 500 вместо страницы с ошибкой.
+        chart, _owner, _rtype = await _context(session, chart_token, report_type)
         return templates.TemplateResponse(
             request,
             "pay.html",
@@ -147,6 +152,7 @@ async def pay_done(
         order = None
 
     if order is not None:
+        order_id = order.id
         try:
             await orders.sync_status(session, order)
             await session.commit()
@@ -154,7 +160,14 @@ async def pay_done(
             # Их API недоступен — платёж не потерян, его подтвердит вебхук.
             # Человеку в этом случае честно пишем «проверяем».
             await session.rollback()
-            logger.warning("Заказ %s: статус спросить не удалось", order.id)
+            logger.warning("Заказ %s: статус спросить не удалось", order_id)
+            # Перечитываем оба объекта по той же причине, что и карту выше:
+            # после отката шаблон читает и номер заказа, и имя владельца
+            # карты — уже вне async-контекста, где догрузка падает.
+            chart, _owner, _rtype = await _context(
+                session, chart_token, DEFAULT_TYPE.value
+            )
+            order = await orders.get_by_token(session, order_token)
 
     paid = order is not None and order.is_paid
     if paid and order is not None:
