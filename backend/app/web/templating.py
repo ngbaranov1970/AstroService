@@ -11,12 +11,18 @@ app/web/routes/. Пока объект жил в роутере стенда, с
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 
 from app.web.deps import with_session
+
+# Время в базе хранится в UTC, а сверять его человек будет с личным кабинетом
+# ЮKassa и выпиской банка — там московское.
+MOSCOW = ZoneInfo("Europe/Moscow")
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -37,4 +43,12 @@ def _url(context, path: str) -> str:
     return with_session(context["request"], path)
 
 
+def _msk(value: datetime | None, fmt: str = "%d.%m.%Y, %H:%M") -> str:
+    """Момент времени в московской зоне; None → пустая строка."""
+    if value is None:
+        return ""
+    return value.astimezone(MOSCOW).strftime(fmt)
+
+
 templates.env.globals["url"] = _url
+templates.env.filters["msk"] = _msk
