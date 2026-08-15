@@ -249,9 +249,12 @@ def sections(report: Report) -> list[Section]:
 
 
 async def needs_purchase(
-    session: AsyncSession, *, user: User, chart: Chart, report_type: ReportType
+    session: AsyncSession, *, user: User | None, chart: Chart, report_type: ReportType
 ) -> bool:
     """Надо ли этому человеку заплатить за этот разбор этой карты.
+
+    user=None — читатель, которого мы не опознали (зашёл по ссылке и ничего
+    ещё не нажимал): платный тип для него закрыт, покупок за ним нет.
 
     Нужна интерфейсу: страница обязана ЗАРАНЕЕ знать, показывать кнопку
     «купить» или готовый текст. Без неё веб-слой либо повторял бы у себя
@@ -265,7 +268,11 @@ async def needs_purchase(
     (проверки доступа стоят после кеша) — спрашивать надо только там, где
     текста ещё нет.
     """
-    if report_type not in _PAID_TYPES or user.is_tester:
+    if report_type not in _PAID_TYPES:
+        return False
+    if user is None:
+        return True
+    if user.is_tester:
         return False
     return not await orders.has_paid(
         session, user_id=user.id, chart_id=chart.id, report_type=report_type

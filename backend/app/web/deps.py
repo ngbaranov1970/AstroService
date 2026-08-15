@@ -54,6 +54,12 @@ SESSION_QUERY_PARAM = "s"
 # Параметр с подписью VK; его наличие и означает «это запуск мини-приложения».
 VK_SIGN_PARAM = "sign"
 
+# Метки запуска, которые уходят в аналитику: откуда пришёл (каталог, поиск,
+# группа) и с какого клиента (mobile_iphone, mobile_android, mobile_web,
+# desktop_web). Читаются только после того, как подпись сошлась.
+VK_REF_PARAM = "vk_ref"
+VK_PLATFORM_PARAM = "vk_platform"
+
 # Значение users.source для пришедших из VK.
 SOURCE_VK = "vk"
 
@@ -87,20 +93,57 @@ async def current_user(
 ) -> User:
     """Зависимость FastAPI: пользователь VK или веба, незнакомого — заводит.
 
+    Для маршрутов, которые ПИШУТ: у карты, отчёта и отзыва должен быть
+    владелец. Читающим страницам нужна `optional_user` — она не создаёт.
+
     Отказ ровно один — 403, когда запрос пришёл из VK, но опознать его не
     удалось (подпись не сошлась, токен протух). Во всех остальных случаях
     возвращает пользователя: регистрации в сервисе нет по замыслу.
     Коммитит сама, в обход общего правила «транзакцией управляет вызывающий»
-    (app/db.py): на обычном `GET /` хендлеру коммитить нечего, и новая
-    строка откатилась бы вместе с сессией.
+    (app/db.py): хендлеру POST /places коммитить нечего, и новая строка
+    откатилась бы вместе с сессией.
     """
+    user = await _resolve(request, session, create=True)
+    if user is None:  # pragma: no cover
+        raise RuntimeError(
+            "current_user не получил пользователя при create=True — веб-ветка "
+            "обязана его завести"
+        )
+    return user
+
+
+async def optional_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User | None:
+    """То же самое, но незнакомого НЕ заводит: None вместо новой строки.
+
+    Для читающих страниц (`GET /`, `GET /r/{token}`). Смысл — краулеры: в
+    проде 375 строк `users` из 388 завёл обход стартовой страницы. Cookie
+    при этом выдаётся всё равно, поэтому человек, который что-нибудь
+    нажмёт, принесёт её обратно и получит строку — с тем же идентификатором,
+    без потери карт и лимитов.
+    """
+    return await _resolve(request, session, create=False)
+
+
+async def _resolve(
+    request: Request, session: AsyncSession, *, create: bool
+) -> User | None:
+    """Общее тело обеих зависимостей; `create` решает судьбу незнакомца."""
+    # Секретная ссылка обязана сработать с первого захода, в том числе без
+    # cookie: ставить is_tester иначе некому.
+    wants_tester = _tester_token_matches(request)
+
     user = await _vk_user(request, session)
     if user is None:
-        user = await _web_user(request, session)
+        user = await _web_user(request, session, create=create or wants_tester)
+    if user is None:
+        return None
 
     # Проверяем на каждом запросе, а не только на «/»: стоит это один разбор
     # query string, а забыть подключить проверку к маршруту — легко.
-    if not user.is_tester and _tester_token_matches(request):
+    if wants_tester and not user.is_tester:
         user.is_tester = True
         logger.info("Пользователь user_id=%s стал тестером по ссылке", user.id)
         # По событию видно, сколько розданных ссылок сработало и когда.
@@ -122,8 +165,9 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
         return None
 
     if request.query_params.get(VK_SIGN_PARAM):
+        params = dict(request.query_params)
         try:
-            vk_id = auth.verify_vk_launch(dict(request.query_params))
+            vk_id = auth.verify_vk_launch(params)
         except auth.LaunchError as err:
             # Не отказ сразу: ниже может лежать живой `?s=`. Параметры
             # запуска протухают за час, а страница «готовим разбор»
@@ -135,6 +179,16 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
                 platform=Platform.VK,
                 external_id=vk_id,
                 source=SOURCE_VK,
+            )
+            # `sign` приходит только при запуске приложения — внутри человек
+            # ходит уже с `?s=`. Поэтому здесь и только здесь известно, откуда
+            # он пришёл и с какого клиента; дальше эти метки взять негде.
+            await events.log(
+                session,
+                events.APP_OPENED,
+                user_id=user.id,
+                ref=params.get(VK_REF_PARAM),
+                platform=params.get(VK_PLATFORM_PARAM),
             )
             _remember_session(request, user.id)
             return user
@@ -157,9 +211,16 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
     return None
 
 
-async def _web_user(request: Request, session: AsyncSession) -> User:
-    """Пользователь стенда по cookie; незнакомому выдаётся новый UUID."""
+async def _web_user(
+    request: Request, session: AsyncSession, *, create: bool
+) -> User | None:
+    """Пользователь стенда по cookie; незнакомому выдаётся новый UUID.
+
+    None означает «cookie не предъявлена, а заводить строку не просили» —
+    так читающие страницы не плодят пользователей.
+    """
     uid = _read_uid(request)
+    known = uid is not None
     if uid is None:
         # uuid4 — случайные 122 бита: чужой не угадать перебором, а
         # координация между процессами (в отличие от счётчика) не нужна.
@@ -168,6 +229,12 @@ async def _web_user(request: Request, session: AsyncSession) -> User:
     # Кладём ВСЕГДА, не только для новых: middleware перевыставит cookie, и
     # срок её жизни продлевается на год при каждом визите.
     setattr(request.state, _STATE_UID, uid)
+
+    # Cookie нет и запрос ничего не пишет — в базу не идём. Cookie при этом
+    # выдана: краулер её не вернёт и следа не оставит, а человек вернёт
+    # следующим же запросом и получит строку с тем же идентификатором.
+    if not known and not create:
+        return None
 
     return await users_service.get_or_create(
         session,

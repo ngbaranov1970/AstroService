@@ -26,7 +26,7 @@ from app.db import get_session
 from app.models import Chart, ReportType, User
 from app.services import charts, events, orders, reports
 from app.web import forms, generation
-from app.web.deps import TESTER_QUERY_PARAM, current_user, with_session
+from app.web.deps import TESTER_QUERY_PARAM, current_user, optional_user, with_session
 from app.web.routes import pay
 from app.web.templating import templates
 
@@ -49,20 +49,28 @@ MAX_COMMENT = 500
 # Тип-сокращение: и сессия, и пользователь нужны почти каждому обработчику.
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 UserDep = Annotated[User, Depends(current_user)]
+# Читающим страницам — пользователь, если он уже известен. Отличие от UserDep
+# не в удобстве: current_user на GET заводит строку каждому обходчику
+# каталогов (см. deps.optional_user).
+MaybeUserDep = Annotated[User | None, Depends(optional_user)]
 
 
 @router.get("/")
-async def index(request: Request, user: UserDep, session: SessionDep) -> Response:
+async def index(request: Request, user: MaybeUserDep, session: SessionDep) -> Response:
     """Форма ввода данных рождения и список уже посчитанных карт."""
-    # Секрет из /?t=<секрет> уводим сразу, как только current_user проставил
+    # Секрет из /?t=<секрет> уводим сразу, как только зависимость проставила
     # тестера: иначе он осядет в истории браузера и уедет в заголовке Referer
     # на первый же внешний сайт.
     if request.query_params.get(TESTER_QUERY_PARAM):
         return _redirect(request, "/")
 
-    my_charts = await charts.list_charts(session, user.id)
-    await events.log(session, events.FORM_OPENED, user_id=user.id)
-    await session.commit()
+    my_charts = []
+    if user is not None:
+        my_charts = await charts.list_charts(session, user.id)
+        # Верх воронки считаем от известного посетителя: у анонима нет
+        # user_id, а без него строка события неотличима от краулерной.
+        await events.log(session, events.FORM_OPENED, user_id=user.id)
+        await session.commit()
 
     return templates.TemplateResponse(
         request,
@@ -74,7 +82,7 @@ async def index(request: Request, user: UserDep, session: SessionDep) -> Respons
 @router.post("/places")
 async def choose_place(
     request: Request,
-    user: UserDep,
+    user: MaybeUserDep,
     session: SessionDep,
     person_name: Annotated[str, Form()] = "",
     birth_date: Annotated[str, Form()] = "",
@@ -177,7 +185,9 @@ async def create_chart(
 
 
 @router.get("/r/{token}")
-async def report_page(request: Request, token: str, user: UserDep, session: SessionDep) -> Response:
+async def report_page(
+    request: Request, token: str, user: MaybeUserDep, session: SessionDep
+) -> Response:
     """Страница карты: расчёт готов сразу, тексты догружаются.
 
     Обработчик только читает. Генерация здесь держала бы ответ минуту, и
@@ -187,7 +197,7 @@ async def report_page(request: Request, token: str, user: UserDep, session: Sess
 
     # Текст видят оба — ссылку для того и пересылают. Кнопки только у
     # владельца: генерация тратит его лимиты и деньги.
-    is_owner = chart.user_id == user.id
+    is_owner = user is not None and chart.user_id == user.id
 
     blocks = [
         await _report_block(
@@ -200,7 +210,7 @@ async def report_page(request: Request, token: str, user: UserDep, session: Sess
 
     # Показ цены — первая ступень воронки покупки; без неё непонятно, что
     # именно теряется: интерес к платному разбору или сама оплата.
-    if any(b["locked"] for b in blocks):
+    if user is not None and any(b["locked"] for b in blocks):
         await events.log(
             session, events.PAYWALL_SHOWN, user_id=user.id, chart_id=chart.id
         )
@@ -347,7 +357,7 @@ async def _report_block(
     chart: Chart,
     report_type: ReportType,
     title: str,
-    user: User,
+    user: User | None,
 ) -> dict:
     """Всё, что шаблону нужно знать про один разбор, одним словарём.
 
@@ -382,14 +392,14 @@ async def _report_block(
 
 
 async def _index_with_error(
-    request: Request, user: User, session: AsyncSession, message: str
+    request: Request, user: User | None, session: AsyncSession, message: str
 ) -> Response:
     """Показать форму заново с человеческим сообщением об ошибке.
 
     Статус 200, а не 400: это страница для человека, а 400 заставил бы часть
     браузеров показать свою страницу ошибки вместо нашей формы.
     """
-    my_charts = await charts.list_charts(session, user.id)
+    my_charts = await charts.list_charts(session, user.id) if user is not None else []
     return templates.TemplateResponse(
         request,
         "index.html",
