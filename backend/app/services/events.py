@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event
@@ -73,6 +74,9 @@ REPORT_DENIED = "report_denied"
 # ушёл в форму банка → заплатил.
 
 # Показан анонс платного разбора с ценой (кнопка «купить» на странице карты).
+# Пишется ОДИН раз на пару человек+карта, через already_logged(): страница
+# перечитывает себя раз в пять секунд, и «сколько раз показали» тут всё равно
+# считало бы автообновления, а не интерес.
 PAYWALL_SHOWN = "paywall_shown"
 
 # Нажал «купить»: строка в orders создана, платежа в ЮKassa ещё нет.
@@ -130,3 +134,30 @@ async def log(
     # событие» утопил бы в логе настоящие сообщения.
     logger.debug("Событие %s (пользователь %s): %s", name, user_id, props)
     return event
+
+
+async def already_logged(
+    session: AsyncSession, name: str, *, user_id: int, chart_id: int
+) -> bool:
+    """Писали ли уже такое событие про эту пару человек+карта.
+
+    Для событий-показов, которые иначе повторяются без действий человека:
+    страница разбора перечитывает себя раз в пять секунд, и один показ цены
+    давал бы десяток строк, завышая верхнюю ступень воронки покупки в разы.
+
+    Смотрит незакоммиченные строки этой же сессии (autoflush), поэтому два
+    вызова подряд в одном запросе второй строки не создадут.
+    """
+    stmt = (
+        select(Event.id)
+        .where(
+            Event.name == name,
+            Event.user_id == user_id,
+            # ->> по JSONB: chart_id лежит в props, своей колонки у него нет.
+            # Индекса на это выражение нет, и он не нужен — запрос всегда
+            # сужен по user_id, а событий на одного человека десятки.
+            Event.props["chart_id"].astext == str(chart_id),
+        )
+        .limit(1)
+    )
+    return await session.scalar(stmt) is not None

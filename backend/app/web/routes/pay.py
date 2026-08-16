@@ -37,7 +37,7 @@ from starlette.responses import Response
 
 from app.config import get_settings
 from app.db import get_session
-from app.models import Chart, Order, ReportType, User
+from app.models import Chart, Order, OrderStatus, ReportType, User
 from app.payments import yookassa
 from app.services import charts, events, orders, reports, users
 from app.web import generation
@@ -100,6 +100,22 @@ async def pay_start(
         order = await orders.get_or_create_order(
             session, user=owner, chart=chart, report_type=rtype
         )
+        # Заказ мог достаться от прошлого захода вместе со ссылкой на форму
+        # оплаты. ЮKassa закрывает неоплаченные платежи сама, а уведомление
+        # об этом могло не дойти — тогда без проверки человек при каждом
+        # нажатии возвращался бы на мёртвую форму и купить не смог бы вовсе.
+        if order.confirmation_url:
+            await orders.sync_status(session, order)
+            if order.is_paid:
+                await session.commit()
+                return RedirectResponse(f"/r/{chart_token}", status.HTTP_303_SEE_OTHER)
+            if order.status is not OrderStatus.PENDING:
+                # Платёж закрыт, платить по нему нечем: заводим новый заказ.
+                # Тем же он быть не может — ключом идемпотентности служит его
+                # токен, и ЮKassa вернула бы по нему тот же мёртвый платёж.
+                order = await orders.get_or_create_order(
+                    session, user=owner, chart=chart, report_type=rtype
+                )
         confirmation_url = await orders.start_payment(
             session,
             order,
@@ -173,7 +189,13 @@ async def pay_done(
     if paid and order is not None:
         # Текст начинает писаться сразу: пока человек читает «спасибо»,
         # DeepSeek уже работает, и на странице разбора ждать меньше.
-        generation.schedule(background, chart, order.report_type)
+        #
+        # Ставим только когда текста ещё нет. Здесь нельзя опереться на
+        # «оплатили сейчас», как в вебхуке: страница обязана остаться вторым
+        # шансом, если деньги зачислил вебхук, а генерация после него упала.
+        # Иначе же обновление страницы плодило бы фоновые задачи.
+        if await reports.get_report(session, chart.id, order.report_type) is None:
+            generation.schedule(background, chart, order.report_type)
 
     return templates.TemplateResponse(
         request,
@@ -219,7 +241,7 @@ async def yookassa_webhook(
         return Response(status_code=status.HTTP_200_OK)
 
     try:
-        order = await orders.apply_notification(session, payment_id)
+        order, just_paid = await orders.apply_notification(session, payment_id)
     except yookassa.PaymentError:
         await session.rollback()
         logger.error("Вебхук ЮKassa: платёж %s проверить не удалось", payment_id)
@@ -227,7 +249,10 @@ async def yookassa_webhook(
 
     await session.commit()
 
-    if order is not None and order.is_paid:
+    # Генерацию запускает ЗАЧИСЛЕНИЕ, а не оплаченность заказа: то же
+    # уведомление ЮKassa присылает по нескольку раз, и на «is_paid» повтор
+    # заводил бы лишнюю фоновую задачу и лишние report_requested/report_ready.
+    if order is not None and just_paid:
         await _start_generation(session, background, order)
     return Response(status_code=status.HTTP_200_OK)
 

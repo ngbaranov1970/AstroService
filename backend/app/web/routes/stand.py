@@ -210,11 +210,19 @@ async def report_page(
 
     # Показ цены — первая ступень воронки покупки; без неё непонятно, что
     # именно теряется: интерес к платному разбору или сама оплата.
+    #
+    # Пишем один раз на карту: пока идёт генерация, страница перечитывает
+    # себя каждые REFRESH_SECONDS, и без проверки одно ожидание текста давало
+    # бы десяток «показов цены» — конверсия в покупку выглядела бы в разы
+    # хуже, чем есть.
     if user is not None and any(b["locked"] for b in blocks):
-        await events.log(
+        if not await events.already_logged(
             session, events.PAYWALL_SHOWN, user_id=user.id, chart_id=chart.id
-        )
-        await session.commit()
+        ):
+            await events.log(
+                session, events.PAYWALL_SHOWN, user_id=user.id, chart_id=chart.id
+            )
+            await session.commit()
 
     return templates.TemplateResponse(
         request,

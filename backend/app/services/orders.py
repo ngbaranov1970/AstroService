@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chart, Order, OrderStatus, ReportType, User
@@ -143,18 +144,21 @@ async def get_or_create_order(
     """
     amount = price(report_type)
 
-    # Свежие вперёд: если заказов накопилось несколько, работаем с последним.
-    existing = await session.scalar(
-        select(Order)
-        .where(
-            Order.user_id == user.id,
-            Order.chart_id == chart.id,
-            Order.report_type == report_type,
-            Order.status.in_((OrderStatus.PAID, OrderStatus.PENDING)),
+    async def find_open() -> Order | None:
+        # Свежие вперёд: если заказов накопилось несколько, работаем с последним.
+        return await session.scalar(
+            select(Order)
+            .where(
+                Order.user_id == user.id,
+                Order.chart_id == chart.id,
+                Order.report_type == report_type,
+                Order.status.in_((OrderStatus.PAID, OrderStatus.PENDING)),
+            )
+            .order_by(Order.id.desc())
+            .limit(1)
         )
-        .order_by(Order.id.desc())
-        .limit(1)
-    )
+
+    existing = await find_open()
     if existing is not None:
         return existing
 
@@ -165,10 +169,25 @@ async def get_or_create_order(
         amount=amount,
         status=OrderStatus.PENDING,
     )
-    session.add(order)
-    # flush, а не commit: нужен id для события и для лога, а решение
-    # «сохранять ли всё это» остаётся за вызывающим.
-    await session.flush()
+    # Вставка под SAVEPOINT — тот же приём, что в charts.create_chart(). Два
+    # одновременных нажатия «купить» оба не находят заказа и оба вставляют;
+    # частичный уникальный индекс не даёт записать второй ждущий заказ, а
+    # без савпоинта его ошибка обрушила бы всю транзакцию («current
+    # transaction is aborted») вместо одной вставки.
+    try:
+        async with session.begin_nested():
+            session.add(order)
+    except IntegrityError:
+        conflicting = await find_open()
+        if conflicting is not None:
+            logger.info(
+                "Заказ на «%s» для карты %s уже завёл параллельный запрос — беру его",
+                report_type.value, chart.id,
+            )
+            return conflicting
+        # Конфликт не про дубль заказа (например, карту успели удалить) —
+        # глушить нельзя, это ошибка в коде вызывающего.
+        raise
 
     await events.log(
         session,
@@ -242,13 +261,19 @@ async def start_payment(
     return confirmation_url
 
 
-async def apply_notification(session: AsyncSession, payment_id: str) -> Order | None:
+async def apply_notification(
+    session: AsyncSession, payment_id: str
+) -> tuple[Order | None, bool]:
     """Обработать уведомление вебхука: сверить платёж с API и зачислить.
 
-    Возвращает затронутый заказ или None, если платёж нам неизвестен (чужой
-    магазин, выдуманный id, заказ ещё не сохранён). None — не авария:
-    вызывающий всё равно отвечает 200, иначе ЮKassa будет повторять
-    уведомление сутки.
+    Возвращает заказ и признак «деньги зачислены ИМЕННО ЭТИМ вызовом».
+    Признак нужен потому, что уведомление приходит по нескольку раз (ЮKassa
+    доставляет минимум однажды), и по нему вызывающий отличает настоящую
+    оплату от повтора — иначе генерация и события повторялись бы следом.
+
+    Заказ равен None, если платёж нам неизвестен (чужой магазин, выдуманный
+    id, заказ ещё не сохранён). Это не авария: вызывающий всё равно отвечает
+    200, иначе ЮKassa будет повторять уведомление сутки.
 
     Бросает PaymentError, если их API недоступен — вот тогда 200 отдавать
     нельзя, повтор уведомления и есть наш второй шанс.
@@ -265,10 +290,10 @@ async def apply_notification(session: AsyncSession, payment_id: str) -> Order | 
     )
     if order is None:
         logger.warning("Уведомление о платеже %s: заказа с таким id нет", payment.id)
-        return None
+        return None, False
 
-    await _apply_payment(session, order, payment)
-    return order
+    just_paid = await _apply_payment(session, order, payment)
+    return order, just_paid
 
 
 async def sync_status(session: AsyncSession, order: Order) -> Order:
@@ -284,14 +309,26 @@ async def sync_status(session: AsyncSession, order: Order) -> Order:
         return order
 
     payment = await yookassa.get_payment(order.provider_payment_id)
+
+    # Перечитываем строку под блокировкой, и только теперь применяем платёж:
+    # вебхук про этот же платёж приходит одновременно с возвратом человека и
+    # мог уже поставить PAID. Без этого оба пути видят PENDING и оба пишут
+    # order_paid — деньги целы, а выручка по событиям задвоена (проверено).
+    # Блокировка берётся ПОСЛЕ запроса к их API: он длится до 30 с, и всё это
+    # время вебхук ждал бы освобождения строки.
+    await session.refresh(order, with_for_update=True)
     await _apply_payment(session, order, payment)
     return order
 
 
 async def _apply_payment(
     session: AsyncSession, order: Order, payment: yookassa.Payment
-) -> None:
+) -> bool:
     """Перенести состояние платежа на заказ. Единственное место, где ставится PAID.
+
+    Возвращает True только когда деньги зачислены этим вызовом. По нему
+    вызывающий решает, запускать ли генерацию: уведомление приходит по
+    нескольку раз, и «заказ оплачен» не то же самое, что «оплатили сейчас».
 
     Идемпотентна: повторный вызов на уже закрытом заказе ничего не меняет и
     события не пишет — вебхук приходит по нескольку раз.
@@ -302,17 +339,17 @@ async def _apply_payment(
 
     if order.status is not OrderStatus.PENDING:
         logger.debug("Платёж %s: заказ %s уже закрыт, пропускаем", payment.id, order.id)
-        return
+        return False
 
     if payment.status == yookassa.STATUS_CANCELED:
         order.status = OrderStatus.CANCELED
         logger.info("Заказ %s отменён: платёж %s canceled", order.id, payment.id)
-        return
+        return False
 
     # Деньги открывают доступ, а не статус: succeeded с paid=false у них
     # означает оплату, отменённую до зачисления.
     if payment.status != yookassa.STATUS_SUCCEEDED or not payment.paid:
-        return
+        return False
 
     if not _amount_matches(payment.amount_rub, order.amount):
         # Доступ не открываем и заказ не трогаем: расхождение сумм означает,
@@ -322,7 +359,7 @@ async def _apply_payment(
             "Заказ %s: платёж %s пришёл на %s ₽ вместо %s ₽ — доступ НЕ открыт",
             order.id, payment.id, payment.amount_rub, order.amount_rub,
         )
-        return
+        return False
 
     order.status = OrderStatus.PAID
     order.paid_at = datetime.now(UTC)
@@ -341,6 +378,7 @@ async def _apply_payment(
         "Заказ %s ОПЛАЧЕН: %s ₽, платёж %s, пользователь %s",
         order.id, order.amount_rub, payment.id, order.user_id,
     )
+    return True
 
 
 def _amount_matches(payment_amount_rub: str, order_amount_kop: int) -> bool:
