@@ -51,17 +51,8 @@ SOURCE_WEB_TESTER = "web_tester"
 # намеренно — оно поедет в каждой ссылке и каждой форме приложения.
 SESSION_QUERY_PARAM = "s"
 
-# Параметр с подписью VK; его наличие и означает «это запуск мини-приложения».
-VK_SIGN_PARAM = "sign"
-
-# Метки запуска, которые уходят в аналитику: откуда пришёл (каталог, поиск,
-# группа) и с какого клиента (mobile_iphone, mobile_android, mobile_web,
-# desktop_web). Читаются только после того, как подпись сошлась.
-VK_REF_PARAM = "vk_ref"
-VK_PLATFORM_PARAM = "vk_platform"
-
-# Значение users.source для пришедших из VK.
-SOURCE_VK = "vk"
+# Имена параметров запуска VK и значение users.source для них живут в
+# app/services/auth.py: их делит с этим файлом JSON-API.
 
 # Ключ в request.state: зависимость кладёт свежий токен, шаблоны забирают
 # его через session_token() и подставляют в ссылки.
@@ -164,7 +155,7 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
     if not get_settings().vk_enabled:
         return None
 
-    if request.query_params.get(VK_SIGN_PARAM):
+    if request.query_params.get(auth.VK_SIGN_PARAM):
         params = dict(request.query_params)
         try:
             vk_id = auth.verify_vk_launch(params)
@@ -178,7 +169,7 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
                 session,
                 platform=Platform.VK,
                 external_id=vk_id,
-                source=SOURCE_VK,
+                source=auth.SOURCE_VK,
             )
             # `sign` приходит только при запуске приложения — внутри человек
             # ходит уже с `?s=`. Поэтому здесь и только здесь известно, откуда
@@ -187,8 +178,8 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
                 session,
                 events.APP_OPENED,
                 user_id=user.id,
-                ref=params.get(VK_REF_PARAM),
-                platform=params.get(VK_PLATFORM_PARAM),
+                ref=params.get(auth.VK_REF_PARAM),
+                platform=params.get(auth.VK_PLATFORM_PARAM),
             )
             _remember_session(request, user.id)
             return user
@@ -203,7 +194,7 @@ async def _vk_user(request: Request, session: AsyncSession) -> User | None:
             _remember_session(request, user.id)
             return user
 
-    if request.query_params.get(VK_SIGN_PARAM) or raw:
+    if request.query_params.get(auth.VK_SIGN_PARAM) or raw:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Сессия недействительна — откройте приложение заново",

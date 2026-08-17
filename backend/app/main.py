@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.api import api_router
 from app.config import get_settings
 from app.db import dispose_engine
 from app.llm import client as llm_client
@@ -101,6 +102,10 @@ def create_app() -> FastAPI:
     # выключат: импорт этого модуля кладёт `merchant` в шаблоны, а он
     # печатается в подвале КАЖДОЙ страницы.
     app.include_router(legal_router)
+
+    # JSON-API для Mini App. Идёт после стенда, но пересечься они не могут:
+    # у API свой префикс /api/v1 и своя авторизация по заголовку.
+    app.include_router(api_router)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:
