@@ -1,10 +1,15 @@
 """Фоновая генерация разборов и её состояние.
 
-Отдельный файл, а не часть router.py, по границе «что это вообще такое»:
+Отдельный файл, а не часть маршрутов, по границе «что это вообще такое»:
 маршруты — про HTTP (разобрать форму, отдать шаблон, увести редиректом),
 а здесь ни одного запроса и ни одного ответа. Здесь работа, которая
 начинается ПОСЛЕ того, как ответ уже ушёл браузеру, и живёт своей жизнью
 30–60 секунд.
+
+Лежит рядом с сервисами, а не в app/web/, потому что реестр генераций
+обязан быть один на процесс: стенд и JSON-API Mini App ходят в одну базу и
+к одному отчёту. Два реестра означали бы, что запущенную в Mini App
+генерацию стенд не видит и рисует кнопку «получить разбор» заново.
 
 Зачем это вообще нужно, в одном абзаце. LLM отвечает десятки секунд. Если
 генерировать прямо в обработчике, страница висит белым экраном, человек
@@ -49,6 +54,10 @@ class Generation:
     # Человеческий текст ошибки — тот, что увидит тестер. Не traceback:
     # подробности уже в логе, а на странице нужна понятная фраза.
     error: str | None = None
+    # Тот же отказ машинным кодом: фронту Mini App по нему выбирать, вести
+    # ли на оплату или предлагать повтор, а сравнивать текст нельзя — он
+    # меняется вместе с формулировками.
+    error_code: str | None = None
 
 
 # Реестр «что сейчас генерируется». Ключ — карта и тип отчёта: генерации
@@ -91,9 +100,9 @@ def schedule(
     не того, кто нажал кнопку: лимиты бесплатных разборов и — позже —
     оплата суть свойства владельца.
 
-    BackgroundTasks — объект FastAPI, и это нормально: файл лежит в
-    app/web/. Запрет на объекты фреймворка действует для app/services/*,
-    которые обслуживают ещё и бота.
+    BackgroundTasks приходит аргументом от вызывающего маршрута. Объект
+    FastAPI здесь допустим — модуль не в app/services/, где запрет на
+    объекты фреймворка нужен ради бота; бот эту очередь не использует.
     """
     _REGISTRY[_key(chart.id, report_type)] = Generation(running=True)
     background.add_task(_run, chart.id, chart.user_id, report_type)
@@ -147,7 +156,8 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
                 "Отказ в генерации %s для карты %s: %s",
                 report_type.value, chart_id, exc,
             )
-            _REGISTRY[key] = Generation(running=False, error=_human_error(exc))
+            code, text = _failure(exc)
+            _REGISTRY[key] = Generation(running=False, error=text, error_code=code)
             await events.log(
                 session, events.REPORT_DENIED,
                 user_id=user_id, chart_id=chart_id, type=report_type.value,
@@ -166,6 +176,7 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
             _REGISTRY[key] = Generation(
                 running=False,
                 error="Не получилось получить текст. Попробуйте ещё раз.",
+                error_code=FAILED,
             )
             await events.log(
                 session, events.REPORT_FAILED,
@@ -174,17 +185,43 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
             await session.commit()
 
 
-def _human_error(exc: reports.ReportError) -> str:
-    """Текст отказа для страницы. Формулировки — часть продукта, а не логов."""
-    if isinstance(exc, reports.ReportLimitError):
-        return "Бесплатные разборы закончились."
-    if isinstance(exc, reports.ReportForbiddenError):
-        # Про тестеров человеку не рассказываем: он сюда попадает, только
-        # отправив форму в обход анонса, и «вы не тестер» ему ничего не
-        # объясняет. Модератор каталога VK увидит то же самое.
-        return "Полный разбор станет доступен, когда заработает оплата."
-    if isinstance(exc, reports.ReportBudgetError):
-        # Про потолок и деньги человеку не рассказываем: он ни при чём, ему
-        # нужен срок. Текст самой ошибки в интерфейс не отдаём намеренно.
-        return "Сегодня разборы закончились. Возвращайтесь завтра."
-    return "Этот вид разбора ещё не готов."
+# Коды отказов для JSON-API. Строки, а не Enum: они уезжают в ответ как есть,
+# и лишний слой преобразования тут ничего не даёт.
+LIMIT_EXHAUSTED = "limit_exhausted"
+NEEDS_PURCHASE = "needs_purchase"
+BUDGET_EXCEEDED = "budget_exceeded"
+NOT_SUPPORTED = "not_supported"
+FAILED = "failed"
+
+# Отказ в двух видах сразу: код для фронта, фраза для страницы стенда.
+# Одна таблица вместо двух функций — разъехавшись, они сказали бы разное про
+# один и тот же отказ.
+_FAILURES: tuple[tuple[type[reports.ReportError], str, str], ...] = (
+    (reports.ReportLimitError, LIMIT_EXHAUSTED, "Бесплатные разборы закончились."),
+    # Про тестеров человеку не рассказываем: он сюда попадает, только отправив
+    # форму в обход анонса, и «вы не тестер» ему ничего не объясняет.
+    # Модератор каталога VK увидит то же самое.
+    (
+        reports.ReportForbiddenError,
+        NEEDS_PURCHASE,
+        "Полный разбор станет доступен, когда заработает оплата.",
+    ),
+    # Про потолок и деньги человеку не рассказываем: он ни при чём, ему нужен
+    # срок. Текст самой ошибки в интерфейс не отдаём намеренно.
+    (
+        reports.ReportBudgetError,
+        BUDGET_EXCEEDED,
+        "Сегодня разборы закончились. Возвращайтесь завтра.",
+    ),
+)
+
+
+def _failure(exc: reports.ReportError) -> tuple[str, str]:
+    """Код и человеческий текст отказа. Формулировки — часть продукта, а не логов."""
+    for error_type, code, text in _FAILURES:
+        if isinstance(exc, error_type):
+            return code, text
+    # Сюда попадают ReportNotSupportedError и любой будущий наследник
+    # ReportError: пообещать человеку разбор, которого нет, хуже, чем сказать
+    # «ещё не готов».
+    return NOT_SUPPORTED, "Этот вид разбора ещё не готов."

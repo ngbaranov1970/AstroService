@@ -4,8 +4,9 @@
 шаблон. Ни расчётов, ни SQL здесь нет — те же сервисы позже дёрнут бот и
 Mini App, и поведение должно совпасть. Соседи по папке `routes/`: `pay.py`
 — оплата, `admin.py` — админка, `legal.py` — оферта и политика. Этажом
-выше: `deps.py` — кто пришёл, `forms.py` — проверка ввода, `generation.py`
-— фоновая генерация, `templating.py` — общий Jinja2.
+выше: `deps.py` — кто пришёл, `forms.py` — проверка ввода, `templating.py`
+— общий Jinja2. Фоновая генерация — в `app/generation.py`, она общая со
+слоем JSON-API.
 
 Форма маршрутов продиктована тем, что LLM отвечает 30–60 с: генерацию
 ставит фоновая задача, POST отвечает 303, GET только читает базу, а
@@ -22,12 +23,12 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
+from app import generation
 from app.db import get_session
 from app.models import Chart, ReportType, User
 from app.services import charts, events, orders, reports
-from app.web import forms, generation
+from app.web import forms
 from app.web.deps import TESTER_QUERY_PARAM, current_user, optional_user, with_session
-from app.web.routes import pay
 from app.web.templating import templates
 
 router = APIRouter(
@@ -200,12 +201,8 @@ async def report_page(
     is_owner = user is not None and chart.user_id == user.id
 
     blocks = [
-        await _report_block(
-            session, chart, ReportType.FREE_NATAL, "Бесплатный разбор", user
-        ),
-        await _report_block(
-            session, chart, ReportType.FULL_NATAL, "Полный разбор", user
-        ),
+        await _report_block(session, chart, report_type, user)
+        for report_type in reports.supported_types()
     ]
 
     # Показ цены — первая ступень воронки покупки; без неё непонятно, что
@@ -364,7 +361,6 @@ async def _report_block(
     session: AsyncSession,
     chart: Chart,
     report_type: ReportType,
-    title: str,
     user: User | None,
 ) -> dict:
     """Всё, что шаблону нужно знать про один разбор, одним словарём.
@@ -384,7 +380,7 @@ async def _report_block(
 
     return {
         "type": report_type.value,
-        "title": title,
+        "title": reports.title(report_type),
         # Текст готов — про состояние генерации уже неважно.
         "sections": reports.sections(report) if report is not None else None,
         "report": report,
@@ -394,7 +390,7 @@ async def _report_block(
         "titles": reports.section_titles(report_type),
         # Адрес кнопки «купить». Абсолютный, потому что из VK платить уходят
         # во внешний браузер (см. routes/pay.py).
-        "pay_url": pay.payment_url(chart.token, report_type) if locked else None,
+        "pay_url": orders.payment_url(chart.token, report_type) if locked else None,
         "price": orders.price_rub(report_type) if locked else None,
     }
 

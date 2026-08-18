@@ -34,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import Chart, Order, OrderStatus, ReportType, User
 from app.payments import yookassa
 from app.services import events
@@ -88,6 +89,23 @@ def title(report_type: ReportType) -> str:
 def is_for_sale(report_type: ReportType) -> bool:
     """Есть ли у типа цена. Интерфейсу — рисовать кнопку или молчать."""
     return report_type in PRICES
+
+
+def payment_url(chart_token: str, report_type: ReportType) -> str | None:
+    """Адрес страницы оплаты для кнопки «купить». None — платежи не настроены.
+
+    Без ключей ЮKassa или PUBLIC_BASE_URL кнопка привела бы человека на
+    страницу, которая честно скажет «не получилось перейти к оплате»; лучше
+    не звать вовсе, чем звать в тупик.
+
+    Адрес абсолютный и всегда ведёт на сайт: из VK и Telegram платить уходят
+    во внешний браузер, а туда путь без домена не годится.
+    """
+    settings = get_settings()
+    base = settings.public_base_url
+    if not settings.payments_enabled or base is None:
+        return None
+    return f"{base.rstrip('/')}/pay/{chart_token}?type={report_type.value}"
 
 
 async def get_by_token(session: AsyncSession, token: str) -> Order | None:

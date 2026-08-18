@@ -10,8 +10,8 @@ Vue — заголовок ставит клиент, и токен едет в 
 оседая в логах Caddy вместе с URL.
 
 Второе отличие: тут никто не заводится сам. Единственная точка входа —
-POST /auth/vk (app/api/auth.py); незнакомый токен получает 401, а не новую
-строку в users.
+POST /auth/vk (app/api/routes/auth.py); незнакомый токен получает 401, а
+не новую строку в users.
 """
 
 from __future__ import annotations
@@ -23,8 +23,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import User
+from app.models import Chart, User
 from app.services import auth
+from app.services import charts as charts_service
 from app.services import users as users_service
 
 # auto_error=False — иначе FastAPI сам ответит 403 на запрос без заголовка,
@@ -71,3 +72,24 @@ async def current_user(
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+async def chart_by_token(token: str, _user: CurrentUser, session: SessionDep) -> Chart:
+    """Карта по токену из пути; 404, если такой нет.
+
+    Пользователя требует ради порядка: без него FastAPI решал бы зависимости
+    в порядке объявления аргументов маршрута, и запрос без токена сначала
+    искал бы карту в базе, а 401 получал бы после — то есть неопознанный
+    клиент и базу дёргал, и по коду ответа узнавал, существует ли карта.
+
+    Проверки владельца здесь нет: токен и есть ключ, 24 случайных байта не
+    подобрать (см. services/charts.py). Кто знает ссылку — видит карту;
+    ограничивают доступ маршруты, которые тратят лимиты и деньги владельца.
+    """
+    chart = await charts_service.get_chart_by_token(session, token)
+    if chart is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такой карты нет")
+    return chart
+
+
+ChartByToken = Annotated[Chart, Depends(chart_by_token)]

@@ -114,6 +114,16 @@ _LIMITS: dict[ReportType, int] = {
 # заказов на один текст бывает несколько, и каждый денежный факт нужен целым.
 _PAID_TYPES: frozenset[ReportType] = frozenset({ReportType.FULL_NATAL})
 
+# Как разбор называется для человека. Отличается от TITLES в services/orders.py:
+# там название товара для банковской выписки («Полный разбор натальной карты»),
+# здесь подпись блока на экране.
+_TITLES: dict[ReportType, str] = {
+    ReportType.FREE_NATAL: "Бесплатный разбор",
+    ReportType.FULL_NATAL: "Полный разбор",
+    ReportType.MATRIX: "Матрица Судьбы",
+    ReportType.EASTERN: "Восточный гороскоп",
+}
+
 
 class ReportError(RuntimeError):
     """Общий предок ошибок модуля — чтобы вызывающий мог поймать одним except."""
@@ -277,6 +287,21 @@ async def needs_purchase(
     return not await orders.has_paid(
         session, user_id=user.id, chart_id=chart.id, report_type=report_type
     )
+
+
+def supported_types() -> list[ReportType]:
+    """Виды разборов, которые сейчас можно получить, — те, у кого есть промпт.
+
+    В ReportType заранее заведены MATRIX и EASTERN, чтобы добавление продукта
+    не требовало миграции CHECK. Интерфейсу их показывать нельзя: генерация
+    такого типа кончится ReportNotSupportedError.
+    """
+    return list(_PROMPTS)
+
+
+def title(report_type: ReportType) -> str:
+    """Название разбора для человека — подпись блока на экране."""
+    return _TITLES.get(report_type, "Астрологический разбор")
 
 
 def section_titles(report_type: ReportType) -> list[str]:

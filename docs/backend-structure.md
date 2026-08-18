@@ -20,13 +20,16 @@ backend/
 │   ├── config.py
 │   ├── db.py
 │   ├── models.py
+│   ├── generation.py         ← фоновые генерации, общие для web/ и api/
 │   ├── schemas/
 │   ├── api/
-│   │   ├── auth.py
-│   │   ├── charts.py
-│   │   ├── reports.py
-│   │   ├── orders.py
-│   │   └── webhooks.py
+│   │   ├── deps.py           ← опознание по Bearer-токену
+│   │   └── routes/
+│   │       ├── auth.py
+│   │       ├── charts.py
+│   │       ├── reports.py
+│   │       ├── orders.py
+│   │       └── webhooks.py
 │   ├── services/
 │   │   ├── auth.py
 │   │   ├── users.py
@@ -36,11 +39,14 @@ backend/
 │   │   ├── events.py
 │   │   └── admin.py          ← выборки админки стенда
 │   ├── web/                  ← стенд для обкатки промптов (Jinja2)
-│   │   ├── router.py
-│   │   ├── admin.py
 │   │   ├── deps.py
 │   │   ├── forms.py
-│   │   ├── generation.py
+│   │   ├── templating.py
+│   │   ├── routes/
+│   │   │   ├── stand.py
+│   │   │   ├── pay.py
+│   │   │   ├── admin.py
+│   │   │   └── legal.py
 │   │   ├── templates/
 │   │   └── static/
 │   └── llm/

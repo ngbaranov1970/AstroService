@@ -35,12 +35,12 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
+from app import generation
 from app.config import get_settings
 from app.db import get_session
 from app.models import Chart, Order, OrderStatus, ReportType, User
 from app.payments import yookassa
 from app.services import charts, events, orders, reports, users
-from app.web import generation
 from app.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -307,23 +307,6 @@ def _page_context(
         "paid": paid,
         "error": error,
     }
-
-
-def payment_url(chart_token: str, report_type: ReportType) -> str | None:
-    """Адрес страницы оплаты для кнопки на странице карты.
-
-    None, когда приём платежей не настроен: кнопка привела бы человека на
-    страницу, которая честно скажет «не получилось перейти к оплате».
-    Лучше не звать вовсе, чем звать в тупик.
-
-    Адрес абсолютный: из VK человек уходит платить во внешний браузер, а
-    туда путь без домена не годится.
-    """
-    settings = get_settings()
-    base = settings.public_base_url
-    if not settings.payments_enabled or base is None:
-        return None
-    return f"{base.rstrip('/')}/pay/{chart_token}?type={report_type.value}"
 
 
 def _absolute(path: str) -> str:
