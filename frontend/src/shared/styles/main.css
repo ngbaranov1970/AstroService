@@ -1,0 +1,102 @@
+/* Единственный CSS-файл, который подключает main.js. Здесь: Tailwind, токены
+   дизайна (цвета, шрифты, кегли) и базовые стили страницы.
+   Разбор макетов, из которых взяты значения, — в docs/frontend-plan.md. */
+
+/* Все @import обязаны стоять до любых других правил — требование самого CSS */
+@import 'tailwindcss';
+@import './fonts.css';
+
+/* @theme — конфигурация Tailwind 4 прямо в CSS (tailwind.config.js больше нет).
+   Каждый токен превращается в утилиты: --color-gold даёт text-gold, bg-gold,
+   border-gold; --text-display даёт text-display. Заодно это обычные
+   CSS-переменные, поэтому светлая тема позже добавится их переопределением. */
+@theme {
+  /* Цвета сняты с макетов images/: тёплый почти-чёрный фон и золото */
+  --color-bg: #171310;
+  --color-bg-card: #1f1a15;
+  --color-gold: #c9a25e;
+  --color-gold-dim: #8a7248;
+  --color-ink: #ece5d8;
+  --color-ink-muted: #9c937f;
+
+  /* Рамки: у активного блока ярче, у спокойного еле видна. Заливок в макете
+     нет вообще — блоки различаются только цветом рамки */
+  --color-line-gold: rgb(201 162 94 / 0.55);
+  --color-line-dim: rgb(201 162 94 / 0.18);
+
+  /* Cormorant — заголовки и знаки, PT Serif — длинные тексты разборов,
+     системная стопка — подписи и капс-лейблы. Georgia в хвосте отрисует
+     текст, пока woff2 ещё летит по сети */
+  --font-display: 'Cormorant', Georgia, serif;
+  --font-read: 'PT Serif', Georgia, serif;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Кегли из таблицы в docs/frontend-plan.md. Двойное тире в имени — это
+     синтаксис Tailwind для «межстрочного этого же кегля» */
+  --text-display: 2.25rem;
+  --text-display--line-height: 1.15;
+  --text-title: 1.4rem;
+  --text-title--line-height: 1.25;
+  --text-read: 1.2rem;
+  --text-read--line-height: 1.6;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.5;
+  --text-meta: 0.875rem;
+  --text-meta--line-height: 1.45;
+  --text-label: 0.72rem;
+  --text-label--line-height: 1;
+
+  /* Разрядка капс-лейблов: без неё капс выглядит слипшимся */
+  --tracking-label: 0.14em;
+
+  /* Скругления в макете едва заметные — рамка, а не «пилюля» */
+  --radius-card: 0.375rem;
+
+  /* Ширина колонки: даёт утилиту max-w-app. Десктопной вёрстки нет, на
+     широком экране контент остаётся этой колонкой (docs/frontend-plan.md,
+     раздел «Большие экраны») */
+  --container-app: 26rem;
+}
+
+/* @layer base — стили, которые Tailwind кладёт в самый низ приоритета, чтобы
+   любая утилита в шаблоне их перебивала без !important */
+@layer base {
+  html {
+    /* iOS Safari сам увеличивает шрифт в альбомной ориентации — запрещаем,
+       иначе вёрстка колонки разъезжается */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    min-height: 100dvh;
+    /* Гасим «резиновый» отскок при скролле: в вебвью VK он выглядит поломкой */
+    overscroll-behavior-y: none;
+    /* Тонкие засечки на тёмном фоне без этого выглядят жирнее, чем в макете */
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Колонка шириной телефона по центру — на широком экране приложение
+     остаётся приложением, а не растягивается на весь монитор */
+  #app {
+    max-inline-size: var(--container-app);
+    margin-inline: auto;
+    /* Свой фон поверх общего: колонка чуть отделяется от полей */
+    background-color: var(--color-bg);
+    min-height: 100dvh;
+  }
+}
+
+/* Обрамление колонки на больших экранах. До 26rem ширины экрана правило молчит,
+   поэтому на телефоне ни свечения, ни линий нет */
+@media (min-width: 26rem) {
+  body {
+    background-image: radial-gradient(120% 60% at 50% 0%, #221b14 0%, var(--color-bg) 60%);
+  }
+
+  #app {
+    border-inline: 1px solid var(--color-line-dim);
+  }
+}

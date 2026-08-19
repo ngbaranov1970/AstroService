@@ -1,0 +1,88 @@
+/* Подключение self-hosted шрифтов. Внешних CDN нет: Google Fonts из VK-iframe
+   на iOS грузится через раз, да и лишний домен — лишний отказ.
+   Файлы скачаны с fonts.google.com (лицензия OFL), нарезаны по алфавитам:
+   браузер тянет кириллицу и латиницу отдельными файлами и берёт только нужное. */
+
+/* Cormorant — вариативный: 400 и 700 лежат в ОДНОМ файле (у Google совпадают
+   md5), поэтому вес указан диапазоном, а не отдельными блоками на начертание. */
+@font-face {
+  font-family: 'Cormorant';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('../../assets/fonts/cormorant-400-normal-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Cormorant';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('../../assets/fonts/cormorant-400-normal-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Cormorant';
+  font-style: italic;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('../../assets/fonts/cormorant-400-italic-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Cormorant';
+  font-style: italic;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('../../assets/fonts/cormorant-400-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* PT Serif — обычный статический шрифт: один файл на одно начертание.
+   Нужен для длинных текстов разборов, Cormorant в 19 px абзацами слишком тонкий. */
+@font-face {
+  font-family: 'PT Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../assets/fonts/pt-serif-400-normal-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'PT Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../assets/fonts/pt-serif-400-normal-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'PT Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../assets/fonts/pt-serif-400-italic-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'PT Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../assets/fonts/pt-serif-400-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}

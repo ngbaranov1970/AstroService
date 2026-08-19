@@ -104,7 +104,8 @@ shared/api/{http,endpoints}.js
 shared/composables/{useSession,useCharts,useReports,usePolling}.js
 shared/ui/                 # AppButton, AppCard, AppInput, StepDots,
                            # BadgePill, Accordion, Skeleton, BottomNav, DashedCard
-shared/styles/main.css       # @import "tailwindcss" + @theme (токены) + @font-face
+shared/styles/main.css       # @import "tailwindcss" + @theme (токены)
+shared/styles/fonts.css      # @font-face; 8 woff2 в assets/fonts (latin+cyrillic)
 features/onboarding/       # OnboardingView + steps/{Date,Time,Place,Name}
 features/home/             # HomeView, homeTiles.js, AstroBadges, TodayCard, ReportTile
 features/report/           # ReportView (generic), reportTypes.js,
@@ -244,18 +245,25 @@ export const REPORT_TYPES = {
 
 ```css
 @import "tailwindcss";
+@import "./fonts.css";
 @theme {
   --color-bg: #171310;            /* почти чёрный тёплый */
   --color-bg-card: #1f1a15;
   --color-gold: #c9a25e;          /* акцент */
   --color-gold-dim: #8a7248;
-  --color-border-gold: rgb(201 162 94 / .35);
+  --color-line-gold: rgb(201 162 94 / .55);   /* рамка активного блока */
+  --color-line-dim:  rgb(201 162 94 / .18);   /* рамка спокойного */
   --color-ink: #ece5d8;  --color-ink-muted: #9c937f;
-  --font-display: "Cormorant", "PT Serif", Georgia, serif;
-  --radius-card: 1rem;
+  --font-display: "Cormorant", Georgia, serif;   /* заголовки, знаки */
+  --font-read: "PT Serif", Georgia, serif;       /* длинные тексты разборов */
+  --font-sans: system-ui, …;                     /* подписи, капс-лейблы */
+  --text-display/title/read/lead/meta/label      /* шкала ниже, с межстрочными */
+  --tracking-label: .14em;
+  --radius-card: .375rem;         /* в макете скругления едва заметны */
+  --container-app: 26rem;         /* ширина колонки → утилита max-w-app */
 }
 ```
-Токены из `@theme` дают утилиты (`bg-bg`, `text-gold`, `border-border-gold`,
+Токены из `@theme` дают утилиты (`bg-bg`, `text-gold`, `border-line-gold`,
 `font-display`, `rounded-card`) — темизация остаётся на CSS-переменных,
 светлая/брендовая тема позже добавится их переопределением. Капс-лейблы —
 `uppercase tracking-[.12em]`, safe-area в BottomNav —
