@@ -1,12 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <!-- viewport-fit=cover — разрешает контенту заезжать под «чёлку» и полосу
+         жестов; без него env(safe-area-inset-*) всегда ноль и отступы в
+         BottomNav не сработают -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Цвет системной шапки браузера. В VK его ставит vk-bridge, здесь он
+         для веба и Telegram -->
+    <meta name="theme-color" content="#171310" />
+    <title>Астросервис</title>
   </head>
-  <body>
+  <!-- Фон повторён прямо в атрибуте: CSS приезжает отдельным файлом, и до
+       него страница моргает белым — на тёмном экране это заметная вспышка -->
+  <body style="background-color: #171310">
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

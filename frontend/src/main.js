@@ -1,5 +1,32 @@
-import { createApp } from 'vue'
-import './style.css'
-import App from './App.vue'
+// Точка входа: единственный файл, который запускает браузер (через index.html).
+// Подключает стили, инициализирует платформу и монтирует Vue в <div id="app">.
 
-createApp(App).mount('#app')
+import { createApp } from 'vue'
+
+import { platform } from '@/app/platform'
+import App from '@/App.vue'
+import '@/shared/styles/main.css'
+
+// Импорт CSS в JS выглядит дико после Python, но так работает сборка: Vite
+// видит импорт, прогоняет файл через Tailwind и подключает результат к странице
+
+async function bootstrap() {
+  try {
+    // VKWebAppInit должен уйти ДО монтирования: пока он не отправлен, поверх
+    // приложения висит прелоадер VK и тапы проходят сквозь него в наши поля.
+    // Здесь же адаптер снимает параметры запуска из адреса, пока их никто не стёр
+    await platform.init()
+    // Шапка и статус-бар под наш фон: иначе над тёмным экраном белая полоса
+    await platform.setHeaderColor()
+  } catch (error) {
+    // Отказ моста — не повод не показать приложение: в обычном браузере
+    // (разработка, веб) VK-методов нет вовсе, и это штатная ситуация.
+    // console.warn печатает в консоль браузера, в наши логи ничего не идёт
+    console.warn('Инициализация платформы не удалась:', error)
+  }
+
+  // mount('#app') — «нарисуй App внутрь элемента с id=app»
+  createApp(App).mount('#app')
+}
+
+bootstrap()
