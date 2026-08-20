@@ -109,8 +109,7 @@ export async function request(method, path, options = {}) {
 
     return await send(method, path, options)
   }
-}ые значения выбрасываем: ?q= бэкенду не нужен
-      Object
+}
 
 // Короткие имена для вызывающих: http.get('/charts'), http.post('/charts', {...}).
 // Стрелочная функция (args) => выражение — это лямбда: короткая запись function
