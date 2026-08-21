@@ -12,11 +12,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
 from app.models import ReportType
 from app.services import orders
+from app.web import deps
 from app.web.templating import templates
 
 MERCHANT = {
@@ -64,13 +65,17 @@ def _page(request: Request, template: str) -> Response:
     )
 
 
-@router.get("/pricing")
+# Две страницы про покупку закрыты для VK: ссылок на них оттуда нет, но
+# адрес набирается руками, а прайс внутри Mini App — то же нарушение 5.4.1,
+# что и кнопка оплаты. Политика и контакты остаются открытыми всегда:
+# первую требует каталог, вторую — п. 2.4.1 правил (способ связи).
+@router.get("/pricing", dependencies=[Depends(deps.forbid_in_vk)])
 async def pricing(request: Request) -> Response:
     """Витрина: что продаём, за сколько и как покупатель получает заказ."""
     return _page(request, "pricing.html")
 
 
-@router.get("/offer")
+@router.get("/offer", dependencies=[Depends(deps.forbid_in_vk)])
 async def offer(request: Request) -> Response:
     """Публичная оферта — договор, который человек принимает оплатой."""
     return _page(request, "offer.html")
