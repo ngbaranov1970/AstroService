@@ -12,7 +12,7 @@
      блок переопределяют — их, наоборот, надо находить. #}
   {% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
-  <title>{% block title %}Астропрогноз{% endblock %}</title>
+  <title>{% block title %}Звездочёт{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
   {% block head_extra %}{% endblock %}
 </head>
@@ -22,7 +22,7 @@
   <header class="site-header">
     {# url() — не голый путь: в VK личность едет в адресе, и ссылка без
        токена уводит на 403 (см. deps.with_session). #}
-    <a class="site-title" href="{{ url('/') }}">Астропрогноз</a>
+    <a class="site-title" href="{{ url('/') }}">Звездочёт</a>
     {# `user` бывает и не передан (страницы оферты), и None (читающие страницы
        не заводят пользователя — см. deps.optional_user). #}
     {% if user is defined and user and user.is_tester %}
