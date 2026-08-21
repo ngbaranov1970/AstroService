@@ -268,6 +268,33 @@ def with_session(request: Request, path: str) -> str:
     return f"{path}{sep}{SESSION_QUERY_PARAM}={token}"
 
 
+def in_vk(request: Request) -> bool:
+    """Показывается ли страница внутри VK: есть ли в адресе `s` или `sign`.
+
+    Решает, рисовать ли блоки про оплату: продавать внутри Mini App нельзя ни
+    на одной платформе (docs/vk-moderation.md). Личность НЕ проверяет — это
+    выбор вёрстки, а не охрана доступа, и ошибиться он может только в сторону
+    «спрятать». Различать iOS, Android и веб не нужно: запрет общий.
+    """
+    q = request.query_params
+    return SESSION_QUERY_PARAM in q or auth.VK_SIGN_PARAM in q
+
+
+def forbid_in_vk(request: Request) -> None:
+    """Зависимость страниц оплаты: пришедшему из VK — 403 вместо витрины.
+
+    Ссылок на оплату в VK-ветке не осталось, но адрес угадывается и открыть
+    его можно руками; витрина с ценой внутри Mini App — прямое нарушение
+    5.4.1. Вебхуку ЮKassa зависимость не нужна: он приходит с чужого сервера
+    и `?s=` не несёт.
+    """
+    if in_vk(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Оплата доступна только на сайте, вне приложения VK",
+        )
+
+
 def _tester_token_matches(request: Request) -> bool:
     """Совпадает ли `?t=...` с секретом из .env; токен не задан → False.
 

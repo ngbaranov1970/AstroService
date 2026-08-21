@@ -19,7 +19,7 @@ from app import generation
 from app.api.deps import ChartByToken, CurrentUser, SessionDep
 from app.models import Chart, ReportType, User
 from app.schemas.reports import ReportOut, ReportRequest, ReportStatus, SectionOut
-from app.services import events, orders
+from app.services import events
 from app.services import reports as reports_service
 
 router = APIRouter(tags=["reports"])
@@ -155,19 +155,14 @@ async def _state(
     if await reports_service.needs_purchase(
         session, user=user, chart=chart, report_type=report_type
     ):
-        # Пейволл идёт впереди упавшей генерации: отказ по этой же причине
-        # (needs_purchase) без цены и ссылки на оплату — тупик для фронта.
-        return out.model_copy(
-            update={
-                "status": ReportStatus.LOCKED,
-                "price_rub": (
-                    orders.price_rub(report_type)
-                    if orders.is_for_sale(report_type)
-                    else None
-                ),
-                "pay_url": orders.payment_url(chart.token, report_type),
-            }
-        )
+        # Пейволл идёт впереди упавшей генерации: иначе фронт покажет ошибку
+        # там, где на деле нужна покупка.
+        #
+        # Цена и ссылка оплаты НЕ заполняются: единственный вход в этот API —
+        # POST /auth/vk, то есть по ту сторону всегда Mini App, а внутри VK
+        # продавать нельзя ни на одной платформе (docs/vk-moderation.md).
+        # `locked` без цены фронт показывает как «этот разбор закрыт».
+        return out.model_copy(update={"status": ReportStatus.LOCKED})
 
     if gen is not None and gen.error is not None:
         return out.model_copy(

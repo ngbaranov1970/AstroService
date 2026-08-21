@@ -23,6 +23,8 @@ cookie читает веб-слой, сообщение разбирает бо�
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,6 +119,22 @@ async def get_or_create(
             "конфликта вставки — кто-то удаляет строки users физически"
         )
     return _revive_if_deleted(user)
+
+
+def mark_vk_messages_allowed(user: User) -> bool:
+    """Запомнить, что человек разрешил сообществу писать; True — если впервые.
+
+    Возвращаемое значение нужно вызывающему, чтобы записать событие воронки
+    ровно один раз: экран подписки человек открывает много раз, а разрешение
+    даёт однажды. Время уже стоит — не переписываем: первая дата и есть
+    точка конверсии.
+
+    Синхронная, в базу не ходит: правка уедет с ближайшим flush сессии.
+    """
+    if user.vk_messages_allowed_at is not None:
+        return False
+    user.vk_messages_allowed_at = datetime.now(UTC)
+    return True
 
 
 def _revive_if_deleted(user: User) -> User:

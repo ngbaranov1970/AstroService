@@ -159,6 +159,14 @@ class User(Base):
         Boolean, nullable=False, default=True, server_default=sql_text("true")
     )
 
+    # Разрешил сообществу VK писать ему (VKWebAppAllowMessagesFromGroup).
+    # Ведём сами, потому что через API список разрешивших не отдаётся вовсе
+    # (docs/vk-moderation.md) — не записали в момент нажатия, потеряли
+    # навсегда. NULL — не разрешал или отозвал разрешение.
+    vk_messages_allowed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
     # Техническая невозможность доставки: человек заблокировал бота.
     # Узнать об этом заранее нельзя — Telegram сообщает только в ответ на
     # попытку отправки (403 Forbidden), ВКонтакте — ошибкой 901. Поэтому

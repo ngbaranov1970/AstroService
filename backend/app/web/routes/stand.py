@@ -24,11 +24,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
 from app import generation
+from app.config import get_settings
 from app.db import get_session
 from app.models import Chart, ReportType, User
 from app.services import charts, events, orders, reports
+from app.services import users as users_service
 from app.web import forms
-from app.web.deps import TESTER_QUERY_PARAM, current_user, optional_user, with_session
+from app.web.deps import (
+    TESTER_QUERY_PARAM,
+    current_user,
+    in_vk,
+    optional_user,
+    with_session,
+)
 from app.web.templating import templates
 
 router = APIRouter(
@@ -208,17 +216,24 @@ async def report_page(
     # Показ цены — первая ступень воронки покупки; без неё непонятно, что
     # именно теряется: интерес к платному разбору или сама оплата.
     #
+    # В VK на этом месте не цена, а предложение подписаться: продавать внутри
+    # приложения нельзя. Событие поэтому другое — иначе воронка считала бы
+    # показы пейволла, которого человек не видел.
+    #
     # Пишем один раз на карту: пока идёт генерация, страница перечитывает
     # себя каждые REFRESH_SECONDS, и без проверки одно ожидание текста давало
-    # бы десяток «показов цены» — конверсия в покупку выглядела бы в разы
-    # хуже, чем есть.
+    # бы десяток «показов» — конверсия выглядела бы в разы хуже, чем есть.
     if user is not None and any(b["locked"] for b in blocks):
-        if not await events.already_logged(
-            session, events.PAYWALL_SHOWN, user_id=user.id, chart_id=chart.id
+        vk = in_vk(request)
+        # Блока подписки без настроенного сообщества нет, значит и события.
+        if vk and get_settings().vk_group_id is None:
+            name = None
+        else:
+            name = events.GROUP_OFFER_SHOWN if vk else events.PAYWALL_SHOWN
+        if name is not None and not await events.already_logged(
+            session, name, user_id=user.id, chart_id=chart.id
         ):
-            await events.log(
-                session, events.PAYWALL_SHOWN, user_id=user.id, chart_id=chart.id
-            )
+            await events.log(session, name, user_id=user.id, chart_id=chart.id)
             await session.commit()
 
     return templates.TemplateResponse(
@@ -328,6 +343,24 @@ async def leave_feedback(
     await session.commit()
 
     return _redirect(request, f"/r/{token}?thanks=1")
+
+
+@router.post("/vk/messages-allowed", status_code=status.HTTP_204_NO_CONTENT)
+async def vk_messages_allowed(user: UserDep, session: SessionDep) -> Response:
+    """Человек разрешил сообществу писать ему — запоминаем это у себя.
+
+    Зовётся из браузера (fetch в static/vk-group.js) после того, как VK
+    ответил на `VKWebAppAllowMessagesFromGroup` согласием. Ответ пустой:
+    странице от него ничего не нужно, а перерисовывать её незачем.
+
+    Своя запись обязательна: список разрешивших через API VK не отдаётся
+    вовсе, и не сохранив его здесь, мы теряем единственный канал повторного
+    контакта (docs/vk-moderation.md).
+    """
+    if users_service.mark_vk_messages_allowed(user):
+        await events.log(session, events.GROUP_MESSAGES_ALLOWED, user_id=user.id)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --- Внутренние помощники --------------------------------------------------

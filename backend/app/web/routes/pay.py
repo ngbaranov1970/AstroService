@@ -41,6 +41,7 @@ from app.db import get_session
 from app.models import Chart, Order, OrderStatus, ReportType, User
 from app.payments import yookassa
 from app.services import charts, events, orders, reports, users
+from app.web import deps
 from app.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ DEFAULT_TYPE = ReportType.FULL_NATAL
 # --- Страницы оплаты -------------------------------------------------------
 
 
-@router.get("/pay/{chart_token}")
+@router.get("/pay/{chart_token}", dependencies=[Depends(deps.forbid_in_vk)])
 async def pay_page(
     request: Request,
     chart_token: str,
@@ -80,7 +81,7 @@ async def pay_page(
     )
 
 
-@router.post("/pay/{chart_token}")
+@router.post("/pay/{chart_token}", dependencies=[Depends(deps.forbid_in_vk)])
 async def pay_start(
     request: Request,
     chart_token: str,
@@ -145,7 +146,7 @@ async def pay_start(
     return RedirectResponse(confirmation_url, status.HTTP_303_SEE_OTHER)
 
 
-@router.get("/pay/{chart_token}/done")
+@router.get("/pay/{chart_token}/done", dependencies=[Depends(deps.forbid_in_vk)])
 async def pay_done(
     request: Request,
     chart_token: str,

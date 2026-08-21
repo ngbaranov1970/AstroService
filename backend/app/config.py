@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     # подписываем свои. Смена ключа разлогинивает всех разом.
     session_secret: SecretStr | None = None
 
+    # Числовой идентификатор нашего сообщества VK. Не задан — блок подписки в
+    # приложении не рисуется: `VKWebAppJoinGroup` без group_id не вызывается,
+    # и кнопка молча ничего не делала бы. Через сообщество идут все продажи,
+    # раз внутри Mini App их нет (docs/vk-moderation.md).
+    vk_group_id: int | None = None
+
     # --- ЮKassa -----------------------------------------------------------
     # Идентификатор магазина и секретный ключ из личного кабинета: вместе они
     # HTTP Basic Auth к api.yookassa.ru. shop_id строкой, хотя значение
@@ -152,6 +158,7 @@ class Settings(BaseSettings):
         "admin_password",
         "vk_app_id",
         "vk_secure_key",
+        "vk_group_id",
         "session_secret",
         "yookassa_shop_id",
         "yookassa_secret_key",
