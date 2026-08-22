@@ -138,7 +138,7 @@ async def create_payment(
     payload: dict[str, Any] = {
         "amount": {"value": amount_rub, "currency": "RUB"},
         # capture=true — списываем сразу, без двухстадийности: товар цифровой
-        # и всегда «в наличии» (см. OrderStatus в app/models.py).
+        # и всегда «в наличии» (см. OrderStatus в app/models/order.py).
         "capture": True,
         "confirmation": {"type": "redirect", "return_url": return_url},
         "description": description[:128],
