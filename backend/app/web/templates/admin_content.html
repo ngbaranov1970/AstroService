@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Посты сообщества{% endblock %}
+
+{# Ширина админки: текст поста в узкой колонке под чтение теряет вид, а
+   рядом с ним ещё и метаданные строкой. #}
+{% block body_class %}admin{% endblock %}
+
+{% block head_extra %}
+  {% if refresh %}
+    {# Перезагрузка, пока идёт прогон. Meta, а не JS: скрипты в этом стенде
+       не используются вовсе (см. base.html). Значение снимается в
+       routes/admin.py, как только прогон закончился. #}
+    <meta http-equiv="refresh" content="{{ refresh }}">
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <h1>Посты сообщества</h1>
+  <p class="lead">
+    Неделя с {{ start.strftime("%d.%m.%Y") }}, {{ days }} дней ·
+    постов в очереди: {{ items | length }}
+  </p>
+
+  {# --- Прогон ----------------------------------------------------------- #}
+
+  <div class="card run">
+    {# div, а не p: внутри форма, а форму внутри абзаца браузер закрывает
+       по-своему и вёрстка разъезжается. #}
+    <div class="toolbar">
+      {# POST, а не ссылка: запуск тратит деньги, а ссылку браузер может
+         дёрнуть сам — предзагрузкой или из истории. #}
+      <form method="post" action="/admin/content/generate">
+        <button type="submit" {% if run and run.running %}disabled{% endif %}>
+          Сгенерировать неделю
+        </button>
+      </form>
+
+      {% if run and run.running %}
+        <span class="waiting">
+          Идёт с {{ run.started_at | msk("%H:%M") }} — минут десять,
+          страница обновляется сама.
+        </span>
+      {% elif run and run.error %}
+        <span class="error" role="alert">{{ run.error }}</span>
+      {% elif run %}
+        <span class="muted">
+          Закончен в {{ run.finished_at | msk("%H:%M") }},
+          постов на неделе: {{ run.posts }}.
+        </span>
+      {% else %}
+        <span class="muted">
+          Готовое не переписывается: прогон дописывает недостающее и за
+          написанное второй раз не платит.
+        </span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# --- Очередь ---------------------------------------------------------- #}
+
+  {% if items %}
+    {% for item in items %}
+      <section class="post">
+        <h2>
+          {{ item.post.target_date.strftime("%d.%m") }} ·
+          {{ item.post.title or "Гороскоп дня" }}
+        </h2>
+
+        <p class="meta-line muted">
+          {{ item.post.kind.value }}
+          {% if item.post.event_key %} · {{ item.post.event_key }}{% endif %}
+          · {{ item.post.prompt_version }}
+          · {{ item.words }} сл.
+          · {{ item.post.tokens_completion }} ток.
+          · сгенерирован {{ item.post.created_at | msk }}
+        </p>
+
+        {# readonly, а не disabled: disabled-поле нельзя выделить, а копировать
+           надо именно выделением — кнопка «скопировать» потребовала бы JS. #}
+        <textarea class="post-text" readonly rows="14"
+                  aria-label="Текст поста">{{ item.text }}</textarea>
+      </section>
+    {% endfor %}
+  {% else %}
+    <p class="muted">
+      На эту неделю ещё ничего не сгенерировано.
+    </p>
+  {% endif %}
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Тексты копируются отсюда в отложку сообщества руками:
+  публиковать через API мы не можем.
+{% endblock %}

@@ -583,3 +583,47 @@ body.admin .site-footer { max-width: 1200px; }
 
 /* Расчёт внутри колонки: отступ в 40px разрывал бы карточку пополам. */
 .column .calc { margin-top: 24px; font-size: 13px; }
+
+/* --- Посты сообщества --------------------------------------------------- */
+
+.run { margin-bottom: 32px; }
+
+/* Кнопка внутри панели — по ширине текста, а не во всю строку, как в форме. */
+.run form { margin: 0; }
+.run .waiting,
+.run .error { margin: 0; padding: 0; border: 0; }
+
+.post {
+  padding-top: 24px;
+  margin-bottom: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.post h2 { margin: 0 0 4px; font-size: 18px; }
+
+.meta-line {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+/* Поле только для копирования: моноширинный шрифт здесь не нужен — текст
+   вычитывают глазами, а не сверяют по колонкам. */
+.post-text {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  /* Тянуть можно только вниз: горизонтальное растягивание ломает колонку. */
+  resize: vertical;
+}
+
+.post-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

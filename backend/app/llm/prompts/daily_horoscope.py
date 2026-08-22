@@ -16,8 +16,6 @@ SYSTEM (роль и тон), build_user() (данные конкретного �
 from __future__ import annotations
 
 import json
-import shutil
-import textwrap
 from datetime import date
 
 from astro_core.natal import SIGNS_RU
@@ -149,24 +147,19 @@ def parse(text: str) -> tuple[str, list[dict[str, str]]] | None:
     return intro, [{"sign": s, "text": by_sign[s]} for s in SIGN_ORDER]
 
 
-def _wrap(body: str) -> str:
-    """Переносит абзац по ширине терминала: 70 слов одной строкой не читаются."""
-    width = min(shutil.get_terminal_size(fallback=(88, 24)).columns, 100)
-    return textwrap.fill(body.strip(), width=width)
-
-
 def render(text: str) -> str:
-    """JSON-ответ модели → читаемый текст для терминальной вычитки промпта.
+    """JSON-ответ модели → готовый к вставке пост: вступление и знаки по порядку.
 
-    Рядом со знаком печатаем длину в словах: в SYSTEM заданы рамки 55–75 слов,
-    и они расходятся первыми при правке промпта.
+    Строки не переносятся и служебных пометок нет: этот текст копируют из
+    /admin/content в отложку VK как есть, и любой перенос уехал бы в пост.
+    Брак разбора отдаём как есть — за текст заплачено.
     """
     parsed = parse(text)
     if parsed is None:
         return text
     intro, signs = parsed
-    blocks = [_wrap(intro)]
-    blocks += [
-        f"## {s['sign']}  ({len(s['text'].split())} сл.)\n\n{_wrap(s['text'])}" for s in signs
-    ]
-    return "\n\n\n".join(blocks)
+    # Знак и его абзац одной группой: в ленте VK заголовок в отдельной строке
+    # — единственный способ разделить двенадцать кусков без разметки.
+    blocks = [intro.strip()]
+    blocks += [f"{s['sign']}\n{s['text'].strip()}" for s in signs]
+    return "\n\n".join(blocks)

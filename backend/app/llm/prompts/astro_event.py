@@ -9,16 +9,13 @@
 продуктовое решение, ему место в app/services/content.py рядом с решением
 «сколько постов в неделю».
 
-Ответ — JSON из заголовка и тела: владелец читает очередь постов прямо из
-базы (docs/vk-moderation.md, экрана в админке нет), и по сплошному тексту
-пачку глазами не пробежать.
+Ответ — JSON из заголовка и тела: очередь постов читают списком на
+/admin/content, и по сплошному тексту пачку глазами не пробежать.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
-import textwrap
 from datetime import date, datetime
 
 VERSION = "astro_event_v1"
@@ -153,18 +150,16 @@ def parse(text: str) -> dict[str, str] | None:
 
 
 def render(text: str) -> str:
-    """JSON-ответ модели → читаемый пост для терминальной вычитки промпта.
+    """JSON-ответ модели → готовый к вставке пост: заголовок, пустая строка, тело.
 
-    Длина в словах печатается рядом с заголовком: рамки 180–260 слов заданы в
-    SYSTEM и расходятся первыми при правке промпта.
+    Строки не переносятся и служебных пометок нет: этот текст копируют из
+    /admin/content в отложку VK как есть, и любой перенос уехал бы в пост.
+    Брак разбора отдаём как есть — за текст заплачено.
     """
     post = parse(text)
     if post is None:
         return text
-    width = min(shutil.get_terminal_size(fallback=(88, 24)).columns, 100)
-    body = "\n\n".join(
-        textwrap.fill(par.strip(), width=width)
-        for par in post["body"].split("\n")
-        if par.strip()
-    )
-    return f"## {post['title']}  ({len(post['body'].split())} сл.)\n\n{body}"
+    # Абзацы разделяем пустой строкой: модель шлёт их одиночным переводом
+    # строки, а в ленте VK такой текст слипается в полотно.
+    body = "\n\n".join(par.strip() for par in post["body"].split("\n") if par.strip())
+    return f"{post['title']}\n\n{body}"

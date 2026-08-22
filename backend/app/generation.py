@@ -1,4 +1,4 @@
-"""Фоновая генерация разборов и её состояние.
+"""Фоновые генерации и их состояние: разборы по кнопке и контент сообщества.
 
 Отдельный файл, а не часть маршрутов, по границе «что это вообще такое»:
 маршруты — про HTTP (разобрать форму, отдать шаблон, увести редиректом),
@@ -30,18 +30,23 @@
    app/services/reports.py). Значит по базе «генерация идёт» и «генерация
    упала» неразличимы — а человеку разница видна сразу: в первом случае
    надо ждать, во втором нажать кнопку ещё раз.
+
+Вторым жильцом сюда въехал прогон недели контента (кнопка на /admin/content):
+работа той же формы — минуты ожидания, ответ уходит раньше результата, — и
+тот же довод про один реестр на процесс.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import BackgroundTasks
 
 from app.db import get_sessionmaker
 from app.models import Chart, ReportType
-from app.services import charts, events, reports, users
+from app.services import charts, content, events, reports, users
 
 logger = logging.getLogger(__name__)
 
@@ -225,3 +230,85 @@ def _failure(exc: reports.ReportError) -> tuple[str, str]:
     # ReportError: пообещать человеку разбор, которого нет, хуже, чем сказать
     # «ещё не готов».
     return NOT_SUPPORTED, "Этот вид разбора ещё не готов."
+
+
+# --- Контент сообщества ----------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ContentRun:
+    """Прогон недели контента: идёт ли он и чем кончился прошлый.
+
+    Времена в UTC — их печатает шаблон фильтром `| msk`.
+    """
+
+    running: bool
+    started_at: datetime
+    finished_at: datetime | None = None
+    # Сколько постов стоит на неделе после прогона — вместе с написанными
+    # раньше: generate_week возвращает всю пачку, а не только новое.
+    posts: int = 0
+    error: str | None = None
+
+
+# Прогон один на процесс, поэтому ячейка, а не словарь: контент ничей, и
+# ключевать его нечем — «вторая неделя параллельно первой» смысла не имеет.
+_CONTENT_RUN: ContentRun | None = None
+
+
+def content_state() -> ContentRun | None:
+    """Что известно про прогон недели. None — в этом процессе не запускали."""
+    return _CONTENT_RUN
+
+
+def schedule_content(background: BackgroundTasks) -> bool:
+    """Поставить прогон недели в очередь. False — прогон уже идёт, второй не ставим.
+
+    Это и есть замок от двойного нажатия: страница ждёт минут десять, за это
+    время кнопку нажмут ещё раз, а второй прогон — второй счёт от DeepSeek
+    (кеш спасает только уже дописанные посты, идущие сейчас в базе ещё нет).
+
+    Проверка и запись идут без `await` между собой, поэтому двум запросам
+    разъехаться негде: asyncio не прерывает корутину посередине.
+    """
+    global _CONTENT_RUN
+    if _CONTENT_RUN is not None and _CONTENT_RUN.running:
+        return False
+
+    _CONTENT_RUN = ContentRun(running=True, started_at=datetime.now(UTC))
+    background.add_task(_run_content)
+    return True
+
+
+async def _run_content() -> None:
+    """Прогнать неделю контента. Выполняется после ответа браузеру, минут десять.
+
+    Сюда долетают только аварии уровня «эфемериды не считаются» или «база
+    отвалилась»: ошибку отдельного поста generate_week гасит сама и идёт
+    дальше, иначе падение на девятом вызове выбросило бы восемь оплаченных
+    текстов.
+    """
+    global _CONTENT_RUN
+    # Запись уже стоит — её поставил schedule_content до ответа браузеру.
+    started = _CONTENT_RUN.started_at if _CONTENT_RUN else datetime.now(UTC)
+
+    async with get_sessionmaker()() as session:
+        try:
+            posts = await content.generate_week(session)
+            _CONTENT_RUN = ContentRun(
+                running=False,
+                started_at=started,
+                finished_at=datetime.now(UTC),
+                posts=len(posts),
+            )
+        except Exception:
+            await session.rollback()
+            # exc_info обязателен: страница скажет только «не дошёл до конца»,
+            # а больше следа не останется — ответ давно отправлен.
+            logger.exception("Прогон недели контента провалился")
+            _CONTENT_RUN = ContentRun(
+                running=False,
+                started_at=started,
+                finished_at=datetime.now(UTC),
+                error="Прогон не дошёл до конца — смотрите лог.",
+            )

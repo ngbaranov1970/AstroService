@@ -1,24 +1,31 @@
-"""Маршруты админки стенда: что сгенерировано и чем один текст лучше другого.
+"""Маршруты админки стенда: что сгенерировано, чем один текст лучше другого
+и очередь постов сообщества.
 
 Отдельный роутер, а не секция в router.py: `require_admin` висит на всём
 APIRouter сразу, поэтому забыть охрану на новом маршруте невозможно — а за
 страницами имена, даты и места рождения живых людей. Выборки живут в
-app/services/admin.py, здесь только разбор параметров и шаблон.
+app/services/admin.py и app/services/content.py, здесь только разбор
+параметров и шаблон.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
+from app import generation
 from app.db import get_session
 from app.services import admin as admin_service
-from app.services import reports
+from app.services import content, reports
 from app.web.deps import require_admin
 from app.web.templating import templates
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/admin",
@@ -36,6 +43,15 @@ LIST_LIMIT = 200
 
 # Сколько текстов помещается рядом, чтобы колонка осталась читаемой.
 MAX_COMPARE = 4
+
+# Период автообновления страницы контента, пока идёт прогон. Реже, чем 5 с у
+# страницы разбора: там ждут минуту, здесь — минут десять, и лишние сотни
+# перезагрузок с полным SELECT пачки ни к чему.
+CONTENT_REFRESH_SECONDS = 15
+
+# Горизонт пачки: те же 7 дней, что генерирует прогон. Меньше — на экране
+# не видно всей недели, больше — пусто, дальше ничего не сгенерировано.
+CONTENT_DAYS = 7
 
 
 @router.get("")
@@ -81,6 +97,55 @@ async def compare(
             "missing": len(report_ids) - len(items),
         },
     )
+
+
+@router.get("/content")
+async def content_page(request: Request, session: SessionDep) -> Response:
+    """Пачка постов на неделю и кнопка прогона.
+
+    Только читает: прогон длится минут десять и держал бы ответ всё это
+    время — тем же порядком, что на странице разбора.
+    """
+    run = generation.content_state()
+    posts = await content.list_week(session, days=CONTENT_DAYS)
+
+    return templates.TemplateResponse(
+        request,
+        "admin_content.html",
+        {
+            "items": [
+                # Текст готовим здесь: шаблон не должен знать, что ответ
+                # модели лежит в базе JSON'ом и разбирает его модуль промпта.
+                # Длина в словах — для калибровки промпта (рамки заданы в его
+                # SYSTEM), поэтому она рядом с текстом, а не внутри него.
+                {"post": post, "text": text, "words": len(text.split())}
+                for post, text in ((p, content.render(p)) for p in posts)
+            ],
+            "run": run,
+            "start": content.today_msk(),
+            "days": CONTENT_DAYS,
+            # Пока прогон идёт, страница перечитывает себя сама; как только
+            # он кончился — перестаёт, иначе экран сам себе создаёт поток
+            # запросов на всю ночь.
+            "refresh": CONTENT_REFRESH_SECONDS if run is not None and run.running else None,
+        },
+    )
+
+
+@router.post("/content/generate")
+async def content_generate(background: BackgroundTasks) -> Response:
+    """Кнопка «сгенерировать неделю»: ставит прогон в очередь и уводит обратно.
+
+    Отказ замка (прогон уже идёт) отдельно не показываем: страница и так
+    напишет, что прогон идёт с такого-то времени.
+    """
+    if not generation.schedule_content(background):
+        logger.info("Прогон контента уже идёт — второй запуск отклонён")
+
+    # 303, а не 302: браузер обязан перейти GET'ом, иначе «обновить» на
+    # странице переотправит форму и попробует запустить прогон снова.
+    # Токен сессии не дописываем — в админку из VK не ходят, там Basic.
+    return RedirectResponse("/admin/content", status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _parse_ids(raw: list[str] | None) -> list[int]:
