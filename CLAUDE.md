@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Состояние проекта
 
-Backend работает, начата разработка frontend (Vue 3 + TypeScript). Расчётное ядро натальной карты готово и сверено (geo.py, natal.py, золотые тесты); подробный статус и следующий шаг — в [docs/progress.md](docs/progress.md), читать его первым. Контекст проекта — в двух документах:
+Backend работает, начата разработка frontend (Vue 3 + TypeScript). Расчётное ядро натальной карты и календарь астрособытий готовы и сверены (geo.py, natal.py, transits.py, золотые тесты); подробный статус и следующий шаг — в [docs/progress.md](docs/progress.md), читать его первым. Хронология («когда и почему так сделали») вынесена в [docs/progress-journal.md](docs/progress-journal.md) — туда заглядывать, когда нужна причина старого решения, а не текущее состояние. Контекст проекта — в двух документах:
 
 - [docs/astro-context.md](docs/astro-context.md) — контекст: рынок, ключевые решения, платформенные ограничения, стек
 - [docs/astro-project-plan.md](docs/astro-project-plan.md) — план MVP: архитектура, модель данных, API, план по неделям

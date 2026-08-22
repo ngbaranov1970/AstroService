@@ -33,7 +33,7 @@
 | `orders` | id, user_id, report_type, chart_ids, amount, provider_id, status, paid_at |
 | `events` | id, user_id, name, props JSONB, ts — своя аналитика воронки |
 | `horoscopes` | sign, period, period_key (уникальная тройка), content — гороскоп на знак, а не на человека: для Овна он один на всех |
-| `content_posts` | id, kind (daily/event/portrait/celebrity/invite), publish_at, body, status (draft/approved/published), vk_post_id — очередь постов сообщества |
+| `posts` | id, kind (daily_horoscope / astro_event / заготовки сетки), target_date, event_key, prompt_version, title, text, паспорт генерации — очередь постов сообщества. СДЕЛАНО 2026-08-22, миграция `c7a41d6b90f2`. Отличия от первоначального замысла: адрес строки включает само событие (иначе в сутки помещался бы ровно один пост), а `status` и `vk_post_id` не заведены — публикация ручная, заполнять их нечем. Подробности — в [db-schema.md](db-schema.md) |
 
 Флаг «разрешил сообщения сообщества» живёт в `users`: это главная метрика
 Mini App после отказа модерации (см. [vk-moderation.md](vk-moderation.md)).
@@ -120,7 +120,7 @@ Mini App после отказа модерации (см. [vk-moderation.md](vk
 | Модуль | Отвечает за | Не знает про |
 |---|---|---|
 | `astro_core/transits.py` | транзиты на дату, календарь событий (ретроградности, лунации, затмения, входы в знаки) | VK, LLM, базу |
-| `app/services/content.py` | тексты постов из расчёта, очередь `content_posts` | VK |
+| `app/services/content.py` | тексты постов из расчёта, отбор событий, очередь `posts` | VK |
 | `app/vk/community.py` | `messages.send`, Callback API сообщества (`message_allow` / `message_deny`) | астрологию |
 
 Правило границы то же, что у `bot/`: слой публикации знает про VK API и
@@ -152,7 +152,7 @@ Mini App после отказа модерации (см. [vk-moderation.md](vk
 
 Вклинивается между ядром и Mini App: верстать фронт по неустоявшимся
 текстам — значит верстать дважды. Подробности в
-[progress.md](progress.md), «Следующие шаги».
+[progress-journal.md](progress-journal.md), «Хронология шагов».
 
 - [x] `services/users.py` (`get_or_create`), `services/reports.py` (кеш + лимит)
 - [x] `app/web/` на Jinja2: форма → выбор города → страница разбора
