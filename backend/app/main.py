@@ -27,6 +27,7 @@ from app.web.routes.admin import router as admin_router
 from app.web.routes.legal import router as legal_router
 from app.web.routes.pay import router as pay_router
 from app.web.routes.stand import router as stand_router
+from app.web.routes.vk_callback import router as vk_callback_router
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,10 @@ def create_app() -> FastAPI:
     # Страницы оплаты и вебхук ЮKassa. Своей авторизации у них нет
     # намеренно: платят из внешнего браузера, где нашей cookie не бывает.
     app.include_router(pay_router)
+    # События сообщества VK (кто разрешил и кто запретил писать). Стоит рядом
+    # с оплатой по той же причине: приходит с чужого сервера, нашей cookie
+    # там нет, подлинность проверяется общим секретом внутри самого роутера.
+    app.include_router(vk_callback_router)
     # Оферта, цены и реквизиты. Подключать обязательно, даже если стенд
     # выключат: импорт этого модуля кладёт `merchant` в шаблоны, а он
     # печатается в подвале КАЖДОЙ страницы.

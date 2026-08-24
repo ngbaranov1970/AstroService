@@ -138,6 +138,28 @@ class Settings(BaseSettings):
     # раз внутри Mini App их нет (docs/vk-moderation.md).
     vk_group_id: int | None = None
 
+    # --- Сообщения от сообщества VK ---------------------------------------
+    # Ключ доступа сообщества (Управление → Работа с API → Ключи доступа),
+    # строка вида "vk1.a...". Им мы ДЕЙСТВУЕМ от имени группы: шлём
+    # messages.send. Не путать с vk_secure_key выше — тем мы, наоборот,
+    # проверяем чужие утверждения о личности, и подписывать им запросы к API
+    # нельзя. Права ключа выданы точечно: без «Сообщения» отправка вернёт
+    # ошибку 15, а не откажет на нашей стороне.
+    vk_group_secure_key: SecretStr | None = None
+
+    # Секретный ключ Callback API из настроек сервера в кабинете сообщества.
+    # VK кладёт его в поле `secret` каждого события, мы сверяем и молча
+    # отбрасываем чужое: адрес /vk/callback открыт всему интернету, подписи
+    # у события нет, и этот ключ — единственное, что отличает VK от любого,
+    # кто узнал адрес.
+    vk_callback_secret: SecretStr | None = None
+
+    # Строка, которую кабинет требует вернуть на событие type=confirmation
+    # (у нас "e4164fb0"). Не секрет: она одноразовая по смыслу — VK шлёт
+    # confirmation только при нажатии «Подтвердить». Хранится в настройках,
+    # потому что своя строка у каждого сервера и у каждого сообщества.
+    vk_callback_confirmation: str | None = None
+
     # --- ЮKassa -----------------------------------------------------------
     # Идентификатор магазина и секретный ключ из личного кабинета: вместе они
     # HTTP Basic Auth к api.yookassa.ru. shop_id строкой, хотя значение
@@ -159,6 +181,9 @@ class Settings(BaseSettings):
         "vk_app_id",
         "vk_secure_key",
         "vk_group_id",
+        "vk_group_secure_key",
+        "vk_callback_secret",
+        "vk_callback_confirmation",
         "session_secret",
         "yookassa_shop_id",
         "yookassa_secret_key",
@@ -192,6 +217,32 @@ class Settings(BaseSettings):
         ошибку уже после успешного входа.
         """
         return self.vk_secure_key is not None and self.session_secret is not None
+
+    @property
+    def vk_callback_enabled(self) -> bool:
+        """Готов ли адрес /vk/callback принимать события сообщества.
+
+        Нужны обе половины: строка подтверждения — чтобы кабинет вообще
+        принял сервер, секрет — чтобы отличить события VK от чужих. Без
+        секрета обработчик отвечает 503 и не подтверждается: подтверждённый
+        адрес без проверки — открытая ручка, которой можно наотписывать
+        людей от рассылки.
+        """
+        return (
+            self.vk_callback_secret is not None
+            and self.vk_callback_confirmation is not None
+        )
+
+    @property
+    def vk_messaging_enabled(self) -> bool:
+        """Можно ли слать сообщения от имени сообщества.
+
+        Одного ключа мало: адресат в messages.send задаётся идентификатором
+        пользователя VK, а группу, от чьего имени идёт письмо, мы проверяем
+        по vk_group_id — событие Callback от чужого сообщества с нашим
+        секретом иначе попало бы в ту же рассылку.
+        """
+        return self.vk_group_secure_key is not None and self.vk_group_id is not None
 
     @property
     def payments_enabled(self) -> bool:

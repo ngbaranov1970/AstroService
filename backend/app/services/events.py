@@ -101,6 +101,14 @@ GROUP_OFFER_SHOWN = "group_offer_shown"
 # что приложение может добыть (docs/vk-moderation.md).
 GROUP_MESSAGES_ALLOWED = "group_messages_allowed"
 
+# Запретил сообществу писать: нажал «запретить» или отказ 901 при доставке.
+# Пара к предыдущему — без неё число разрешивших растёт монотонно и врёт:
+# отток по этому каналу виден только разностью двух счётчиков.
+GROUP_MESSAGES_DENIED = "group_messages_denied"
+
+# Написал в сообщество сам. Это и согласие на ответ, и сигнал живости.
+GROUP_MESSAGE_RECEIVED = "group_message_received"
+
 # Оценка разбора тестером: 1–5 и необязательный комментарий.
 FEEDBACK = "feedback"
 
