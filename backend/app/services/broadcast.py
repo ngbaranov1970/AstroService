@@ -88,7 +88,10 @@ def sun_sign(calc: dict) -> str | None:
     Строки здесь те же, что в daily_horoscope.SIGN_ORDER: обе стороны берут
     их из astro_core.natal.SIGNS_RU, поэтому словарь-переходник не нужен.
     """
-    for planet in calc.get("planets", []):
+    # Натальный расчёт лежит под ключом natal — рядом с ним встанут matrix и
+    # eastern, когда их посчитают (models/chart.py). Отсутствие ключа читаем
+    # как «знака нет»: рассылка такую карту пропустит, а не упадёт.
+    for planet in (calc.get("natal") or {}).get("planets") or []:
         if planet.get("name") == "Sun":
             return planet.get("sign_ru")
     return None
