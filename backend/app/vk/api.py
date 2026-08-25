@@ -189,7 +189,11 @@ async def _send_chunk(
 ) -> list[SendResult]:
     """Один вызов messages.send на пачку до ста человек."""
     data: dict[str, Any] = {
-        "user_ids": ",".join(str(uid) for uid in user_ids),
+        # peer_ids, а не user_ids: последний VK не принимает с версии 5.138
+        # («user_ids is deprecated», ошибка 100), а мы ходим на 5.199. Для
+        # личных сообщений peer_id совпадает с идентификатором человека, и
+        # параметр доступен только ключу сообщества — у нас он и есть.
+        "peer_ids": ",".join(str(uid) for uid in user_ids),
         "message": text,
         "random_id": random_id,
         # Упоминания вида @id123 в тексте не подсвечиваем: текст пишет LLM,
@@ -202,7 +206,7 @@ async def _send_chunk(
     payload = await _request("messages.send", data)
 
     # На пачку VK отвечает массивом объектов, по одному на адресата. Иногда
-    # (например, когда в user_ids один человек) — просто числом message_id.
+    # (замечено на одном адресате) — просто числом message_id.
     if isinstance(payload, int):
         return [SendResult(user_id=user_ids[0], message_id=payload)]
 
