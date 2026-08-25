@@ -22,6 +22,7 @@ from app.db import dispose_engine
 from app.llm import client as llm_client
 from app.logging_setup import setup_logging
 from app.payments import yookassa
+from app.vk import api as vk_api
 from app.web.deps import install_session_cookie
 from app.web.routes.admin import router as admin_router
 from app.web.routes.legal import router as legal_router
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Оба закрываются молча, если ни одного запроса не было.
     await llm_client.close_client()
     await yookassa.close_client()
+    await vk_api.close_client()
 
 
 def create_app() -> FastAPI:
