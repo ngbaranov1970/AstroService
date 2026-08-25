@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Platform, User
+from app.models import Chart, Platform, User
 
 
 async def _find(
@@ -134,6 +134,30 @@ def mark_vk_messages_allowed(user: User) -> bool:
     if user.vk_messages_allowed_at is not None:
         return False
     user.vk_messages_allowed_at = datetime.now(UTC)
+    return True
+
+
+def set_primary_chart(user: User, chart: Chart) -> bool:
+    """Отметить карту как собственную карту пользователя; True — если сменилась.
+
+    По ней рассылка берёт знак Солнца, поэтому карта обязана принадлежать
+    этому же человеку: ссылка /r/<token> пересылаема, и без проверки своей
+    можно было бы назначить чужую карту. Чужая — ValueError, это ошибка
+    вызывающего, а не выбор пользователя.
+
+    Первую карту проставляет сам сервис карт (charts._set_primary_if_first);
+    эта функция — про осознанную смену, когда карт несколько.
+
+    Синхронная, в базу не ходит: правка уедет с ближайшим flush сессии.
+    """
+    if chart.user_id != user.id:
+        raise ValueError(
+            f"Карта {chart.id} принадлежит пользователю {chart.user_id}, "
+            f"а не {user.id}"
+        )
+    if user.primary_chart_id == chart.id:
+        return False
+    user.primary_chart_id = chart.id
     return True
 
 

@@ -309,6 +309,31 @@ button:hover,
   margin-top: 2px;
 }
 
+/* Отметка «моя карта» и кнопка «это я». Кнопка здесь перебивает общий стиль
+   button (во всю ширину, акцентный фон) — в строке списка такая выглядит
+   как главное действие страницы, хотя это выбор между равными картами. */
+.charts .primary-mark,
+.charts button {
+  display: inline-block;
+  width: auto;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.charts .primary-mark {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.charts button {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
 /* --- Страница разбора -------------------------------------------------- */
 
 h3 { font-size: 16px; margin: 24px 0 8px; }

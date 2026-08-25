@@ -161,7 +161,13 @@ class Chart(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    user: Mapped[User] = relationship(back_populates="charts", lazy="raise_on_sql")
+    # foreign_keys обязателен: после появления users.primary_chart_id между
+    # таблицами ДВА внешних ключа, и без указания SQLAlchemy не знает, по
+    # какому строить связь, — падает AmbiguousForeignKeysError при первом же
+    # запросе. Здесь связь всегда по владельцу карты.
+    user: Mapped[User] = relationship(
+        back_populates="charts", foreign_keys=[user_id], lazy="raise_on_sql"
+    )
     reports: Mapped[list[Report]] = relationship(
         back_populates="chart",
         cascade="all, delete-orphan",

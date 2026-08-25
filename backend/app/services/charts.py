@@ -18,11 +18,11 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from importlib.metadata import version
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chart
+from app.models import Chart, User
 from astro_core.geo import City, search_cities, tz_at
 from astro_core.natal import compute_natal
 
@@ -183,6 +183,8 @@ async def create_chart(
         # следующий запрос. С савпоинтом откатывается только сама вставка.
         async with session.begin_nested():
             session.add(chart)
+        # Выход из savepoint делает flush, то есть chart.id уже настоящий.
+        await _set_primary_if_first(session, user_id, chart.id)
         return chart
     except IntegrityError:
         existing = await _find_by_hash(session, user_id, input_hash)
@@ -191,6 +193,24 @@ async def create_chart(
         # Ошибка не про дубль карты (например, user_id несуществующий) —
         # глушить нельзя, это ошибка в коде вызывающего.
         raise
+
+
+async def _set_primary_if_first(
+    session: AsyncSession, user_id: int, chart_id: int
+) -> None:
+    """Первую карту человека отметить как его собственную.
+
+    Условие «признак пуст» стоит в самом UPDATE, а не в коде: база проверяет
+    и пишет одной командой, и влезть между проверкой и записью нельзя.
+
+    Вторая и третья карты признак НЕ перебивают — иначе расчёт карты подруги
+    молча переключал бы человеку его собственный гороскоп в рассылке.
+    """
+    await session.execute(
+        update(User)
+        .where(User.id == user_id, User.primary_chart_id.is_(None))
+        .values(primary_chart_id=chart_id)
+    )
 
 
 async def get_chart(

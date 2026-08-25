@@ -78,6 +78,19 @@
             {% endif %}
             · {{ chart.place_name }}
           </span>
+
+          {# Своя карта отмечается, только когда карт несколько: по ней
+             рассылка берёт знак Солнца. При единственной карте выбирать
+             не из чего — она отмечена автоматически при расчёте. #}
+          {% if charts|length > 1 %}
+            {% if user and user.primary_chart_id == chart.id %}
+              <span class="primary-mark">моя карта</span>
+            {% else %}
+              <form method="post" action="{{ url('/r/' ~ chart.token ~ '/primary') }}">
+                <button type="submit">это я</button>
+              </form>
+            {% endif %}
+          {% endif %}
         </li>
       {% endfor %}
     </ul>

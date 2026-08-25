@@ -345,6 +345,24 @@ async def leave_feedback(
     return _redirect(request, f"/r/{token}?thanks=1")
 
 
+@router.post("/r/{token}/primary")
+async def set_primary_chart(
+    request: Request, token: str, user: UserDep, session: SessionDep
+) -> Response:
+    """Кнопка «это я» в списке карт: по какой карте слать гороскоп.
+
+    POST, а не ссылка: нажатие меняет данные, а GET выполнит любой
+    предзагрузчик браузера — признак сменился бы сам собой.
+    """
+    chart = await _chart_or_404(session, token)
+    if chart.user_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это чужая карта")
+
+    users_service.set_primary_chart(user, chart)
+    await session.commit()
+    return _redirect(request, "/")
+
+
 @router.post("/vk/messages-allowed", status_code=status.HTTP_204_NO_CONTENT)
 async def vk_messages_allowed(user: UserDep, session: SessionDep) -> Response:
     """Человек разрешил сообществу писать ему — запоминаем это у себя.

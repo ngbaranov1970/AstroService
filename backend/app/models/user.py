@@ -14,6 +14,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    ForeignKey,
     String,
     UniqueConstraint,
     func,
@@ -130,6 +131,23 @@ class User(Base):
     # быть джойном с orders, а не разбором JSONB в таблице-потоке.
     source: Mapped[str | None] = mapped_column(String(64))
 
+    # Карта САМОГО пользователя среди его карт. Нужна рассылке: гороскоп
+    # шлётся по знаку Солнца, а карт у человека бывает несколько — своя,
+    # мужа, подруги, — и угадывать «наверное, первая» значит однажды слать
+    # человеку чужой знак каждый день.
+    #
+    # Внешний ключ смотрит на charts, у которой ключ смотрит сюда: цикл в
+    # схеме допустим, потому что колонка nullable. Связи relationship
+    # намеренно нет — она заставила бы SQLAlchemy разрывать цикл через
+    # post_update, добавляя лишний UPDATE к созданию каждой карты. Знак для
+    # рассылки достаётся запросом, объект карты в этом месте не нужен.
+    #
+    # SET NULL, а не CASCADE: удаление карты гасит признак, но не уносит
+    # с собой пользователя.
+    primary_chart_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("charts.id", ondelete="SET NULL")
+    )
+
     # Тестировщику полный разбор открыт без оплаты — нужно для обкатки
     # в закрытой группе до запуска платежей.
     is_tester: Mapped[bool] = mapped_column(
@@ -217,6 +235,9 @@ class User(Base):
     # чтобы гасить их по одной — за каскад отвечает сама база (ondelete ниже).
     charts: Mapped[list[Chart]] = relationship(
         back_populates="user",
+        # Строкой, а не объектом колонки: Chart здесь импортирован только для
+        # проверки типов. Причина самого аргумента — в chart.py, у Chart.user.
+        foreign_keys="Chart.user_id",
         cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="raise_on_sql",
