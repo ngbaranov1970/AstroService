@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Рассылка{% endblock %}
+
+{# Та же широкая колонка, что на странице постов: письма читают целиком. #}
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  <h1>Рассылка гороскопа</h1>
+  <p class="lead">
+    {{ preview.target_date.strftime("%d.%m.%Y") }} ·
+    получателей сейчас: {{ preview.total }}
+    {% if preview.already_sent %}
+      · уже отправлено за этот день: {{ preview.already_sent }}
+    {% endif %}
+  </p>
+
+  {# --- Итог отправки ------------------------------------------------------
+     Показывается только после нажатия кнопки: это ответ на POST, а не
+     состояние экрана. #}
+
+  {% if report %}
+    <div class="card run">
+      <p>
+        Доставлено: <strong>{{ report.delivered }}</strong>,
+        отказов: <strong>{{ report.failed }}</strong>.
+      </p>
+      {% if report.errors %}
+        <p class="muted">
+          Коды отказов:
+          {% for code, count in report.errors.items() %}
+            {{ code }} — {{ count }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+          (901 — отозвал разрешение, снято автоматически;
+          900 — чёрный список; 902 — настройки приватности).
+        </p>
+      {% endif %}
+      {% if report.aborted %}
+        <p class="error" role="alert">
+          Рассылка оборвалась: {{ report.aborted }}.
+          Отправленное до обрыва записано, повтор его не задвоит.
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# --- Кнопка отправки --------------------------------------------------- #}
+
+  <div class="card run">
+    <div class="toolbar">
+      {# POST и здесь: письмо необратимо, а ссылку браузер дёргает сам. #}
+      <form method="post" action="/admin/broadcast/send">
+        <input type="hidden" name="day" value="{{ preview.target_date.isoformat() }}">
+        <button type="submit" {% if preview.problem %}disabled{% endif %}>
+          Разослать {{ preview.total }} письмам
+        </button>
+      </form>
+
+      {% if preview.problem %}
+        <span class="muted">{{ preview.problem }}</span>
+      {% else %}
+        <span class="muted">
+          Письмо уходит один раз на человека в день: повторное нажатие
+          никому не напишет второй раз.
+        </span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# --- Охват по знакам ---------------------------------------------------- #}
+
+  {% if preview.by_sign %}
+    <p class="meta-line muted">
+      {% for sign, count in preview.by_sign.items() %}
+        {{ sign }} — {{ count }}{% if not loop.last %} · {% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
+
+  {# --- Письма на вычитку -------------------------------------------------- #}
+
+  {% if preview.letters %}
+    <h2>Письма</h2>
+    {% for sign, letter in preview.letters.items() %}
+      <section class="post">
+        <h2>
+          {{ sign }}
+          <span class="muted">· получателей: {{ preview.by_sign.get(sign, 0) }}</span>
+        </h2>
+        <textarea class="post-text" readonly rows="12"
+                  aria-label="Письмо для знака {{ sign }}">{{ letter }}</textarea>
+      </section>
+    {% endfor %}
+  {% endif %}
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Письмо ведёт человека в Mini App кнопкой и ничего не
+  продаёт: платного внутри VK у нас нет.
+{% endblock %}

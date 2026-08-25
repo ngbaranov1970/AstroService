@@ -11,9 +11,10 @@ app/services/admin.py и app/services/content.py, здесь только раз
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
@@ -21,7 +22,7 @@ from starlette.responses import Response
 from app import generation
 from app.db import get_session
 from app.services import admin as admin_service
-from app.services import content, reports
+from app.services import broadcast, content, reports
 from app.web.deps import require_admin
 from app.web.templating import templates
 
@@ -146,6 +147,69 @@ async def content_generate(background: BackgroundTasks) -> Response:
     # странице переотправит форму и попробует запустить прогон снова.
     # Токен сессии не дописываем — в админку из VK не ходят, там Basic.
     return RedirectResponse("/admin/content", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/broadcast")
+async def broadcast_page(
+    request: Request,
+    session: SessionDep,
+    day: Annotated[str | None, Query()] = None,
+) -> Response:
+    """Экран рассылки: охват, двенадцать писем на вычитку и кнопка отправки."""
+    return _broadcast_response(request, await broadcast.preview(session, _parse_day(day)))
+
+
+@router.post("/broadcast/send")
+async def broadcast_send(
+    request: Request,
+    session: SessionDep,
+    day: Annotated[str | None, Form()] = None,
+) -> Response:
+    """Разослать гороскоп и показать итог тем же экраном.
+
+    Ответ страницей, а не редиректом (в отличие от кнопки контента): итог
+    рассылки — единственное место, где видны отказы по кодам, и после 303 он
+    бы потерялся. Повторная отправка по F5 безвредна: за этот день письмо уже
+    отмечено в events, и второй раз оно никому не уйдёт.
+    """
+    target_date = _parse_day(day)
+    try:
+        report = await broadcast.run(session, target_date)
+    except LookupError as e:
+        # Поста за день нет или он не разобрался — это состояние экрана,
+        # а не сбой: причину покажет сам preview.
+        logger.info("Рассылка за %s не запущена: %s", target_date, e)
+        return _broadcast_response(request, await broadcast.preview(session, target_date))
+
+    # Коммит здесь, а не в сервисе: письма уже ушли, и события об этом
+    # обязаны пережить ответ — иначе следующий запуск отправит их снова.
+    await session.commit()
+    return _broadcast_response(request, await broadcast.preview(session, target_date), report)
+
+
+def _broadcast_response(
+    request: Request,
+    preview: broadcast.Preview,
+    report: broadcast.BroadcastReport | None = None,
+) -> Response:
+    """Один шаблон на обе ручки: GET показывает его без отчёта, POST — с ним."""
+    return templates.TemplateResponse(
+        request,
+        "admin_broadcast.html",
+        {"preview": preview, "report": report},
+    )
+
+
+def _parse_day(raw: str | None) -> date:
+    """«2026-08-25» → дата; пусто или мусор → сегодня по Москве.
+
+    Мусор молча превращается в сегодня, как и в _parse_ids: опечатка в
+    адресе не должна ронять экран.
+    """
+    try:
+        return date.fromisoformat(raw) if raw else content.today_msk()
+    except ValueError:
+        return content.today_msk()
 
 
 def _parse_ids(raw: list[str] | None) -> list[int]:
