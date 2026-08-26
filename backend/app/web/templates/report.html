@@ -46,11 +46,12 @@
 
       {% if block.sections %}
         {% for part in block.sections %}
-          {% if part.title %}<h3>{{ part.title }}</h3>{% endif %}
+          {% if part.title %}<h3>{{ part.title | md }}</h3>{% endif %}
           {# Модель отдаёт сплошной текст с пустой строкой между абзацами;
-             без разбивки он слипается в нечитаемое полотно. #}
+             без разбивки он слипается в нечитаемое полотно. Фильтр md
+             дорисовывает жирный и экранирует остальное вместо автоэкранирования. #}
           {% for para in part.body.split("\n\n") %}
-            {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+            {% if para.strip() %}<p>{{ para.strip() | md }}</p>{% endif %}
           {% endfor %}
         {% endfor %}
 
@@ -136,17 +137,31 @@
   {% if in_vk() and vk_group_id() %}
     <section class="report group-offer"
              data-group-id="{{ vk_group_id() }}"
-             data-allow-url="{{ url('/vk/messages-allowed') }}">
+             data-allow-url="{{ url('/vk/messages-allowed') }}"
+             data-deny-url="{{ url('/vk/messages-denied') }}">
       <h2>Что дальше</h2>
-      {# Обещаем только то, что уже есть: рассылки пока нет, и «пришлём разбор
-         по вашей карте» повисло бы обещанием на недели. #}
-      <p>
-        Гороскоп дня и разборы важных дат — в нашем сообществе.
-        Разрешите сообщения, чтобы не пропустить.
-      </p>
+      {# Обещаем только то, что уже есть: гороскоп дня рассылается, разборы
+         важных дат — нет, и обещать их значило бы обещать на недели. #}
+      {% if messages_allowed %}
+        <p>Гороскоп дня приходит вам в личные сообщения.</p>
+      {% else %}
+        <p>
+          Гороскоп дня и жизнь сообщества — во ВКонтакте.
+          Разрешите сообщения, чтобы гороскоп приходил в личные.
+        </p>
+      {% endif %}
       <p class="group-buttons">
-        <button type="button" class="js-vk-join">Подписаться</button>
-        <button type="button" class="secondary js-vk-allow">Разрешить сообщения</button>
+        {# Подписан ли человек — знаем от groups.isMember. None значит «VK не
+           ответил»: тогда кнопка остаётся, лишний раз нажать не вредно. #}
+        {% if not group_joined %}
+          <button type="button" class="js-vk-join">Подписаться</button>
+        {% endif %}
+        {# Обе кнопки в разметке всегда, скрыта ненужная: JS меняет их местами
+           после нажатия, не перезагружая страницу. #}
+        <button type="button" class="secondary js-vk-allow"
+                {% if messages_allowed %}hidden{% endif %}>Разрешить сообщения</button>
+        <button type="button" class="secondary js-vk-deny"
+                {% if not messages_allowed %}hidden{% endif %}>Не присылать</button>
       </p>
       {# role=status: экранный диктор прочитает появившийся текст сам. #}
       <p class="muted js-vk-status" role="status"></p>

@@ -61,9 +61,9 @@
           </header>
 
           {% for part in entry.sections %}
-            {% if part.title %}<h3>{{ part.title }}</h3>{% endif %}
+            {% if part.title %}<h3>{{ part.title | md }}</h3>{% endif %}
             {% for para in part.body.split("\n\n") %}
-              {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+              {% if para.strip() %}<p>{{ para.strip() | md }}</p>{% endif %}
             {% endfor %}
           {% endfor %}
 

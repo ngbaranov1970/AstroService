@@ -11,12 +11,14 @@ app/web/routes/. Пока объект жил в роутере стенда, с
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
+from markupsafe import Markup, escape
 
 from app.config import get_settings
 from app.web.deps import in_vk, with_session
@@ -64,6 +66,25 @@ def _vk_group_id() -> int | None:
     return get_settings().vk_group_id
 
 
+# Жирный markdown: две звёздочки, текст, две звёздочки. DOTALL — модель
+# иногда переносит строку внутри выделения.
+_BOLD = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def md(value: str) -> Markup:
+    """Текст от модели → HTML, где `**жирный**` стал <strong>.
+
+    Разметку из значения по-прежнему экранируем — фильтр не отменяет защиту,
+    а добавляет ровно одну конструкцию поверх неё.
+
+    Заголовки `##` сюда не доходят: их снимают parse() модулей llm/prompts/.
+    """
+    # escape() отдаёт Markup, а re.sub на нём вернул бы обычную строку и
+    # уронил бы пометку «безопасно» — поэтому сначала str, Markup в конце.
+    text = _BOLD.sub(r"<strong>\1</strong>", str(escape(value)))
+    return Markup(text)
+
+
 def _msk(value: datetime | None, fmt: str = "%d.%m.%Y, %H:%M") -> str:
     """Момент времени в московской зоне; None → пустая строка."""
     if value is None:
@@ -75,3 +96,4 @@ templates.env.globals["url"] = _url
 templates.env.globals["in_vk"] = _in_vk
 templates.env.globals["vk_group_id"] = _vk_group_id
 templates.env.filters["msk"] = _msk
+templates.env.filters["md"] = md

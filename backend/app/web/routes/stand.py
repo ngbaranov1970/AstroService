@@ -26,9 +26,10 @@ from starlette.responses import Response
 from app import generation
 from app.config import get_settings
 from app.db import get_session
-from app.models import Chart, ReportType, User
+from app.models import Chart, Platform, ReportType, User
 from app.services import charts, events, orders, reports
 from app.services import users as users_service
+from app.vk import api as vk_api
 from app.web import forms
 from app.web.deps import (
     TESTER_QUERY_PARAM,
@@ -236,6 +237,8 @@ async def report_page(
             await events.log(session, name, user_id=user.id, chart_id=chart.id)
             await session.commit()
 
+    group_joined, messages_allowed = await _group_state(request, user)
+
     return templates.TemplateResponse(
         request,
         "report.html",
@@ -245,6 +248,10 @@ async def report_page(
             "natal": chart.calc["natal"],
             "is_owner": is_owner,
             "blocks": blocks,
+            # Состояние блока подписки: подписан ли на сообщество и разрешил
+            # ли писать. None у первого — «выяснить не удалось».
+            "group_joined": group_joined,
+            "messages_allowed": messages_allowed,
             # Когда всё готово, автообновление прекращается — иначе стенд сам
             # себе создаёт бесконечный поток запросов.
             "refresh": REFRESH_SECONDS if any(b["running"] for b in blocks) else None,
@@ -381,7 +388,44 @@ async def vk_messages_allowed(user: UserDep, session: SessionDep) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/vk/messages-denied", status_code=status.HTTP_204_NO_CONTENT)
+async def vk_messages_denied(user: UserDep, session: SessionDep) -> Response:
+    """Человек отказался от писем — гасим разрешение у себя.
+
+    Зовётся из браузера кнопкой «Не присылать». У VK Bridge обратного метода
+    к `VKWebAppAllowMessagesFromGroup` нет: на стороне VK разрешение
+    останется, но рассылка берёт получателей по нашему флагу — писать мы
+    перестанем сразу.
+
+    Тот же путь, что и у события message_deny из vk_callback.py: два входа
+    в одно и то же место, потому что отказаться можно и здесь, и в диалоге
+    с сообществом.
+    """
+    if users_service.mark_vk_messages_denied(user):
+        await events.log(session, events.GROUP_MESSAGES_DENIED, user_id=user.id)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # --- Внутренние помощники --------------------------------------------------
+
+
+async def _group_state(request: Request, user: User | None) -> tuple[bool | None, bool]:
+    """Состояние человека в сообществе: (подписан, разрешил писать).
+
+    Подписка — `None`, когда выяснять не у кого или VK не ответил; страница
+    в этом случае показывает кнопку «Подписаться», как показывала всем.
+    Разрешение — наш собственный флаг, он всегда известен точно.
+
+    Спрашиваем VK только внутри VK и только про опознанного человека: на
+    вебе блока подписки нет вовсе, и лишний сетевой вызов задерживал бы
+    страницу разбора ни за чем.
+    """
+    if user is None or not in_vk(request) or user.platform is not Platform.VK:
+        return None, False
+    messages_allowed = user.vk_messages_allowed_at is not None
+    joined = await vk_api.is_group_member(int(user.external_id))
+    return joined, messages_allowed
 
 
 def _redirect(request: Request, path: str) -> RedirectResponse:
