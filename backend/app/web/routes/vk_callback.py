@@ -129,6 +129,11 @@ async def vk_callback(request: Request, session: SessionDep) -> PlainTextRespons
         # им и открывается — VK такие сообщения принимает.
         if users.mark_vk_messages_allowed(user):
             await events.log(session, events.GROUP_MESSAGES_ALLOWED, user_id=user.id)
+        # Человек проявился — значит ни чёрного списка, ни запрета приватности
+        # больше нет: рассылка погасила его по коду 900/902, и вернуть в неё
+        # может только это место.
+        if users.clear_delivery_block(user):
+            logger.info("Callback VK: пользователь %s снова доступен для рассылки", user.id)
         if event_type == "message_new":
             await events.log(session, events.GROUP_MESSAGE_RECEIVED, user_id=user.id)
         logger.info("Callback VK: пользователь %s разрешил сообщения (%s)", user.id, event_type)

@@ -384,6 +384,10 @@ async def vk_messages_allowed(user: UserDep, session: SessionDep) -> Response:
     """
     if users_service.mark_vk_messages_allowed(user):
         await events.log(session, events.GROUP_MESSAGES_ALLOWED, user_id=user.id)
+    # Второй вход в ту же дверь, что message_allow в vk_callback.py: согласие
+    # означает, что чёрного списка и запрета приватности больше нет, а
+    # погашенный по коду 900/902 иначе в рассылку не вернётся.
+    users_service.clear_delivery_block(user)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

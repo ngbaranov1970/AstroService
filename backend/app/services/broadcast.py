@@ -21,7 +21,7 @@ import zlib
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.prompts import daily_horoscope
@@ -292,8 +292,14 @@ async def _record(
     target_date: date,
     sign: str,
 ) -> None:
-    """Разложить ответ VK в события и отчёт, погасив разрешение отказавшим."""
+    """Разложить ответ VK в события и отчёт, погасив тех, кому не доставить.
+
+    Гашения два, и они про разное: 901 снимает НАШЕ разрешение (вернётся
+    кнопкой «разрешить»), 900 и 902 отмечают недоставляемость — чёрный
+    список и настройки приватности на стороне человека.
+    """
     denied: list[int] = []
+    blocked: list[int] = []
     for result in results:
         person = by_vk_id.get(result.user_id)
         if person is None:
@@ -325,6 +331,8 @@ async def _record(
         )
         if code == vk_api.ERROR_NO_PERMISSION:
             denied.append(person.user_id)
+        elif code in vk_api.UNDELIVERABLE:
+            blocked.append(person.user_id)
 
     if denied:
         # Пакетным UPDATE, а не users.mark_vk_messages_denied по одному: та
@@ -335,3 +343,14 @@ async def _record(
         )
         for user_id in denied:
             await events.log(session, events.GROUP_MESSAGES_DENIED, user_id=user_id, code=901)
+
+    if blocked:
+        # Разрешение не трогаем: оно выдано и в силе, недоставляемость к нему
+        # отношения не имеет. Снимет отметку только сам человек, написав
+        # сообществу или разрешив сообщения заново (users.clear_delivery_block).
+        # Время ставит база (func.now()), а не процесс: часы приложения и
+        # сервера расходятся, а поле — метрика оттока по датам.
+        await session.execute(
+            update(User).where(User.id.in_(blocked)).values(bot_blocked_at=func.now())
+        )
+        logger.info("Рассылка за %s: погашено недоставляемых %s", target_date, len(blocked))

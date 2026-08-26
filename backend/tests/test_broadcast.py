@@ -169,17 +169,49 @@ async def test_run_otkaz_901_gasit_razreshenie(stub) -> None:
     assert _event_names(session) == ["broadcast_failed", "group_messages_denied"]
 
 
-async def test_run_otkaz_902_nichego_ne_gasit(stub) -> None:
-    """902 — настройки приватности человека, наше разрешение тут ни при чём."""
+@pytest.mark.parametrize("code", [900, 902])
+async def test_run_nedostavlyaemye_gasyat_dostavku(stub, code: int) -> None:
+    """900 (чёрный список) и 902 (приватность) ставят bot_blocked_at.
+
+    Событие group_messages_denied при этом НЕ пишется: наше разрешение
+    осталось в силе, погашена доставка, а это разные вещи.
+    """
     people = [broadcast.Recipient(user_id=1, vk_id=101, sign="Лев")]
-    stub(people, [vk_api.SendResult(user_id=101, error_code=902)])
+    stub(people, [vk_api.SendResult(user_id=101, error_code=code)])
     session = FakeSession()
 
     report = await broadcast.run(session, TODAY)
 
-    assert report.errors == {902: 1}
-    assert session.executed == []
+    assert report.errors == {code: 1}
+    assert len(session.executed) == 1
     assert _event_names(session) == ["broadcast_failed"]
+
+
+async def test_run_901_i_900_gasyat_raznoe(stub) -> None:
+    """Два кода в одной пачке разводятся по разным UPDATE, а не сливаются."""
+    people = [
+        broadcast.Recipient(user_id=1, vk_id=101, sign="Лев"),
+        broadcast.Recipient(user_id=2, vk_id=102, sign="Лев"),
+    ]
+    stub(
+        people,
+        [
+            vk_api.SendResult(user_id=101, error_code=901),
+            vk_api.SendResult(user_id=102, error_code=900),
+        ],
+    )
+    session = FakeSession()
+
+    report = await broadcast.run(session, TODAY)
+
+    assert report.errors == {901: 1, 900: 1}
+    # Два UPDATE: разрешение первому, недоставляемость второму.
+    assert len(session.executed) == 2
+    assert _event_names(session) == [
+        "broadcast_failed",
+        "broadcast_failed",
+        "group_messages_denied",
+    ]
 
 
 async def test_run_obryv_ne_teryaet_otmetok(stub) -> None:
