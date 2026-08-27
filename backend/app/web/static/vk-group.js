@@ -141,9 +141,24 @@
   allowButton?.addEventListener('click', async () => {
     say('Открываем окно VK…');
 
-    // Спрашиваем у клиента VK, знает ли он метод. Старое приложение на
-    // телефоне незнакомый метод не отклоняет, а просто молчит — и без этой
-    // проверки мы ждали бы ответа впустую все 15 секунд.
+    // ВРЕМЕННО, диагностика: клиент VK молчит на AllowMessagesFromGroup, и
+    // надо понять — не знает метода или знает, но игнорирует. supportsAsync
+    // спрашивает об этом сам клиент. Таймаут короткий: ответ либо приходит
+    // сразу, либо не придёт вовсе. Результат копим в строке, а не показываем
+    // сразу: следующий шаг перезаписал бы подпись, и прочитать её не успели бы.
+    let probe = 'группа ' + groupId;
+    try {
+      const known = await sendWithTimeout(
+        'VKWebAppSupportsAsync',
+        { method: 'VKWebAppAllowMessagesFromGroup' },
+        5000,
+      );
+      probe += ', метод известен: ' + JSON.stringify(known?.result);
+    } catch (error) {
+      probe += ', проверка метода: ' + describe(error);
+    }
+    say(probe + ' — открываем окно…');
+
     try {
       const supported = await sendWithTimeout(
         'VKWebAppAllowMessagesFromGroup',
@@ -152,11 +167,11 @@
       // Ответ VK — объект вида { result: true }. Пришло что угодно другое —
       // считаем, что разрешения нет.
       if (!supported?.result) {
-        say('VK не подтвердил разрешение. Попробуйте ещё раз.');
+        say(probe + ' — VK не подтвердил разрешение.');
         return;
       }
     } catch (error) {
-      say('Разрешение не выдано (' + describe(error) + ').');
+      say(probe + ' — не выдано (' + describe(error) + ').');
       return;
     }
 
