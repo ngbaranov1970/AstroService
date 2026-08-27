@@ -162,6 +162,13 @@
                 {% if messages_allowed %}hidden{% endif %}>Разрешить сообщения</button>
         <button type="button" class="secondary js-vk-deny"
                 {% if not messages_allowed %}hidden{% endif %}>Не присылать</button>
+        {# Запасной путь для встроенного браузера VK: там страница открыта не
+           как Mini App, Bridge не отвечает и кнопки выше мертвы. В самом
+           сообществе подписка и «написать» работают штатно, а разрешение
+           вернётся к нам через Callback API. Показывает ссылку только JS,
+           убедившись, что Bridge недоступен. #}
+        <a class="js-vk-club" href="https://vk.com/club{{ vk_group_id() }}"
+           hidden>Открыть сообщество</a>
       </p>
       {# role=status: экранный диктор прочитает появившийся текст сам. #}
       <p class="muted js-vk-status" role="status"></p>

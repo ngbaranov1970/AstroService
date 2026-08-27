@@ -40,7 +40,12 @@
   const joinButton = offer.querySelector('.js-vk-join');
   const allowButton = offer.querySelector('.js-vk-allow');
   const denyButton = offer.querySelector('.js-vk-deny');
+  const clubLink = offer.querySelector('.js-vk-club');
   const status = offer.querySelector('.js-vk-status');
+
+  // Разрешение уже выдано, если сервер нарисовал кнопку «Разрешить» скрытой:
+  // состояние он берёт из базы, а другого источника правды у страницы нет.
+  const allowedAlready = allowButton?.hidden === true;
 
   // Показать или спрятать кнопку. hidden — обычный атрибут HTML, браузер сам
   // не рисует элемент с ним; из JS он выглядит как свойство true/false.
@@ -79,6 +84,26 @@
     return;
   }
 
+  // Страница открыта не как Mini App, а во встроенном браузере VK: так
+  // бывает при переходе по ссылке из сообщения или карточки. Библиотека на
+  // странице есть, а отвечать её запросам некому — send уходит в никуда и
+  // висит вечно, включая служебный SupportsAsync (проверено 27.08.2026).
+  // isEmbedded смотрит на сам контейнер и отвечает сразу, ничего не спрашивая
+  // у приложения VK.
+  if (!vkBridge.isEmbedded()) {
+    // «Подписаться» и «Разрешить» умеют работать только через Bridge —
+    // прячем. «Не присылать» оставляем: ей нужен лишь fetch на наш сервер.
+    show(joinButton, false);
+    show(allowButton, false);
+    show(clubLink, true);
+    // Разрешение уже выдано (сервер нарисовал кнопку «Разрешить» скрытой) —
+    // звать в сообщество незачем, человек и так всё получает.
+    if (!allowedAlready) {
+      say('Напишите нам в сообществе — после этого гороскоп дня будет приходить в личные сообщения.');
+    }
+    return;
+  }
+
   // Обёртка над vkBridge.send с собственным ограничением по времени.
   // Зачем: клиент VK на отправленный метод может не ответить вовсе — тогда
   // промис не выполняется и не отклоняется, catch не срабатывает, и человек
@@ -96,22 +121,6 @@
         setTimeout(() => reject(new Error('VK не ответил')), ms);
       }),
     ]);
-
-  // Ошибку VK — в короткую строку для подписи под кнопками.
-  // Bridge кладёт подробности в error.error_data; там либо числовой
-  // error_code от API, либо текстовый error_reason вроде 'User denied'.
-  // ?. — «возьми свойство, только если слева не null»; ?? — «возьми правое
-  // значение, если левое null или undefined».
-  const describe = (error) => {
-    const data = error?.error_data ?? {};
-    const reason = data.error_reason ?? data.error_code ?? error?.message;
-    // reason иногда приходит объектом — тогда показываем его как JSON,
-    // иначе в подписи было бы бесполезное [object Object].
-    if (reason && typeof reason === 'object') {
-      return JSON.stringify(reason);
-    }
-    return reason ?? 'причина неизвестна';
-  };
 
   // Обработчик кнопки «Подписаться».
   // async перед функцией означает, что внутри можно писать await — как
@@ -133,7 +142,7 @@
     } catch (error) {
       // Сюда попадаем и когда человек нажал «Отмена» — это не поломка,
       // поэтому текст нейтральный.
-      say('Не получилось подписаться (' + describe(error) + ').');
+      say('Не получилось подписаться. Можно открыть сообщество вручную.');
     }
   });
 
@@ -141,37 +150,20 @@
   allowButton?.addEventListener('click', async () => {
     say('Открываем окно VK…');
 
-    // ВРЕМЕННО, диагностика: клиент VK молчит на AllowMessagesFromGroup, и
-    // надо понять — не знает метода или знает, но игнорирует. supportsAsync
-    // спрашивает об этом сам клиент. Таймаут короткий: ответ либо приходит
-    // сразу, либо не придёт вовсе. Результат копим в строке, а не показываем
-    // сразу: следующий шаг перезаписал бы подпись, и прочитать её не успели бы.
-    let probe = 'группа ' + groupId;
     try {
-      const known = await sendWithTimeout(
-        'VKWebAppSupportsAsync',
-        { method: 'VKWebAppAllowMessagesFromGroup' },
-        5000,
-      );
-      probe += ', метод известен: ' + JSON.stringify(known?.result);
-    } catch (error) {
-      probe += ', проверка метода: ' + describe(error);
-    }
-    say(probe + ' — открываем окно…');
-
-    try {
-      const supported = await sendWithTimeout(
+      const answer = await sendWithTimeout(
         'VKWebAppAllowMessagesFromGroup',
         { group_id: groupId },
       );
       // Ответ VK — объект вида { result: true }. Пришло что угодно другое —
-      // считаем, что разрешения нет.
-      if (!supported?.result) {
-        say(probe + ' — VK не подтвердил разрешение.');
+      // считаем, что разрешения нет: поднимать флаг «нам можно писать» по
+      // неясному ответу нельзя, рассылка потом упрётся в отказ API.
+      if (!answer?.result) {
+        say('VK не подтвердил разрешение. Попробуйте ещё раз.');
         return;
       }
     } catch (error) {
-      say(probe + ' — не выдано (' + describe(error) + ').');
+      say('Разрешение не выдано. Без него мы не сможем написать вам.');
       return;
     }
 
