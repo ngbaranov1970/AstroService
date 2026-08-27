@@ -76,7 +76,9 @@
   {# Кнопки блока подписки на сообщество. Грузим ровно там, где блок есть:
      условие то же, что у него самого в report.html. #}
   {% if in_vk() and vk_group_id() %}
-    <script src="/static/vk-group.js"></script>
+    {# ?v= меняем при каждой правке скрипта: для браузера это другой адрес,
+       и webview VK не подставит старую копию из кеша. #}
+    <script src="/static/vk-group.js?v=2"></script>
   {% endif %}
 </body>
 </html>
