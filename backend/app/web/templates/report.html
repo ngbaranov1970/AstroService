@@ -39,7 +39,7 @@
 
   {# Внутри VK платный разбор не показываем вообще: ни цены, ни состава
      секций, ни фразы про оплату — всё это «подсказка об оплате» из 5.4.1
-     (docs/vk-moderation.md). Фильтр в for, а не пустая секция с заголовком. #}
+     (docs/astro-context.md). Фильтр в for, а не пустая секция с заголовком. #}
   {% for block in blocks if not (in_vk() and block.locked) %}
     <section class="report">
       <h2>{{ block.title }}</h2>
@@ -131,7 +131,7 @@
 
   {# Стоит на месте вырезанного пейволла: в VK приложение ничем не продаёт, и
      единственное, что оно может добыть, — право написать человеку потом
-     (docs/vk-moderation.md). Без vk_group_id блок не рисуем: VKWebAppJoinGroup
+     (docs/astro-context.md). Без vk_group_id блок не рисуем: VKWebAppJoinGroup
      без group_id не вызывается, кнопка молча ничего не делала бы.
      ID и адрес — в data-атрибутах, чтобы скрипт не держал их копию. #}
   {% if in_vk() and vk_group_id() %}

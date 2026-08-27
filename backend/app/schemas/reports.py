@@ -73,7 +73,7 @@ class ReportOut(BaseModel):
     section_titles: list[str] = []
 
     # Всегда `null`, пока API обслуживает только Mini App: продавать внутри
-    # VK нельзя ни на одной платформе (docs/vk-moderation.md). Поля оставлены
+    # VK нельзя ни на одной платформе (docs/astro-context.md). Поля оставлены
     # под тот день, когда на этот же API сядет сайт.
     price_rub: int | None = None
     pay_url: str | None = None

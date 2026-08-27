@@ -160,7 +160,7 @@ async def _state(
         #
         # Цена и ссылка оплаты НЕ заполняются: единственный вход в этот API —
         # POST /auth/vk, то есть по ту сторону всегда Mini App, а внутри VK
-        # продавать нельзя ни на одной платформе (docs/vk-moderation.md).
+        # продавать нельзя ни на одной платформе (docs/astro-context.md).
         # `locked` без цены фронт показывает как «этот разбор закрыт».
         return out.model_copy(update={"status": ReportStatus.LOCKED})
 

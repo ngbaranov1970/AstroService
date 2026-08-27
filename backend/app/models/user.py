@@ -162,7 +162,7 @@ class User(Base):
 
     # Разрешил сообществу VK писать ему (VKWebAppAllowMessagesFromGroup).
     # Ведём сами, потому что через API список разрешивших не отдаётся вовсе
-    # (docs/vk-moderation.md) — не записали в момент нажатия, потеряли
+    # (docs/astro-context.md) — не записали в момент нажатия, потеряли
     # навсегда. NULL — не разрешал или отозвал разрешение.
     vk_messages_allowed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)

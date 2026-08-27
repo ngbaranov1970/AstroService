@@ -380,7 +380,7 @@ async def vk_messages_allowed(user: UserDep, session: SessionDep) -> Response:
 
     Своя запись обязательна: список разрешивших через API VK не отдаётся
     вовсе, и не сохранив его здесь, мы теряем единственный канал повторного
-    контакта (docs/vk-moderation.md).
+    контакта (docs/astro-context.md, «Контур сообщества VK»).
     """
     if users_service.mark_vk_messages_allowed(user):
         await events.log(session, events.GROUP_MESSAGES_ALLOWED, user_id=user.id)
