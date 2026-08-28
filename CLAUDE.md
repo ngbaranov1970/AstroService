@@ -66,10 +66,9 @@ HMAC от `initData`, той же формы, что VK-шный `sign`.
 [docs/astro-context.md](docs/astro-context.md), раздел «Деплой: что решено».
 
 Прод-стенд: `ssh ngbaranov@89.58.8.122`, проект в
-`~/projects/AstroService`. Доменов два: `ngbaranov.top` — канонический, он
-стоит в кабинетах ЮKassa и VK и во всех ссылках; `astrozvezdochet.ru` —
-брендовый, куплен 22.08.2026 и поднят вторым именем в Caddy. Переезд на него
-целиком — только после вердикта модерации VK и только пакетом из пяти правок
+`~/projects/AstroService`. Канонический домен — `astrozvezdochet.ru` (переезд
+28.08.2026): он в кабинетах ЮKassa и VK и во всех ссылках. Старый
+`ngbaranov.top` и `www` отвечают 301 на него, кроме `/webhooks/*`
 (см. [docs/astro-context.md](docs/astro-context.md), «Два домена»).
 Оболочка там **fish**, а
 не bash — `for … do … done` и `$(…)` из привычного синтаксиса падают, длинные
