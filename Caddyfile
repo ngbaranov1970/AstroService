@@ -3,10 +3,28 @@
 {$SITE_ADDRESS} {
 	encode zstd gzip
 
+	# Канонический адрес один — astrozvezdochet.ru, остальные имена уводим на
+	# него: одинаковое содержимое на двух адресах делит вес в поиске.
+	# ngbaranov.top не отключаем — на нём ссылки в уже выданных разборах,
+	# редирект сохраняет путь, и /r/<token> открывается на новом домене.
+	#
+	# Вебхук из редиректа исключён: уведомления старого магазина 1432173
+	# приходят POST'ом на ngbaranov.top, а за 301 POST не повторяют — деньги
+	# списались бы, а отчёт не открылся.
+	@legacy {
+		host ngbaranov.top www.astrozvezdochet.ru
+		not path /webhooks/*
+	}
+	handle @legacy {
+		redir https://astrozvezdochet.ru{uri} permanent
+	}
+
 	# Статику (один style.css) отдаёт само приложение через StaticFiles:
 	# копировать её в контейнер Caddy ради одного файла — лишняя сборка и
 	# ещё одно место, где она может устареть.
-	reverse_proxy api:8000
+	handle {
+		reverse_proxy api:8000
+	}
 
 	log {
 		# Персональных данных здесь нет: адреса вида /r/<token> токен не

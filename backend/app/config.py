@@ -168,11 +168,11 @@ class Settings(BaseSettings):
     yookassa_shop_id: str | None = None
     yookassa_secret_key: SecretStr | None = None
 
-    # Внешний адрес сайта («https://ngbaranov.top»), от которого строятся
+    # Внешний адрес сайта («https://astrozvezdochet.ru»), от которого строятся
     # return_url для ЮKassa и ссылка /pay/<token>. Обе обязаны быть
     # абсолютными: из Mini App человек уходит платить во внешний браузер, а
     # туда путь без домена не годится. Дефолта нет намеренно — зашитый
-    # ngbaranov.top увёл бы платежи с чужого стенда на прод.
+    # адрес прода увёл бы платежи с чужого стенда на боевой магазин.
     public_base_url: str | None = None
 
     @field_validator(

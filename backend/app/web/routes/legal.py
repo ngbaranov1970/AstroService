@@ -26,7 +26,7 @@ MERCHANT = {
     "inn": "620400375525",
     "email": "ngbaranov@gmail.com",
     "phone": "+7 958 190-87-88",
-    "site": "ngbaranov.top",
+    "site": "astrozvezdochet.ru",
 }
 
 # Реквизиты печатаются в подвале КАЖДОЙ страницы, поэтому глобал, а не
