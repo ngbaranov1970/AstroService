@@ -4,6 +4,7 @@
 import { createApp } from 'vue'
 
 import { platform } from '@/app/platform'
+import { router } from '@/app/router'
 import App from '@/App.vue'
 import '@/shared/styles/main.css'
 
@@ -25,8 +26,12 @@ async function bootstrap() {
     console.warn('Инициализация платформы не удалась:', error)
   }
 
-  // mount('#app') — «нарисуй App внутрь элемента с id=app»
-  createApp(App).mount('#app')
+  // use(router) — подключаем плагин: только после этого в шаблонах появляются
+  // RouterView и RouterLink, а useRoute()/useRouter() внутри компонентов
+  // находят роутер. mount('#app') — «нарисуй App внутрь элемента с id=app».
+  // Монтируем не дожидаясь router.isReady(): первый переход ждёт входа по
+  // сети, и до его конца App показывает «Соединяемся…», а не белый экран
+  createApp(App).use(router).mount('#app')
 }
 
 bootstrap()

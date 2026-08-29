@@ -12,38 +12,26 @@ from __future__ import annotations
 
 import logging
 import secrets
-import uuid
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import get_settings
 from app.db import get_session
 from app.models import Platform, User
 from app.services import auth, events
 from app.services import users as users_service
+from app.session_cookie import SOURCE_WEB_TESTER, take_uid
 
 logger = logging.getLogger(__name__)
-
-# Без префикса `__Host-`: он требует HTTPS, а стенд первые дни живёт по
-# голому IP — такая cookie там просто не сохранится.
-COOKIE_NAME = "astro_uid"
-
-# Год: тестер заходит раз в несколько дней и не должен терять свои карты.
-COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 
 # Имя параметра из секретной ссылки для тестеров: /?t=<секрет из .env>.
 TESTER_QUERY_PARAM = "t"
 
-# Ключ в request.state: зависимость кладёт uid, middleware забирает. В
-# константе — чтобы опечатка в одном из двух мест не ломала cookie молча.
-_STATE_UID = "web_uid"
-
-# Значение users.source для пришедших на стенд.
-SOURCE_WEB_TESTER = "web_tester"
+# Cookie-личность (имя cookie, чтение UUID, middleware) переехала в
+# app/session_cookie.py: ту же cookie читает вход JSON-API.
 
 # --- VK --------------------------------------------------------------------
 
@@ -57,25 +45,6 @@ SESSION_QUERY_PARAM = "s"
 # Ключ в request.state: зависимость кладёт свежий токен, шаблоны забирают
 # его через session_token() и подставляют в ссылки.
 _STATE_TOKEN = "session_token"
-
-
-def _read_uid(request: Request) -> str | None:
-    """Вернуть UUID из cookie или None, если её нет или в ней мусор.
-
-    Формат проверяем потому, что cookie — данные клиента: строка длиннее
-    `varchar(64)` уронит вставку в `users.external_id`. От подделки это не
-    защищает и не должно — cookie здесь не пароль, а «какая корзина твоя».
-    """
-    raw = request.cookies.get(COOKIE_NAME)
-    if not raw:
-        return None
-    try:
-        # str(UUID(...)) заодно приводит запись к каноничной: иначе один
-        # и тот же идентификатор в разном регистре даст двух пользователей.
-        return str(uuid.UUID(raw))
-    except ValueError:
-        logger.debug("Cookie %s не похожа на UUID, выдаю новый", COOKIE_NAME)
-        return None
 
 
 async def current_user(
@@ -210,16 +179,9 @@ async def _web_user(
     None означает «cookie не предъявлена, а заводить строку не просили» —
     так читающие страницы не плодят пользователей.
     """
-    uid = _read_uid(request)
-    known = uid is not None
-    if uid is None:
-        # uuid4 — случайные 122 бита: чужой не угадать перебором, а
-        # координация между процессами (в отличие от счётчика) не нужна.
-        uid = str(uuid.uuid4())
-
-    # Кладём ВСЕГДА, не только для новых: middleware перевыставит cookie, и
-    # срок её жизни продлевается на год при каждом визите.
-    setattr(request.state, _STATE_UID, uid)
+    # take_uid заодно кладёт идентификатор в request.state — middleware
+    # перевыставит cookie, и её срок жизни продлевается при каждом визите.
+    uid, known = take_uid(request)
 
     # Cookie нет и запрос ничего не пишет — в базу не идём. Cookie при этом
     # выдана: краулер её не вернёт и следа не оставит, а человек вернёт
@@ -310,46 +272,6 @@ def _tester_token_matches(request: Request) -> bool:
     # compare_digest, а не `==`: обычное сравнение выходит на первом
     # различающемся символе, и секрет подбирается по времени ответа.
     return secrets.compare_digest(given, expected.get_secret_value())
-
-
-class SessionCookieMiddleware(BaseHTTPMiddleware):
-    """Проставляет cookie с идентификатором в ответ.
-
-    Не `response.set_cookie` внутри зависимости: записанные там заголовки
-    теряются, если хендлер вернул готовый `Response` — FastAPI отдаёт его как
-    есть (`routing.py`, `raw_response` возвращается напрямую). А это все наши
-    POST с редиректом на `/r/<token>`, ровно те запросы, где пользователь и
-    создаётся впервые. Middleware видит финальный ответ в любом случае.
-    """
-
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-
-        uid = getattr(request.state, _STATE_UID, None)
-        if uid is None:
-            # Запрос не трогал current_user: /health, /static, 404.
-            return response
-
-        settings = get_settings()
-        response.set_cookie(
-            COOKIE_NAME,
-            uid,
-            max_age=COOKIE_MAX_AGE,
-            path="/",
-            # Скриптов на стенде нет вовсе, а запрет снимает класс XSS-проблем.
-            httponly=True,
-            # lax: cookie уходит при переходе по ссылке из мессенджера
-            # (так тестер и приходит), но не при запросах с чужих сайтов.
-            samesite="lax",
-            # На dev-стенде по http браузер выбросит cookie с secure=True.
-            secure=settings.is_prod,
-        )
-        return response
-
-
-def install_session_cookie(app) -> None:
-    """Подключить middleware к приложению. Зовётся из app/main.py."""
-    app.add_middleware(SessionCookieMiddleware)
 
 
 # --- Админка ---------------------------------------------------------------

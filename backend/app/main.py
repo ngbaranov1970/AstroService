@@ -22,8 +22,8 @@ from app.db import dispose_engine
 from app.llm import client as llm_client
 from app.logging_setup import setup_logging
 from app.payments import yookassa
+from app.session_cookie import install_session_cookie
 from app.vk import api as vk_api
-from app.web.deps import install_session_cookie
 from app.web.routes.admin import router as admin_router
 from app.web.routes.legal import router as legal_router
 from app.web.routes.pay import router as pay_router

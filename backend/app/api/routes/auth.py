@@ -2,7 +2,9 @@
 
 Единственная точка входа всего API: остальные маршруты требуют готовый
 токен и никого не заводят. Регистрации в сервисе нет — первый заход из VK
-и есть регистрация.
+и есть регистрация. Второй маршрут, `/auth/web`, опознаёт по cookie и
+работает только вне прода: он нужен, чтобы отлаживать фронт в обычном
+браузере, боевого веб-входа у нас пока нет.
 
 Тот же обмен делает и веб-стенд в app/web/deps.py, но там он вплетён в
 каждый запрос (личность едет в адресе), а здесь это отдельный шаг: фронт
@@ -14,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.api.deps import SessionDep
 from app.config import get_settings
@@ -22,6 +24,7 @@ from app.models import Platform
 from app.schemas.auth import SessionOut, UserOut, VkLaunchIn
 from app.services import auth, events
 from app.services import users as users_service
+from app.session_cookie import SOURCE_WEB_TESTER, take_uid
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,44 @@ async def login_vk(payload: VkLaunchIn, session: SessionDep) -> SessionOut:
         ref=payload.params.get(auth.VK_REF_PARAM),
         platform=payload.params.get(auth.VK_PLATFORM_PARAM),
     )
+    await session.commit()
+
+    return SessionOut(
+        token=auth.issue_session(user.id),
+        expires_in=auth.SESSION_TTL,
+        user=UserOut.model_validate(user),
+    )
+
+
+@router.post("/web", response_model=SessionOut)
+async def login_web(request: Request, session: SessionDep) -> SessionOut:
+    """Вход по cookie браузера — для разработки фронта. В проде 404.
+
+    503 — не задан SESSION_SECRET. Cookie в ответ ставит middleware
+    (app/session_cookie.py), хендлеру достаточно дёрнуть take_uid.
+    """
+    settings = get_settings()
+    if settings.is_prod:
+        # В проде маршрута нет, и 404 говорит ровно это: отдельная веб-личность
+        # (cookie на браузер) разъезжается с VK-строкой того же человека, и
+        # боевой веб-вход будет через VK ID — docs/astro-context.md, «Идентичность»
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    if settings.session_secret is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Вход не настроен: нет SESSION_SECRET",
+        )
+
+    uid, _ = take_uid(request)
+    user = await users_service.get_or_create(
+        session,
+        platform=Platform.WEB,
+        external_id=uid,
+        source=SOURCE_WEB_TESTER,
+    )
+    # События открытия здесь нет, в отличие от VK-ветки: маршрут живёт только
+    # в разработке, и его заходы исказили бы воронку
     await session.commit()
 
     return SessionOut(
