@@ -10,18 +10,20 @@ import { useCharts } from '@/shared/composables/useCharts'
 import { useReports } from '@/shared/composables/useReports'
 import DashedCard from '@/shared/ui/DashedCard.vue'
 
+import AddChartCard from './AddChartCard.vue'
 import AstroBadges from './AstroBadges.vue'
+import ChartSwitcher from './ChartSwitcher.vue'
 import { buildHomeTiles, HOME_NOTE } from './homeTiles'
 import ReportTile from './ReportTile.vue'
 import TodayCard from './TodayCard.vue'
 
-// primary — самая свежая карта: переключателя карт нет, главная всегда про неё
-const { primary, detail, ensureDetail } = useCharts()
+// current — карта, выбранная в переключателе (по умолчанию самая свежая)
+const { current, detail, ensureDetail } = useCharts()
 const { state: reportsState, ensureLoaded, reload: reloadReports } = useReports()
 
 // Адрес карты, вокруг которого крутится весь экран. null означает «списка ещё
 // нет» — до сюда такое почти не доходит, guard роутера ждёт список до перехода
-const token = computed(() => primary.value?.token ?? null)
+const token = computed(() => current.value?.token ?? null)
 
 // Расчёт карты: он приезжает отдельным запросом, в списке карт его нет
 const natal = computed(() => (token.value ? detail(token.value).chart?.calc?.natal : null) ?? null)
@@ -47,9 +49,8 @@ function byShape(list) {
 const ready = computed(() => byShape(tiles.value.filter((tile) => !tile.soon)))
 const soon = computed(() => byShape(tiles.value.filter((tile) => tile.soon)))
 
-const personName = computed(() => primary.value?.person_name ?? 'Твоя карта')
 // Без точного времени асцендент считан от полудня — бейдж покажет причину
-const timeKnown = computed(() => primary.value?.time_known ?? true)
+const timeKnown = computed(() => current.value?.time_known ?? true)
 
 // Дата в шапке. Intl.DateTimeFormat — встроенное в браузер форматирование дат
 // по языку, аналог strftime с локалью; вручную склеивать «суббота, 30 августа»
@@ -78,14 +79,14 @@ watch(
   <!-- space-y-7 — вертикальные промежутки между секциями (~28 px из макета).
        Горизонтальные отступы и ширину колонки задаёт App.vue, здесь их нет -->
   <div class="space-y-7">
-    <!-- Двух кругов из макета здесь нет: там они означали переключатель карт и
-         профиль, но оба экрана отложены, а профиль есть в нижней навигации.
-         Вернутся вместе с переключателем, когда карт станет несколько -->
+    <!-- Двух кругов из макета здесь нет: один означал переключатель карт — им
+         стало само имя (ChartSwitcher), второй профиль — тот экран отложен, а
+         вход в него есть в нижней навигации.
+         Имя рисует ChartSwitcher, а не этот файл: заголовок и список карт —
+         один элемент управления, разрывать их между файлами незачем -->
     <header class="min-w-0">
       <p class="font-sans text-label tracking-label text-gold-dim uppercase">{{ today }}</p>
-      <!-- truncate обрезает длинное имя многоточием: в одну строку макета
-           помещается около десяти букв этого кегля -->
-      <h1 class="mt-2 truncate font-display text-display text-ink">{{ personName }}</h1>
+      <ChartSwitcher class="mt-2" />
     </header>
 
     <AstroBadges :natal="natal" :time-known="timeKnown" />
@@ -108,6 +109,11 @@ watch(
       <div v-if="ready.narrow.length" class="grid grid-cols-2 gap-3">
         <ReportTile v-for="tile in ready.narrow" :key="tile.key" :tile="tile" />
       </div>
+
+      <!-- Приглашение завести вторую карту стоит сразу за разборами: рядом с
+           готовым текстом понятно, что именно получит близкий. Внизу экрана,
+           среди анонсов, оно читалось бы как ещё одно «скоро» -->
+      <AddChartCard />
     </section>
 
     <!-- Анонсы: то, чего ещё нет. Отдельный заголовок вместо подписи «скоро»

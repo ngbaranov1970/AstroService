@@ -20,7 +20,10 @@ import TimeStep from './steps/TimeStep.vue'
 const TOTAL = 4
 
 const router = useRouter()
-const { remember } = useCharts()
+// hasCharts — есть ли у человека хоть одна карта. От этого зависит, можно ли
+// уйти с онбординга: первого пользователя отпускать некуда, guard роутера
+// вернёт его сюда же
+const { hasCharts, remember } = useCharts()
 
 const step = ref(1)
 const submitting = ref(false)
@@ -92,8 +95,23 @@ function next() {
   submit()
 }
 
+// Нижняя кнопка делает разное на первом шаге и на остальных: там выход из
+// мастера, тут возврат к предыдущему полю
+const backLabel = computed(() => (step.value > 1 ? 'Назад' : 'Отмена'))
+
+// Показываем её всегда, кроме первого шага у человека без карт: ему уходить
+// некуда, и «Отмена» вела бы на главную, откуда guard тут же вернёт назад
+const showBack = computed(() => step.value > 1 || hasCharts.value)
+
 function back() {
-  if (step.value > 1) step.value -= 1
+  if (step.value > 1) {
+    step.value -= 1
+    return
+  }
+
+  // Первый шаг: сюда пришли из переключателя за второй картой и передумали.
+  // replace, а не push: брошенный мастер в истории никому не нужен
+  router.replace({ name: 'home' })
 }
 </script>
 
@@ -131,15 +149,16 @@ function back() {
       {{ nextLabel }}
     </AppButton>
 
-    <!-- Возврат на предыдущий шаг. На макете его нет, но без него опечатка в
-         дате исправляется только перезапуском приложения -->
+    <!-- Возврат на предыдущий шаг, а на первом — выход из мастера. На макете
+         кнопки нет, но без неё опечатка в дате исправляется только
+         перезапуском приложения, а брошенный мастер вообще не закрыть -->
     <button
-      v-if="step > 1"
+      v-if="showBack"
       type="button"
       class="mt-4 py-2 font-sans text-label tracking-label text-gold-dim uppercase"
       @click="back"
     >
-      Назад
+      {{ backLabel }}
     </button>
   </section>
 </template>

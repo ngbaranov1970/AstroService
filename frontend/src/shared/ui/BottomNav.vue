@@ -10,8 +10,9 @@ import { useCharts } from '@/shared/composables/useCharts'
 
 // useRoute() — текущий адрес: имя роута и параметры из шаблона (:token, :feature)
 const route = useRoute()
-// primary — самая свежая карта пользователя; из неё берём token для /chart/:token
-const { primary } = useCharts()
+// current — карта, выбранная в переключателе на главной (по умолчанию самая
+// свежая); из неё берём token для /chart/:token
+const { current } = useCharts()
 
 // Список пунктов пересчитывается сам при смене адреса или карты: computed —
 // это значение-формула, Vue помнит зависимости и обновляет только при их
@@ -34,7 +35,7 @@ const items = computed(() => {
       // Карты может не быть (список ещё грузится) — тогда пункт без адреса:
       // ссылка на /chart/undefined увела бы в никуда.
       // ? : — короткое ветвление прямо в выражении, как a if cond else b
-      to: primary.value ? { name: 'chart', params: { token: primary.value.token } } : null,
+      to: current.value ? { name: 'chart', params: { token: current.value.token } } : null,
       active: name === 'chart',
     },
     {

@@ -1,5 +1,5 @@
 // Карты пользователя: список (одна загрузка на запуск, ответ на вопрос «карты
-// вообще есть?») и расчёт отдельной карты по token.
+// вообще есть?»), выбранная карта и расчёт отдельной карты по token.
 // Состояние объявлено на уровне модуля — модуль
 // выполняется один раз, поэтому список во всём приложении общий (как useSession).
 // Ошибку наружу не бросает: её читают из error, а решения принимает экран.
@@ -11,6 +11,11 @@ import { getChart, listCharts } from '@/shared/api/endpoints'
 const charts = ref([]) // [{token, person_name, birth_local, time_known, place_name, created_at}]
 const status = ref('idle') // idle | loading | ready | error
 const error = ref(null)
+
+// Карта, выбранная в переключателе на главной. null — не выбирали: тогда
+// показываем самую свежую. Живёт только в памяти: сессия в VK и так на один
+// запуск, а сохранённый token удалённой карты потом воскрес бы из хранилища
+const selectedToken = ref(null)
 
 // Второй кеш модуля: карта вместе с расчётом, по одной записи на token.
 // В списке выше calc нет — его отдаёт только GET /charts/{token}, а без
@@ -64,12 +69,21 @@ function reload() {
 
 /** Положить карту, только что вернувшуюся из POST /charts, в начало списка.
  *  Дедупликация на сервере может вернуть уже известную карту — тогда старую
- *  запись заменяем, а не добавляем вторую с тем же token. */
+ *  запись заменяем, а не добавляем вторую с тем же token.
+ *  Заодно делает её текущей: онбординг проходят ради неё. */
 function remember(chart) {
   // filter оставляет элементы, для которых функция вернула true — как
   // списковое включение [c for c in charts if c.token != chart.token]
   charts.value = [chart, ...charts.value.filter((item) => item.token !== chart.token)]
   status.value = 'ready'
+  selectedToken.value = chart.token
+}
+
+/** Выбрать карту, вокруг которой крутится приложение.
+ *  Незнакомый token не отвергаем: список мог ещё не догрузиться, а current
+ *  сам вернётся к самой свежей карте, если такой в нём не окажется. */
+function select(token) {
+  selectedToken.value = token
 }
 
 /** Состояние одной карты с расчётом: {status, error, chart}. Про незнакомый
@@ -120,9 +134,15 @@ export function useCharts() {
     // отдельная проверка на ready: guard по ней отличает «пусто» от «не знаем»
     isLoaded: computed(() => status.value === 'ready'),
     hasCharts: computed(() => charts.value.length > 0),
-    // Карта по умолчанию — самая свежая: её показывает главная, пока
-    // переключателя карт нет
-    primary: computed(() => charts.value[0] ?? null),
+    // Карта, про которую сейчас всё приложение. Выбранная человеком, а пока
+    // он не выбирал (и если выбранная пропала из списка) — самая свежая
+    current: computed(
+      () =>
+        charts.value.find((item) => item.token === selectedToken.value) ??
+        charts.value[0] ??
+        null,
+    ),
+    select,
     ensureLoaded,
     reload,
     remember,
