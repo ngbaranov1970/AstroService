@@ -129,7 +129,8 @@ features/home/             # HomeView, homeTiles.js, AstroBadges, TodayCard,
                            # ReportTile, ChartSwitcher, AddChartCard
 features/report/           # ReportView (generic), reportTypes.js,
                            # ReportSections, FullReportTile
-features/chart/            # ChartView + PlanetsTable, HousesTable, AspectsTable
+features/chart/            # ChartView + ChartTable (одна на три секции),
+                           # chartRows.js (calc.natal → строки, формат градусов)
 features/soon/SoonView.vue # «Пара», «Профиль», плитки «скоро»
 ```
 
@@ -160,7 +161,15 @@ features/soon/SoonView.vue # «Пара», «Профиль», плитки «с
    budget_exceeded, not_supported, failed), `error` — fallback.
 4. **ChartView** — таблицы планет (name_ru, sign_ru, deg_in_sign, house,
    retrograde), домов и аспектов из `GET /charts/{token}` → `calc.natal`.
-   SVG-колесо — потом (astro_core/wheel.py пуст).
+   Своего запроса нет: расчёт лежит в кеше `useCharts`, тот же, что кормит
+   бейджи главной. Три таблицы — один компонент `ChartTable` со строками
+   «имя — значение — приписка»: колонки у них одинаковые, а тройная правка
+   вёрстки разъезжается на второй итерации. Градусы с минутами
+   (`11°08′`), минуты округляются точно как в `scripts/natal_cli.py`
+   (усечение расходилось бы с нашим же сверщиком на минуту). При
+   `time_known=false` таблицы домов нет вовсе, а у планет скрыт номер дома —
+   от полудня они означают чужую карту. SVG-колесо — потом
+   (astro_core/wheel.py пуст).
 5. **BottomNav**: Главная / Карта / Пара / Профиль (две последние → SoonView).
 
 ## Механизм расширения (то, ради чего каркас)
