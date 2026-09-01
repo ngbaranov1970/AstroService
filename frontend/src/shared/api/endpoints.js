@@ -78,6 +78,40 @@ export function createOrder(token) {
   return http.post(`/charts/${token}/orders`)
 }
 
+/** Оценка разбора: 1–5 звёзд и необязательное «что не так».
+ *  Ответ пустой (204 No Content) — экран и так знает, что человек нажал.
+ *  Владельцем карты быть не обязательно: мнение того, кому переслали
+ *  ссылку, нам нужно не меньше. */
+export function leaveFeedback(token, type, rating, comment = '') {
+  return http.post(`/charts/${token}/feedback`, { type, rating, comment })
+}
+
+/** Состояние человека в нашем сообществе VK:
+ *  {joined, messages_allowed, group_id}.
+ *  joined === null означает «выяснить не удалось» (VK не ответил или
+ *  сообщество не настроено) — в этом случае кнопку подписки всё равно
+ *  показываем: предложить лишний раз дешевле, чем спрятать её у того, кто
+ *  на самом деле не подписан.
+ *  Вне VK отвечает {joined: null, messages_allowed: false, group_id: null}. */
+export function getGroupState() {
+  return http.get('/vk/group-state')
+}
+
+/** Запомнить у себя, что человек разрешил сообществу писать.
+ *  Зовётся ПОСЛЕ того, как VK Bridge ответил согласием: список разрешивших
+ *  VK не отдаёт, и наша запись — единственный источник правды для рассылки.
+ *  Ответ пустой. 409 — вход был не из VK. */
+export function allowGroupMessages() {
+  return http.post('/vk/messages-allowed')
+}
+
+/** Погасить разрешение писать. В VK при этом ничего не меняется — отменить
+ *  выданное разрешение Bridge не умеет вовсе, — но рассылка берёт
+ *  получателей по нашему флагу, и писать мы перестаём сразу. */
+export function denyGroupMessages() {
+  return http.post('/vk/messages-denied')
+}
+
 /** Состояние заказа по его токену: {token, number, status, paid, title,
  *  price_rub, created_at, paid_at}. Спрашивается на экране возврата с оплаты —
  *  сервер при этом сам сверяется с ЮKassa и, если деньги пришли, ставит текст

@@ -31,6 +31,12 @@ export const webPlatform = {
     return () => {}
   },
 
+  /** Окон VK здесь нет — блок подписки на сообщество не рисуется вовсе.
+   *  Методов joinGroup и allowMessages поэтому тоже нет: звать их некому. */
+  supportsGroup() {
+    return false
+  },
+
   async setHeaderColor() {},
 
   async close() {},

@@ -50,6 +50,12 @@ export const telegramPlatform = {
     }
   },
 
+  /** Сообщество — понятие VK. У Telegram своя механика подписки на канал,
+   *  и появится она вместе с ботом, а не здесь. */
+  supportsGroup() {
+    return false
+  },
+
   async setHeaderColor() {
     tg()?.setHeaderColor('#171310')
     tg()?.setBackgroundColor('#171310')

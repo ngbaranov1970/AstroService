@@ -7,8 +7,6 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tunnel": "vk-tunnel --insecure=1 --http-protocol=http --ws-protocol=ws --host=0.0.0.0 --port=5173",
-    "tunnel:cf": "cloudflared tunnel --url http://localhost:5173",
     "tunnel:lhr": "ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:5173 nokey@localhost.run",
     "tunnel:api": "ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8000 nokey@localhost.run"
   },
@@ -20,7 +18,6 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.7",
-    "@vkontakte/vk-tunnel": "^0.2.10",
     "tailwindcss": "^4.3.3",
     "vite": "^8.1.1"
   }

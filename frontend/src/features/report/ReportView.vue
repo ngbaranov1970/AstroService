@@ -9,12 +9,14 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
+import GroupCard from '@/features/community/GroupCard.vue'
 import { ERROR_CODE, REPORT_STATUS } from '@/shared/api/endpoints'
 import { usePolling } from '@/shared/composables/usePolling'
 import { useReports } from '@/shared/composables/useReports'
 import AppButton from '@/shared/ui/AppButton.vue'
 
 import FullReportTile from './FullReportTile.vue'
+import ReportFeedback from './ReportFeedback.vue'
 import ReportSections from './ReportSections.vue'
 
 const route = useRoute()
@@ -166,6 +168,19 @@ watch(
            наружу (заперт) или внутрь (уже открыт) -->
       <div v-if="isFree && fullReport" class="mt-10">
         <FullReportTile :token="token" :report="fullReport" />
+      </div>
+
+      <!-- Оценка текста: по ней сравниваются поколения промпта. Спрашиваем
+           после того, как человек дочитал, — раньше оценивать нечего -->
+      <div class="mt-10">
+        <ReportFeedback :token="token" :type="type" />
+      </div>
+
+      <!-- Подписка на гороскоп дня. Место выбрано тем же доводом: соглашаются
+           на письма от того, чей текст только что понравился. Вне VK блок
+           не рисуется сам -->
+      <div class="mt-8">
+        <GroupCard />
       </div>
     </template>
 

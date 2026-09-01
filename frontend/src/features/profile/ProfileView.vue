@@ -10,6 +10,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
+import GroupCard from '@/features/community/GroupCard.vue'
 import AddChartCard from '@/features/home/AddChartCard.vue'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useSession } from '@/shared/composables/useSession'
@@ -94,6 +95,13 @@ function choose(token) {
         <AddChartCard />
       </div>
     </section>
+
+    <!-- Подписка на гороскоп дня. В профиле она постоянная: разбор читают
+         один раз, а включить и выключить письма человек должен уметь всегда.
+         Вне VK блок не рисуется — компонент решает это сам -->
+    <div class="mt-10">
+      <GroupCard />
+    </div>
 
     <!-- Документы. Открываются наружу, а не роутером: это страницы сайта,
          которые отдаёт FastAPI, и внутри приложения их быть не должно -->

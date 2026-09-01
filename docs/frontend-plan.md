@@ -50,7 +50,8 @@ HMAC от initData) — платформо-зависим только слой 
   авторизация, и фиксируется сразу целиком (дописать метод в стаб дёшево,
   разыскать по коду прямые вызовы `bridge.send` — нет):
   `init()`, `obtainToken(http)`, `openExternal(url)`, `onBack(handler)`,
-  `setHeaderColor()`, `close()`. Прямых обращений к `vk-bridge` вне
+  `setHeaderColor()`, `close()`, `supportsGroup()`, `joinGroup(groupId)`,
+  `allowMessages(groupId)`. Прямых обращений к `vk-bridge` вне
   `platform/vk.js` быть не должно. См. «Три платформы» ниже.
 - **Оплата только наружу**: `<a :href="pay_url" target="_blank"
   rel="noopener">`; `pay_url === null` при `locked` = «покупка временно
@@ -69,6 +70,23 @@ HMAC от initData) — платформо-зависим только слой 
   single-flight повторный `obtainToken()` и один повтор запроса.
 - **Большие экраны — одна колонка, второго лэйаута нет** (решение
   2026-08-18, разбор ниже).
+- **Блок сообщества и оценка разбора** (перенесены со снятого стенда
+  01.09.2026). Три решения, которые иначе отменят по незнанию:
+  - `group_id` фронт берёт из ответа `GET /api/v1/vk/group-state`, а не из
+    переменной сборки `VITE_*`. Второй экземпляр числа однажды разъехался
+    бы с тем, по которому бэкенд считает `joined` через `groups.isMember`.
+  - Состояние сообщества вынесено в `useGroup` — четвёртый
+    composable-синглтон. Блок стоит на двух экранах (конец разбора,
+    профиль), а запрос состояния на бэкенде ходит по сети в VK: держи
+    состояние в компоненте, и профиль спрашивал бы VK при каждом открытии.
+  - `joined === null` («VK не ответил») трактуется как «не подписан», и
+    кнопка подписки показывается: предложить лишний раз дешевле, чем
+    спрятать её у того, кто на самом деле не подписан.
+  - Оценка уходит одним запросом по кнопке, а не тапом по звезде: иначе
+    звезда и последующий комментарий дали бы два события `feedback`, и один
+    человек считался бы в аналитике дважды. Факт «уже оценил» живёт только
+    в памяти компонента — бэкенд его не отдаёт, при перезагрузке экрана
+    звёзды спрашиваются снова.
 
 ## Большие экраны (ноутбук, десктоп, планшет)
 
@@ -119,7 +137,7 @@ App.vue                    # shell: auth-гейт → router-view + BottomNav
 app/router.js              # ленивые роуты; guard «нет карт → /onboarding»
 app/platform/{index,vk,web,telegram}.js
 shared/api/{http,endpoints}.js
-shared/composables/{useSession,useCharts,useReports,usePolling}.js
+shared/composables/{useSession,useCharts,useReports,usePolling,useGroup}.js
 shared/ui/                 # AppButton, AppCard, AppInput, StepDots,
                            # BadgePill, Accordion, Skeleton, BottomNav, DashedCard
 shared/styles/main.css       # @import "tailwindcss" + @theme (токены)
@@ -128,7 +146,9 @@ features/onboarding/       # OnboardingView + steps/{Date,Time,Place,Name}
 features/home/             # HomeView, homeTiles.js, AstroBadges, TodayCard,
                            # ReportTile, ChartSwitcher, AddChartCard
 features/report/           # ReportView (generic), reportTypes.js,
-                           # ReportSections, FullReportTile
+                           # ReportSections, FullReportTile, ReportFeedback
+features/community/        # GroupCard: подписка на сообщество и разрешение
+                           # писать; вне VK не рисуется
 features/chart/            # ChartView + ChartTable (одна на три секции),
                            # chartRows.js (calc.natal → строки, формат градусов)
 features/soon/SoonView.vue # «Пара», «Профиль», плитки «скоро»
@@ -159,6 +179,9 @@ features/soon/SoonView.vue # «Пара», «Профиль», плитки «с
    наружу; после клика — поллинг + refetch на `visibilitychange`);
    `failed` → тексты по `error_code` (limit_exhausted, needs_purchase,
    budget_exceeded, not_supported, failed), `error` — fallback.
+   Под готовым текстом — оценка (`ReportFeedback`) и блок сообщества
+   (`GroupCard`): соглашаются на письма от того, чей текст только что
+   понравился.
 4. **ChartView** — таблицы планет (name_ru, sign_ru, deg_in_sign, house,
    retrograde), домов и аспектов из `GET /charts/{token}` → `calc.natal`.
    Своего запроса нет: расчёт лежит в кеше `useCharts`, тот же, что кормит

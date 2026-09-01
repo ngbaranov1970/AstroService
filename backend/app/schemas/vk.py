@@ -19,3 +19,9 @@ class GroupStateOut(BaseModel):
     joined: bool | None
     # Наш собственный флаг, он известен точно: VK список разрешивших не отдаёт.
     messages_allowed: bool
+    # Числовой id сообщества из VK_GROUP_ID — без него фронт не может позвать
+    # VKWebAppJoinGroup и VKWebAppAllowMessagesFromGroup. Отдаём отсюда, а не
+    # переменной сборки: второй экземпляр числа однажды разъехался бы с тем,
+    # по которому считается joined. None — сообщество не настроено, блока в
+    # приложении нет вовсе.
+    group_id: int | None = None

@@ -15,6 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.deps import CurrentUser, SessionDep
+from app.config import get_settings
 from app.models import Platform, User
 from app.schemas.vk import GroupStateOut
 from app.services import events
@@ -35,12 +36,13 @@ async def group_state(user: CurrentUser) -> GroupStateOut:
     if user.platform is not Platform.VK:
         # Не из VK — блока подписки на экране нет вовсе, и сетевой вызов был
         # бы напрасным.
-        return GroupStateOut(joined=None, messages_allowed=False)
+        return GroupStateOut(joined=None, messages_allowed=False, group_id=None)
 
     joined = await vk_api.is_group_member(int(user.external_id))
     return GroupStateOut(
         joined=joined,
         messages_allowed=user.vk_messages_allowed_at is not None,
+        group_id=get_settings().vk_group_id,
     )
 
 
