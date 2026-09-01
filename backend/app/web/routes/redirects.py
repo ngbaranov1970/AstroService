@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 from fastapi.responses import RedirectResponse
 
 router = APIRouter(include_in_schema=False)
@@ -22,12 +22,19 @@ APP_PATH = "/app/"
 
 
 @router.get("/")
-async def index() -> RedirectResponse:
+async def index(request: Request) -> RedirectResponse:
     """Корень домена — пока в приложение, потом на лендинг.
 
     Временный редирект: 302 сменится на страницу, а не на другой адрес.
     """
-    return RedirectResponse(APP_PATH, status.HTTP_302_FOUND)
+    # Всё, что стояло после «?», переносим на новый адрес. В VK личность едет
+    # именно там (sign и vk_*): если приложение в кабинете указано на корень,
+    # редирект без параметров оставил бы Mini App без запуска вовсе.
+    query = request.url.query
+    return RedirectResponse(
+        f"{APP_PATH}?{query}" if query else APP_PATH,
+        status.HTTP_302_FOUND,
+    )
 
 
 @router.get("/r/{token}")
