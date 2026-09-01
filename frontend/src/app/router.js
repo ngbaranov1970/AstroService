@@ -35,6 +35,25 @@ const routes = [
     component: () => import('@/features/report/ReportView.vue'),
   },
   {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('@/features/profile/ProfileView.vue'),
+  },
+  // Витрина оплаты и возврат с неё. Экраны веб-ветки: в VK продавать нельзя,
+  // и пришедшего оттуда PayView сам уводит на разбор
+  {
+    path: '/pay/:token',
+    name: 'pay',
+    component: () => import('@/features/pay/PayView.vue'),
+  },
+  // Сюда редиректом возвращает серверная страница /pay/<token>/done, номер
+  // заказа приходит в ?order
+  {
+    path: '/paid/:token',
+    name: 'paid',
+    component: () => import('@/features/pay/PaidView.vue'),
+  },
+  {
     path: '/soon/:feature',
     name: 'soon',
     component: () => import('@/features/soon/SoonView.vue'),

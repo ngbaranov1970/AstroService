@@ -27,8 +27,13 @@ __pycache__/
 .env.*
 !.env.example
 
+# Фронт нужен в контексте целиком: стадия frontend в backend/Dockerfile
+# собирает из него dist. Исключаем только производное — node_modules ставится
+# в образе по package-lock.json, dist собирается там же.
+frontend/node_modules/
+frontend/dist/
+
 # Не нужно backend'у
-frontend/
 site/
 docs/
 bot/

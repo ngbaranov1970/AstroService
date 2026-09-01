@@ -65,3 +65,23 @@ export function listReports(token) {
 export function requestReport(token, type) {
   return http.post(`/charts/${token}/reports`, { type })
 }
+
+/** Завести заказ на платный разбор этой карты. Отвечает
+ *  {token, confirmation_url} — по второму адресу лежит форма оплаты ЮKassa,
+ *  на неё уходим переходом в этой же вкладке.
+ *
+ *  Внутри VK эта ручка отвечает 403: продавать в Mini App запрещено, поэтому
+ *  звать её оттуда нельзя (плитка «Полный разбор» и не зовёт).
+ *  Повторный вызов не заводит второго платежа — вернётся тот же заказ.
+ *  409 означает «уже оплачено». */
+export function createOrder(token) {
+  return http.post(`/charts/${token}/orders`)
+}
+
+/** Состояние заказа по его токену: {token, number, status, paid, title,
+ *  price_rub, created_at, paid_at}. Спрашивается на экране возврата с оплаты —
+ *  сервер при этом сам сверяется с ЮKassa и, если деньги пришли, ставит текст
+ *  в очередь. */
+export function getOrder(orderToken) {
+  return http.get(`/orders/${orderToken}`)
+}

@@ -6,6 +6,9 @@
 // Внутри VK нет ни цены, ни слов «купить» и «оплатить»: продавать в Mini App
 // правилами VK запрещено, поэтому отсюда только уводим на сайт, а сумма и
 // оплата живут там (docs/astro-context.md).
+//
+// В обычном браузере запрета нет, и оплата идёт внутри приложения: плитка
+// ведёт на свой экран /pay/:token, а наружу уходит только форма ЮKassa.
 
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
@@ -44,9 +47,16 @@ const ACTION = Object.freeze({
   [REPORT_STATUS.FAILED]: 'Попробовать снова',
 })
 
-// Единственное состояние, из которого уходим на сайт. Всё остальное —
-// «разбор уже наш», и открывается он внутри приложения
+// Единственное состояние, ведущее к оплате. Всё остальное — «разбор уже наш»,
+// и открывается он внутри приложения
 const isLocked = computed(() => props.report?.status === REPORT_STATUS.LOCKED)
+
+// В обычном браузере оплата целиком наша: и витрина, и возврат — экраны Vue.
+// В VK и Telegram платить уходят во внешний браузер, на страницы сайта
+const isWeb = computed(() => platform.name === 'web')
+
+// Цену сервер присылает всем, кроме пришедших из VK (backend api/routes/reports.py)
+const price = computed(() => props.report?.price_rub ?? null)
 
 // Название берём с сервера: тем же именем товар назван на странице оплаты
 const title = computed(() => props.report?.title ?? 'Полный разбор натальной карты')
@@ -55,23 +65,34 @@ const title = computed(() => props.report?.title ?? 'Полный разбор �
 const sections = computed(() => props.report?.section_titles ?? [])
 
 const action = computed(() => {
-  // В VK говорим только про переход. На web и в Telegram платформа фронту
-  // известна и запрет не действует — там можно назвать вещи своими именами
-  if (isLocked.value) return platform.name === 'vk' ? 'Открыть' : 'Оформить на сайте'
+  if (isLocked.value) {
+    // В VK говорим только про переход: ни цены, ни слова «оформить».
+    // Где запрет не действует, называем вещи своими именами и показываем сумму
+    if (platform.name === 'vk') return 'Открыть'
+    return price.value === null ? 'Оформить' : `Оформить за ${price.value} ₽`
+  }
 
   return ACTION[props.report?.status] ?? 'Открыть'
 })
 
 function open() {
-  if (isLocked.value) {
+  if (isLocked.value && !isWeb.value) {
     // Внешний браузер, а не переход внутри приложения: цифровые товары внутри
-    // Mini App разрешены только за «голоса», а на iOS запрещены вовсе
-    platform.openExternal(`${SITE_URL}/pay/${props.token}`)
+    // Mini App разрешены только за «голоса», а на iOS запрещены вовсе.
+    // back=vk просит страницу «спасибо» дать ссылку обратно в приложение —
+    // сама она этого не угадает, платят из чужого браузера
+    const back = platform.name === 'vk' ? '?back=vk' : ''
+    platform.openExternal(`${SITE_URL}/pay/${props.token}${back}`)
     return
   }
 
-  // push — переход на другой экран приложения, как клик по RouterLink
-  router.push({ name: 'report', params: { token: props.token, type: 'full_natal' } })
+  // push — переход на другой экран приложения, как клик по RouterLink.
+  // Заперт и мы в браузере — ведём на свою витрину, иначе сразу в разбор
+  router.push(
+    isLocked.value
+      ? { name: 'pay', params: { token: props.token } }
+      : { name: 'report', params: { token: props.token, type: 'full_natal' } },
+  )
 }
 </script>
 

@@ -5,6 +5,27 @@
 # Причина — uv workspace: `uv.lock` и корневой `pyproject.toml` лежат выше
 # backend/, а Docker не умеет читать файлы вне контекста.
 
+# --- Стадия 0: собираем Vue-фронт -------------------------------------------
+# Node нужен только здесь: в рантайм уезжает готовый dist, а не инструменты
+# сборки. 22 — LTS, нижняя граница Vite 8 (нужен 20.19+ или 22.12+).
+FROM node:22-alpine AS frontend
+
+WORKDIR /front
+
+# Сначала только манифесты: слой с npm ci кешируется и не переигрывается,
+# пока не менялись зависимости.
+COPY frontend/package.json frontend/package-lock.json ./
+
+# ci, а не install: ставит ровно версии из package-lock.json и падает, если
+# lock разошёлся с package.json. Аналог `uv sync --frozen` выше.
+RUN npm ci
+
+COPY frontend/ ./
+
+# Собирает в /front/dist. Адрес /app/ зашивается в ссылки на этом шаге
+# (base в vite.config.js) — из браузера его уже не поменять.
+RUN npm run build
+
 # --- Стадия 1: собираем окружение -------------------------------------------
 # Официальный образ uv поверх того же python:3.13-slim-bookworm, что и рантайм
 # ниже, — venv из этой стадии ссылается на интерпретатор по тому же пути и
@@ -68,6 +89,10 @@ RUN useradd --create-home --uid 10001 app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/backend /app/backend
+
+# Собранный фронт кладём туда же, где он лежит в репозитории (frontend/dist):
+# так путь в app/main.py один и тот же в контейнере и при локальном запуске.
+COPY --from=frontend --chown=app:app /front/dist /app/frontend/dist
 
 USER app
 # Из backend/ запускается и alembic (здесь alembic.ini), и uvicorn.

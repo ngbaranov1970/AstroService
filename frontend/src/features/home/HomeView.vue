@@ -6,6 +6,8 @@
 
 import { computed, watch } from 'vue'
 
+import FullReportTile from '@/features/report/FullReportTile.vue'
+import { REPORT_STATUS } from '@/shared/api/endpoints'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useReports } from '@/shared/composables/useReports'
 import DashedCard from '@/shared/ui/DashedCard.vue'
@@ -19,7 +21,7 @@ import TodayCard from './TodayCard.vue'
 
 // current — карта, выбранная в переключателе (по умолчанию самая свежая)
 const { current, detail, ensureDetail } = useCharts()
-const { state: reportsState, ensureLoaded, reload: reloadReports } = useReports()
+const { state: reportsState, report, ensureLoaded, reload: reloadReports } = useReports()
 
 // Адрес карты, вокруг которого крутится весь экран. null означает «списка ещё
 // нет» — до сюда такое почти не доходит, guard роутера ждёт список до перехода
@@ -48,6 +50,17 @@ function byShape(list) {
 // homeTiles.js, здесь только раскладка
 const ready = computed(() => byShape(tiles.value.filter((tile) => !tile.soon)))
 const soon = computed(() => byShape(tiles.value.filter((tile) => tile.soon)))
+
+// Полный разбор идёт мимо плиток главной (в reportTypes.js у него onHome:
+// false): обычная плитка — просто ссылка на экран разбора, а здесь нужны цена,
+// состав секций и развилка «оплата внутри приложения или на сайте». Всё это
+// умеет FullReportTile, тот же компонент показывает конец бесплатного разбора.
+// null — списка разборов ещё нет либо сервер такого типа не отдаёт
+const fullReport = computed(() => report(token.value, 'full_natal'))
+
+// Предлагаем платное только тому, кто дочитал бесплатное: до первого текста
+// «полный разбор из шести секций» — обещание неизвестно чего
+const freeIsReady = computed(() => report(token.value, 'free_natal')?.status === REPORT_STATUS.READY)
 
 // Без точного времени асцендент считан от полудня — бейдж покажет причину
 const timeKnown = computed(() => current.value?.time_known ?? true)
@@ -109,6 +122,11 @@ watch(
       <div v-if="ready.narrow.length" class="grid grid-cols-2 gap-3">
         <ReportTile v-for="tile in ready.narrow" :key="tile.key" :tile="tile" />
       </div>
+
+      <!-- Полный разбор — последним в секции: сначала то, что уже есть, потом
+           платное предложение. Плитка сама решает, вести ли на оплату (заперт)
+           или в текст (уже куплен) и показывать ли цену: в VK её нет -->
+      <FullReportTile v-if="fullReport && freeIsReady" :token="token" :report="fullReport" />
 
       <!-- Приглашение завести вторую карту стоит сразу за разборами: рядом с
            готовым текстом понятно, что именно получит близкий. Внизу экрана,

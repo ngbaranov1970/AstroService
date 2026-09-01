@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 # backend/, и из корня репозитория, и из контейнера.
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 
+# Собранный Vue-фронт (npm run build). В образе его кладёт сюда же стадия
+# frontend из backend/Dockerfile, поэтому путь один на оба случая.
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -92,6 +96,15 @@ def create_app() -> FastAPI:
     # Статика стенда. Монтируется на приложение целиком, поэтому живёт
     # здесь, а не внутри web/.
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    # Vue-фронт на /app/. Монтируем, только если сборка есть: при локальном
+    # запуске без npm run build каталога нет, и StaticFiles упал бы на старте.
+    # html=True отдаёт index.html на /app/ — адреса экранов живут после «#»
+    # (createWebHashHistory), сервер их не видит, и SPA-fallback не нужен.
+    if FRONTEND_DIR.is_dir():
+        app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    else:
+        logger.warning("Сборки фронта нет (%s) — /app отдаваться не будет", FRONTEND_DIR)
 
     # Веб-стенд: cookie-сессия обязана стоять до роутера — по ней deps.py
     # узнаёт, кто пришёл, а без неё каждый запрос был бы новым человеком.

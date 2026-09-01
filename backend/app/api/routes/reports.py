@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import generation
 from app.api.deps import ChartByToken, CurrentUser, SessionDep
-from app.models import Chart, ReportType, User
+from app.models import Chart, Platform, ReportType, User
 from app.schemas.reports import ReportOut, ReportRequest, ReportStatus, SectionOut
 from app.services import events
+from app.services import orders as orders_service
 from app.services import reports as reports_service
 
 router = APIRouter(tags=["reports"])
@@ -158,11 +159,17 @@ async def _state(
         # Пейволл идёт впереди упавшей генерации: иначе фронт покажет ошибку
         # там, где на деле нужна покупка.
         #
-        # Цена и ссылка оплаты НЕ заполняются: единственный вход в этот API —
-        # POST /auth/vk, то есть по ту сторону всегда Mini App, а внутри VK
-        # продавать нельзя ни на одной платформе (docs/astro-context.md).
+        # Цену видит кто угодно, кроме пришедшего из VK: внутри Mini App
+        # продавать нельзя ни на одной платформе (docs/astro-context.md), и
         # `locked` без цены фронт показывает как «этот разбор закрыт».
-        return out.model_copy(update={"status": ReportStatus.LOCKED})
+        # Ссылку оплаты не отдаём никому: веб-фронт ведёт на свой экран
+        # /pay/<token>, а токен карты у него уже есть.
+        return out.model_copy(
+            update={
+                "status": ReportStatus.LOCKED,
+                "price_rub": _price_for(user, report_type),
+            }
+        )
 
     if gen is not None and gen.error is not None:
         return out.model_copy(
@@ -174,3 +181,14 @@ async def _state(
         )
 
     return out
+
+
+def _price_for(user: User, report_type: ReportType) -> int | None:
+    """Цена разбора в рублях или None, если показывать её нельзя или нечего.
+
+    None означает ровно «кнопки покупки не будет»: из VK — по правилам
+    площадки, у неоплачиваемого типа — потому что цены нет вовсе.
+    """
+    if user.platform is Platform.VK or not orders_service.is_for_sale(report_type):
+        return None
+    return orders_service.price_rub(report_type)

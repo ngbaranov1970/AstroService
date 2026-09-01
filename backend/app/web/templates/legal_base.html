@@ -1,0 +1,48 @@
+{# Каркас юридических страниц: цены, оферта, политика ПДн, контакты.
+   Отдельный от base.html намеренно: тот принадлежит стенду и умрёт вместе с
+   ним, а эти четыре страницы остаются и после переезда на Vue — их открывают
+   модерация ЮKassa и VK прямой ссылкой, без запуска приложения. #}
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  {# Документы должны находиться поиском — в отличие от страниц стенда, где
+     даты и места рождения живых людей. #}
+  {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+
+  <title>{% block title %}Звездочёт{% endblock %}</title>
+  <link rel="stylesheet" href="/static/legal.css">
+</head>
+<body>
+  <header class="doc-header">
+    {# Название текстом, а не ссылкой на «/»: страницу открывают отдельной
+       вкладкой из приложения, и уводить с неё некуда. #}
+    <p class="doc-brand">Звездочёт</p>
+  </header>
+
+  <main class="doc">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="doc-footer">
+    <nav class="doc-nav">
+      {# Внутри VK ссылок на покупку нет: витрина и оферта в Mini App — то же
+         нарушение 5.4.1, что и кнопка оплаты. #}
+      {% if not in_vk() %}
+        <a href="{{ url('/pricing') }}">Услуги и цены</a>
+        <a href="{{ url('/offer') }}">Оферта</a>
+      {% endif %}
+      <a href="{{ url('/privacy') }}">Обработка данных</a>
+      <a href="{{ url('/contacts') }}">Контакты</a>
+    </nav>
+
+    {# Реквизиты на каждой странице, а не только на /contacts: ЮKassa
+       принимает ссылку на любую из них, если ИНН напечатан. #}
+    <p class="doc-legal">
+      {{ merchant.name }} · ИНН {{ merchant.inn }} · {{ merchant.email }}
+    </p>
+  </footer>
+</body>
+</html>

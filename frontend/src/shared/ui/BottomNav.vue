@@ -47,8 +47,8 @@ const items = computed(() => {
     {
       key: 'profile',
       label: 'Профиль',
-      to: { name: 'soon', params: { feature: 'profile' } },
-      active: name === 'soon' && feature === 'profile',
+      to: { name: 'profile' },
+      active: name === 'profile',
     },
   ]
 })

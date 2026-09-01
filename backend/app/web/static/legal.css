@@ -1,0 +1,160 @@
+/* Стиль юридических страниц (цены, оферта, политика, контакты).
+   Самостоятельный файл, а не надстройка над style.css: тот принадлежит
+   стенду и уйдёт вместе с ним, а эти страницы остаются.
+   Цвета — токены Vue-приложения (frontend/src/shared/styles/main.css), чтобы
+   документ, открытый из профиля, не выглядел чужим сайтом. Шрифты системные:
+   woff2 приложения лежат в сборке Vite, тащить их в /static ради четырёх
+   страниц дороже, чем взять Georgia — она же стоит в конце стопки токенов. */
+
+:root {
+  --bg: #171310;
+  --bg-card: #1f1a15;
+  --gold: #c9a25e;
+  --gold-dim: #8a7248;
+  --ink: #ece5d8;
+  --ink-muted: #9c937f;
+  --line: rgb(201 162 94 / 0.18);
+  --line-gold: rgb(201 162 94 / 0.55);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  /* Засечки на тёмном фоне иначе выглядят жирнее, чем в приложении. */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Колонка шире, чем в приложении (26rem): там короткие карточки, здесь
+   страницы сплошного текста, и узкая мера превращает оферту в ленту. */
+.doc-header,
+.doc,
+.doc-footer {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.doc-header {
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+/* Капс с разрядкой — тот же приём, что у лейблов приложения. */
+.doc-brand {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+}
+
+.doc { flex: 1; }
+
+/* --- Типографика документа ------------------------------------------- */
+
+h1 {
+  margin: 4px 0 14px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 36px 0 12px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+  font-weight: 400;
+  color: var(--gold);
+}
+
+p { margin: 0 0 14px; }
+
+.lead { color: var(--ink-muted); margin: 0 0 26px; }
+.muted { color: var(--ink-muted); }
+
+a { color: var(--gold); text-underline-offset: 3px; }
+
+strong { font-weight: 600; }
+
+.doc ul,
+.doc ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.doc li { margin-bottom: 6px; }
+
+/* --- Карточка услуги на витрине -------------------------------------- */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 18px 20px;
+}
+
+.card + .card { margin-top: 14px; }
+
+.offer-name {
+  margin: 0 0 6px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 19px;
+}
+
+.price {
+  margin: 0 0 12px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  color: var(--gold);
+}
+
+/* --- Реквизиты: подпись и значение в строку --------------------------- */
+
+.requisites {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.requisites dt { color: var(--ink-muted); }
+.requisites dd { margin: 0; }
+
+/* На узком экране две колонки схлопываются в кашу из переносов. */
+@media (max-width: 420px) {
+  .requisites { grid-template-columns: 1fr; gap: 0; }
+  .requisites dd { margin-bottom: 10px; }
+}
+
+/* --- Подвал ----------------------------------------------------------- */
+
+.doc-footer {
+  margin-top: 52px;
+  padding-top: 20px;
+  padding-bottom: 34px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.doc-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.doc-legal {
+  margin: 12px 0 0;
+  /* Ниже 12px модерация просто не разглядит ИНН. */
+  font-size: 12px;
+}

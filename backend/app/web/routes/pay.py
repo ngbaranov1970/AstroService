@@ -54,6 +54,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 # платный тип на сегодня; список цен живёт в services/orders.py.
 DEFAULT_TYPE = ReportType.FULL_NATAL
 
+# Откуда раздаётся собранный Vue-фронт. Та же строка стоит в `base` в
+# frontend/vite.config.js — разойдясь, они дадут возврат с оплаты в никуда.
+APP_BASE_PATH = "/app/"
+
 
 # --- Страницы оплаты -------------------------------------------------------
 
@@ -64,12 +68,16 @@ async def pay_page(
     chart_token: str,
     session: SessionDep,
     report_type: Annotated[str, Query(alias="type")] = DEFAULT_TYPE.value,
+    back: Annotated[str, Query()] = "",
 ) -> Response:
     """Витрина заказа: что покупается, за сколько, кнопка и ссылка на оферту.
 
     Только читает. Платёж заводится по нажатию кнопки (POST) — GET не должен
     ходить в чужой API: этот адрес открывают и предпросмотр ссылки в
     мессенджере, и обновление страницы.
+
+    `back` говорит, откуда пришёл человек; форма несёт его дальше, чтобы
+    страница возврата знала, куда его вернуть.
     """
     chart, owner, rtype = await _context(session, chart_token, report_type)
 
@@ -77,7 +85,7 @@ async def pay_page(
         session, user_id=owner.id, chart_id=chart.id, report_type=rtype
     )
     return templates.TemplateResponse(
-        request, "pay.html", _page_context(chart, rtype, paid=paid)
+        request, "pay.html", _page_context(chart, rtype, paid=paid, back=_back(back))
     )
 
 
@@ -87,9 +95,11 @@ async def pay_start(
     chart_token: str,
     session: SessionDep,
     report_type: Annotated[str, Form()] = DEFAULT_TYPE.value,
+    back: Annotated[str, Form()] = "",
 ) -> Response:
     """Нажата кнопка оплаты: заводим заказ, платёж и уводим на форму ЮKassa."""
     chart, owner, rtype = await _context(session, chart_token, report_type)
+    back = _back(back)
 
     if await orders.has_paid(
         session, user_id=owner.id, chart_id=chart.id, report_type=rtype
@@ -122,7 +132,9 @@ async def pay_start(
             order,
             # Абсолютный адрес обязателен: ЮKassa возвращает человека из
             # своего домена, относительный путь ей не годится.
-            return_url=_absolute(f"/pay/{chart_token}/done?order={order.token}"),
+            return_url=_absolute(
+                f"/pay/{chart_token}/done?order={order.token}&back={back}"
+            ),
         )
     except (orders.OrderError, yookassa.PaymentError) as e:
         # Заказ мог успеть записаться, а платёж — нет; откатываем, чтобы не
@@ -137,7 +149,7 @@ async def pay_start(
         return templates.TemplateResponse(
             request,
             "pay.html",
-            _page_context(chart, rtype, paid=False, error=_HUMAN_ERROR),
+            _page_context(chart, rtype, paid=False, back=back, error=_HUMAN_ERROR),
         )
 
     # Коммит ДО редиректа: за ним человек уходит на чужой сайт, и если
@@ -153,6 +165,7 @@ async def pay_done(
     session: SessionDep,
     background: BackgroundTasks,
     order_token: Annotated[str, Query(alias="order")] = "",
+    back: Annotated[str, Query()] = "",
 ) -> Response:
     """Сюда ЮKassa возвращает человека с формы оплаты.
 
@@ -160,7 +173,11 @@ async def pay_done(
     же легко открыть руками, — поэтому статус спрашивается у их API
     (sync_status). Вебхук делает то же самое своим темпом; кто успел первым,
     неважно.
+
+    `back=app` означает, что платить пришли из веб-фронта: тогда страница
+    ничего не рисует, а уводит редиректом обратно в приложение.
     """
+    back = _back(back)
     chart, _owner, _rtype = await _context(session, chart_token, DEFAULT_TYPE.value)
 
     order = await orders.get_by_token(session, order_token) if order_token else None
@@ -198,6 +215,15 @@ async def pay_done(
         if await reports.get_report(session, chart.id, order.report_type) is None:
             generation.schedule(background, chart, order.report_type)
 
+    if back == orders.BACK_APP:
+        # Человек платил из веб-фронта: свой экран «оплачено» он ждёт там, и
+        # показать ему страницу стенда — значит выкинуть из приложения.
+        # Токен заказа передаём: по нему тот экран берёт номер и сумму.
+        return RedirectResponse(
+            _app_url(f"/paid/{chart_token}", order=order_token),
+            status.HTTP_303_SEE_OTHER,
+        )
+
     return templates.TemplateResponse(
         request,
         "pay_done.html",
@@ -208,6 +234,9 @@ async def pay_done(
             "paid": paid,
             "title": orders.title(order.report_type if order else DEFAULT_TYPE),
             "owner_name": chart.person_name,
+            # Ссылка обратно в Mini App — только для пришедших из VK: у
+            # остальных приложения, куда возвращаться, нет.
+            "vk_return_url": _vk_return_url(chart_token) if back == orders.BACK_VK else None,
         },
     )
 
@@ -293,14 +322,56 @@ async def _context(
     return chart, owner, rtype
 
 
+def _back(value: str) -> str:
+    """Оставить от параметра `back` только известное значение, иначе пусто.
+
+    Строка уезжает в return_url и в скрытое поле формы; произвольную оттуда
+    вернут нам же обратно, и на странице возврата она станет чужим адресом.
+    """
+    return value if value in (orders.BACK_APP, orders.BACK_VK) else ""
+
+
+def _app_url(path: str, *, order: str) -> str:
+    """Адрес экрана веб-фронта: /app/#/paid/<токен карты>?order=<токен заказа>.
+
+    Берётся из APP_BASE_URL, а без неё строится относительным путём на том же
+    домене. Настройка нужна потому, что вернуться человек может не туда, где
+    лежит фронт: адрес возврата ЮKassa запомнила при создании платежа, и
+    сменившийся с тех пор PUBLIC_BASE_URL приводил бы его на 404.
+
+    Решётка обязательна — роутер фронта работает в hash-режиме, чтобы
+    переходы не стирали параметры запуска VK.
+    """
+    base = get_settings().app_base_url
+    root = base.rstrip("/") if base else APP_BASE_PATH.rstrip("/")
+    return f"{root}/#{path}?order={order}"
+
+
+def _vk_return_url(chart_token: str) -> str | None:
+    """Ссылка обратно в Mini App на экран полного разбора. None — id не задан.
+
+    Открывается она в браузере телефона, а VK уже перекидывает в приложение.
+    """
+    app_id = get_settings().vk_app_id
+    if app_id is None:
+        return None
+    return f"https://vk.com/app{app_id}#/report/{chart_token}/{DEFAULT_TYPE.value}"
+
+
 def _page_context(
-    chart: Chart, report_type: ReportType, *, paid: bool, error: str | None = None
+    chart: Chart,
+    report_type: ReportType,
+    *,
+    paid: bool,
+    back: str = "",
+    error: str | None = None,
 ) -> dict:
     """Данные витрины оплаты — одним словарём для шаблона."""
     return {
         "chart": chart,
         "chart_token": chart.token,
         "report_type": report_type.value,
+        "back": back,
         "title": orders.title(report_type),
         "price": orders.price_rub(report_type),
         "titles": reports.section_titles(report_type),
