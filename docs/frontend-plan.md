@@ -320,27 +320,43 @@ export const REPORT_TYPES = {
 
 ## Деплой
 
-Собранный dist отдаёт Caddy, npm в Docker-образ backend не попадает:
-1. `vite.config.js`: `base: '/app/'` (+ proxy `/api` для dev).
-2. `docker-compose.yml`, сервис caddy: volume `./frontend/dist:/srv/app:ro`.
-3. `Caddyfile` до `reverse_proxy`: `handle_path /app/* { root * /srv/app;
-   try_files {path} /index.html; file_server }` + immutable-кеш на
-   `/assets/*`, no-cache на index.html.
-4. `deploy/build-frontend.sh`: локально `npm ci && npm run build` → rsync
-   dist на прод (fish на сервере — команды слать скриптом).
-5. Jinja-стенд (`/`, `/r/*`, `/pay/*`, админка, legal) не трогается; URL
-   Mini App в кабинете VK меняется на `https://ngbaranov.top/app/` ПОСЛЕ
-   ручной проверки.
+Сделано не так, как планировалось здесь изначально: dist отдаёт не Caddy, а
+само приложение, и собирается он внутри Docker-образа. Volume в caddy,
+`build-frontend.sh` с rsync и `handle_path` в Caddyfile не понадобились —
+раздача одним `mount` дешевле, а сборка в образе исключает расхождение между
+кодом и залитым руками dist.
+
+1. `vite.config.js`: `base: '/app/'` (+ proxy `/api` и страниц оплаты для dev).
+2. `backend/Dockerfile`: стадия `frontend` (node:22-alpine) делает `npm ci &&
+   npm run build`, готовый dist копируется в рантайм-образ; node в него не
+   уезжает. Выкатка поэтому **только с `--build`**.
+3. `main.py`: `mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True))`.
+   Монтируется, только если каталог есть, — локально без `npm run build`
+   приложение всё равно стартует.
+4. `Caddyfile`: immutable-кеш на `/app/assets/*` (в имени файла хеш
+   содержимого), no-cache на `/app/` — иначе точка входа залипнет в кеше
+   вебвью. Проксирование в `api:8000` осталось общим.
+5. URL Mini App в кабинете VK — `https://astrozvezdochet.ru/app/`,
+   переключается ПОСЛЕ ручной проверки в живом VK.
+
+Снос Jinja-стенда — отдельный шаг после этой проверки, не одновременно с ней
+(`astro-context.md`, «Стенд снят, адреса разведены»). Оплата, юр. страницы,
+админка и вебхуки остаются в `app/web/` и не трогаются вовсе.
 
 ## Правки бэкенда (минимум)
 
 1. ~~**docs/progress.md** — исправить статус заявки в каталог VK~~ — СДЕЛАНО
    2026-08-21: отказ 20.08 и повторная подача 21.08 записаны, «подать
    заявку» из «Следующих шагов» убрано.
-2. (Шаг 10, опционально) `POST /api/v1/charts/{token}/feedback`
-   `{type, rating 1..5, comment?}`: перенос логики оценки из
-   `web/routes/stand.py` в `app/services/` + тонкий маршрут — паритет со
-   стендом. ПДн в логи не писать.
+2. (Шаг 10, обязательно перед сносом стенда) Две функции, которые есть в
+   `web/routes/stand.py` и отсутствуют в JSON-API:
+   - `POST /api/v1/charts/{token}/feedback` `{type, rating 1..5, comment?}` —
+     перенос логики оценки в `app/services/` + тонкий маршрут;
+   - подписка на сообщения сообщества (`/vk/messages-allowed`, `-denied`) —
+     без неё рассылке некого собирать.
+
+   ПДн в логи не писать. Со сносом стенда обе пропали бы молча: JSON-API их
+   не дублирует.
 
 ## Порядок работ и вехи
 
@@ -355,8 +371,9 @@ export const REPORT_TYPES = {
 | 6 | Пейволл full_natal | locked с ценой/составом/ссылкой; pay_url:null — без кнопки; после оплаты поллинг доводит до ready |
 | 7 | ChartView: таблицы | данные совпадают со страницей стенда /r/{token} |
 | 8 | Полировка: failed-коды, 503-экран, скелетоны, safe-area, VKWebAppSetViewSettings | ручной прогон ошибочных веток |
-| 9 | Деплой: base:'/app/', Caddyfile, volume, build-frontend.sh | ngbaranov.top/app/ работает из VK; стенд и админка целы |
-| 10 | (опц.) feedback в API + звёзды на ready-экране | событие feedback в events с report_id |
+| 9 | ~~Раздача сборки~~ — СДЕЛАНО: стадия `frontend` в Dockerfile, `mount("/app")` в main.py, кеш-правила в Caddyfile | остаётся деплой с `--build` и прогон astrozvezdochet.ru/app/ из живого VK |
+| 10 | Паритет со стендом перед сносом: `POST /api/v1/charts/{token}/feedback` и подписка на сообщения сообщества в API | событие feedback в events с report_id; `messages_allowed` меняется из Vue |
+| 11 | Снос стенда: удалить `stand.py` с шаблонами, корень → редирект в `/app/`, `/r/<token>` → 301 | `/pay/*`, `/offer`, `/pricing`, `/privacy`, `/contacts`, `/admin`, `/api/v1` отвечают как раньше |
 
 ## Верификация
 
@@ -366,7 +383,9 @@ export const REPORT_TYPES = {
 - Пейволл: тестовый магазин ЮKassa (ключи ТОЛЬКО парой) — оплата во внешнем
   браузере, возврат в Mini App, разбор открылся.
 - `pytest` backend зелёный (фронт его не трогает, кроме шага 10).
-- После выкатки: Jinja-стенд, `/admin`, `/pay/*` отвечают как раньше.
+- После выкатки Vue на `/app/`: Jinja-стенд, `/admin`, `/pay/*` отвечают как
+  раньше. После сноса стенда — то же, кроме самого стенда: корень отвечает
+  редиректом, а `/admin`, `/pay/*` и юр. страницы не меняются.
 
 ## Риски
 
