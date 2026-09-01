@@ -137,6 +137,22 @@ def mark_vk_messages_allowed(user: User) -> bool:
     return True
 
 
+def set_tester(user: User, value: bool) -> bool:
+    """Включить или снять признак тестера; True — если значение изменилось.
+
+    Тестеру открыт полный разбор без оплаты и сняты лимиты
+    (services/reports.py), то есть каждый его запрос тратит наши деньги на
+    DeepSeek. Поэтому ставится только руками из админки: раньше признак
+    давала секретная ссылка `?t=`, но она ушла вместе с веб-стендом.
+
+    Синхронная, в базу не ходит: правка уедет с ближайшим flush сессии.
+    """
+    if user.is_tester == value:
+        return False
+    user.is_tester = value
+    return True
+
+
 def set_primary_chart(user: User, chart: Chart) -> bool:
     """Отметить карту как собственную карту пользователя; True — если сменилась.
 

@@ -98,6 +98,17 @@
                     {{ row.person_name or "Без имени" }}
                   </a>
                   {% if row.is_tester %}<span class="badge">тестер</span>{% endif %}
+                  {# Признак правится у ЧЕЛОВЕКА, а не у этой строки: у него
+                     может быть много разборов, и кнопка в каждом ряду одна и
+                     та же. formaction/formmethod, а не своя форма: таблица уже
+                     лежит внутри формы сравнения, а вложенные формы HTML
+                     запрещает — браузер молча выбросил бы внутреннюю. #}
+                  <button type="submit" class="tiny" name="value"
+                          value="{{ '' if row.is_tester else 'on' }}"
+                          formmethod="post"
+                          formaction="/admin/users/{{ row.user_id }}/tester">
+                    {{ "снять тестера" if row.is_tester else "в тестеры" }}
+                  </button>
                   <span class="muted sub">
                     {{ row.birth_local.strftime("%d.%m.%Y") }}
                     {% if row.time_known %}

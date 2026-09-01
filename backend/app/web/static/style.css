@@ -442,6 +442,19 @@ button.secondary {
   border: 1px solid var(--line);
 }
 
+/* Кнопка внутри строки таблицы админки: обычная у нас во всю ширину блока,
+   а здесь их по одной в каждой строке и места ровно на подпись. */
+button.tiny {
+  width: auto;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
 /* --- Данные расчёта ---------------------------------------------------- */
 
 .calc {

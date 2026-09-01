@@ -14,7 +14,16 @@ import logging
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
@@ -22,7 +31,8 @@ from starlette.responses import Response
 from app import generation
 from app.db import get_session
 from app.services import admin as admin_service
-from app.services import broadcast, content, reports
+from app.services import broadcast, content, events, reports
+from app.services import users as users_service
 from app.web.deps import require_admin
 from app.web.templating import templates
 
@@ -68,6 +78,34 @@ async def index(request: Request, session: SessionDep) -> Response:
             "limit": LIST_LIMIT,
         },
     )
+
+
+@router.post("/users/{user_id}/tester")
+async def toggle_tester(
+    user_id: int,
+    session: SessionDep,
+    value: Annotated[str, Form()] = "",
+) -> Response:
+    """Выдать или снять признак тестера. Возвращает на таблицу разборов.
+
+    Нужное значение приходит формой, а не считается от текущего: в двух
+    открытых вкладках админки кнопки-переключатели гасили бы работу друг
+    друга. Раньше признак давала секретная ссылка `?t=`, она ушла вместе
+    со стендом.
+    """
+    user = await users_service.get_by_id(session, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого пользователя нет")
+
+    wanted = value == "on"
+    if users_service.set_tester(user, wanted) and wanted:
+        await events.log(session, events.TESTER_ACTIVATED, user_id=user.id)
+    await session.commit()
+
+    # Внутренний user_id, а не имя и не vk_id: права меняются редко, и след
+    # в логе нужен, а персональных данных в нём быть не должно.
+    logger.info("Админка: тестер у пользователя %s → %s", user_id, wanted)
+    return RedirectResponse("/admin", status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/compare")
