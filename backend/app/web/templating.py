@@ -21,7 +21,7 @@ from jinja2 import pass_context
 from markupsafe import Markup, escape
 
 from app.config import get_settings
-from app.web.deps import in_vk, with_session
+from app.web.deps import in_vk
 
 # Время в базе хранится в UTC, а сверять его человек будет с личным кабинетом
 # ЮKassa и выпиской банка — там московское.
@@ -35,15 +35,16 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 
-@pass_context
-def _url(context, path: str) -> str:
-    """Jinja-глобал `url()`: внутренний адрес с токеном сессии, если он есть.
+def _url(path: str) -> str:
+    """Jinja-глобал `url()`: внутренний адрес страницы.
 
-    Глобал, а не переменная контекста: переменную забыли бы передать в один
-    из шаблонов, и в VK ровно эта страница стала бы тупиком. `pass_context`
-    даёт доступ к `request`, который Jinja2Templates кладёт в контекст сам.
+    Раньше дописывал к адресу токен сессии `?s=` — в стенде личность внутри
+    VK ехала именно так. Со сносом стенда дописывать нечего: оставшиеся
+    страницы личности не спрашивают. Глобал сохранён потому, что его зовут
+    24 места в шаблонах, и он — единственная точка, куда вернётся сборка
+    адреса, если Telegram Web App снова понесёт личность в ссылке.
     """
-    return with_session(context["request"], path)
+    return path
 
 
 @pass_context

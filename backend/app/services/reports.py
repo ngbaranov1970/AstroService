@@ -73,7 +73,7 @@ from app.config import get_settings
 from app.llm import client
 from app.llm.prompts import free_natal, full_natal
 from app.models import Chart, Report, ReportType, User
-from app.services import orders
+from app.services import events, orders
 
 # Логи здесь важнее, чем в соседних модулях: генерацию запускает фоновая
 # задача, которую никто не ждёт, а колонки «статус» у отчёта нет намеренно
@@ -641,3 +641,55 @@ async def _check_allowed(
             f"Исчерпан лимит бесплатных разборов «{report_type.value}»: "
             f"{used} из {limit}"
         )
+
+
+# --- Отзывы ---------------------------------------------------------------
+
+# Потолок длины комментария: поле свободное, и без ограничения в props
+# аналитики уедет чья-нибудь вставленная целиком статья.
+MAX_COMMENT = 500
+
+
+async def leave_feedback(
+    session: AsyncSession,
+    *,
+    chart: Chart,
+    user: User,
+    report_type: ReportType,
+    rating: int,
+    comment: str = "",
+) -> None:
+    """Записать оценку разбора: 1–5 и необязательное «что не так».
+
+    Пишет в `events`, а не в свою таблицу: миграция ради одного поля со
+    звёздочками не окупается. Когда отзывов станет много, их место —
+    отдельная таблица, которую чистят по запросу человека.
+
+    Не коммитит: транзакцией распоряжается вызывающий. ValueError — оценка
+    вне 1–5, это ошибка вызывающего, а не выбор пользователя.
+    """
+    if not 1 <= rating <= 5:
+        raise ValueError(f"Оценка {rating} вне диапазона 1–5")
+
+    # Оценивают конкретную редакцию текста, а не карту: без report_id звёзды
+    # после смены VERSION молча переехали бы на новый разбор, которого человек
+    # не видел, — и админка сравнивала бы версии по чужим оценкам.
+    report = await get_report(session, chart.id, report_type)
+
+    # Правило «в props нет ПДн» здесь держится на самом человеке: он может
+    # процитировать в жалобе дату рождения. Проверить это нечем, и потому
+    # комментарий не попадает в логи ни на одном слое.
+    await events.log(
+        session,
+        events.FEEDBACK,
+        user_id=user.id,
+        chart_id=chart.id,
+        type=report_type.value,
+        report_id=report.id if report is not None else None,
+        prompt_version=report.prompt_version if report is not None else None,
+        rating=rating,
+        comment=comment.strip()[:MAX_COMMENT],
+        # Мнение владельца и мнение того, кому переслали ссылку, в отчётах
+        # весят по-разному.
+        own=chart.user_id == user.id,
+    )

@@ -105,7 +105,9 @@ async def pay_start(
         session, user_id=owner.id, chart_id=chart.id, report_type=rtype
     ):
         # Платить второй раз за тот же разбор не даём: отправляем читать.
-        return RedirectResponse(f"/r/{chart_token}", status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            _app_url(f"/chart/{chart_token}"), status.HTTP_303_SEE_OTHER
+        )
 
     try:
         order = await orders.get_or_create_order(
@@ -119,7 +121,9 @@ async def pay_start(
             await orders.sync_status(session, order)
             if order.is_paid:
                 await session.commit()
-                return RedirectResponse(f"/r/{chart_token}", status.HTTP_303_SEE_OTHER)
+                return RedirectResponse(
+                    _app_url(f"/chart/{chart_token}"), status.HTTP_303_SEE_OTHER
+                )
             if order.status is not OrderStatus.PENDING:
                 # Платёж закрыт, платить по нему нечем: заводим новый заказ.
                 # Тем же он быть не может — ключом идемпотентности служит его
@@ -230,6 +234,7 @@ async def pay_done(
         {
             "chart": chart,
             "chart_token": chart_token,
+            "chart_url": _app_url(f"/chart/{chart_token}"),
             "order": order,
             "paid": paid,
             "title": orders.title(order.report_type if order else DEFAULT_TYPE),
@@ -331,8 +336,8 @@ def _back(value: str) -> str:
     return value if value in (orders.BACK_APP, orders.BACK_VK) else ""
 
 
-def _app_url(path: str, *, order: str) -> str:
-    """Адрес экрана веб-фронта: /app/#/paid/<токен карты>?order=<токен заказа>.
+def _app_url(path: str, *, order: str | None = None) -> str:
+    """Адрес экрана веб-фронта: /app/#/<path>, с номером заказа, если он есть.
 
     Берётся из APP_BASE_URL, а без неё строится относительным путём на том же
     домене. Настройка нужна потому, что вернуться человек может не туда, где
@@ -344,7 +349,8 @@ def _app_url(path: str, *, order: str) -> str:
     """
     base = get_settings().app_base_url
     root = base.rstrip("/") if base else APP_BASE_PATH.rstrip("/")
-    return f"{root}/#{path}?order={order}"
+    tail = f"?order={order}" if order else ""
+    return f"{root}/#{path}{tail}"
 
 
 def _vk_return_url(chart_token: str) -> str | None:
@@ -370,6 +376,9 @@ def _page_context(
     return {
         "chart": chart,
         "chart_token": chart.token,
+        # Готовый адрес экрана карты во фронте: шаблон собрать его не может —
+        # корень фронта живёт в настройках, а не в шаблоне.
+        "chart_url": _app_url(f"/chart/{chart.token}"),
         "report_type": report_type.value,
         "back": back,
         "title": orders.title(report_type),

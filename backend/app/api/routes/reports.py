@@ -1,8 +1,6 @@
 """JSON-маршруты разборов: состояние текстов по карте и запрос генерации.
 
 Слой тонкий: принять запрос, собрать состояние из сервисов, отдать схему.
-Ту же картину рисует стенд (`_report_block` в app/web/routes/stand.py) — он
-и этот файл обязаны отвечать одинаково, потому что за ними одни сервисы.
 
 Форма продиктована временем ответа LLM: текст готовится 30–60 секунд, и
 маршрута «дай разбор» быть не может — он держал бы соединение минуту.
@@ -12,13 +10,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import generation
 from app.api.deps import ChartByToken, CurrentUser, SessionDep
 from app.models import Chart, Platform, ReportType, User
-from app.schemas.reports import ReportOut, ReportRequest, ReportStatus, SectionOut
+from app.schemas.reports import (
+    FeedbackIn,
+    ReportOut,
+    ReportRequest,
+    ReportStatus,
+    SectionOut,
+)
 from app.services import events
 from app.services import orders as orders_service
 from app.services import reports as reports_service
@@ -117,6 +121,33 @@ async def request_report(
             "error_code": None,
         }
     )
+
+
+@router.post(
+    "/charts/{token}/feedback", status_code=status.HTTP_204_NO_CONTENT
+)
+async def leave_feedback(
+    payload: FeedbackIn,
+    chart: ChartByToken,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Response:
+    """Оценка разбора звёздами с необязательным комментарием.
+
+    Владельца карты не требует намеренно: ссылку пересылают, и мнение
+    прочитавшего со стороны нужно не меньше. Чьё это мнение, различает флаг
+    `own` в самом событии.
+    """
+    await reports_service.leave_feedback(
+        session,
+        chart=chart,
+        user=user,
+        report_type=payload.type,
+        rating=payload.rating,
+        comment=payload.comment,
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 async def _state(
