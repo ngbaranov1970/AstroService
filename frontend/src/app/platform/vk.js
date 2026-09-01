@@ -18,16 +18,23 @@ const BG = '#171310'
 // человека выглядит просто сломанной (проверено на стенде 27.08.2026)
 const BRIDGE_TIMEOUT_MS = 15000
 
-/** Позвать метод Bridge, но не ждать дольше BRIDGE_TIMEOUT_MS.
+// Отдельный срок для вызовов на старте: за ними стоит монтирование Vue, и
+// каждая секунда ожидания — секунда пустого экрана. Ждать столько же, сколько
+// окна подписки, нельзя: 15 секунд темноты человек читает как «сломалось»
+const STARTUP_TIMEOUT_MS = 3000
+
+/** Позвать метод Bridge, но не ждать дольше timeoutMs.
  *  Promise.race берёт несколько промисов и отдаёт результат того, кто
- *  финишировал первым; второй участник здесь — таймер, отклоняющий гонку. */
-function sendWithTimeout(method, params) {
+ *  финишировал первым; второй участник здесь — таймер, отклоняющий гонку.
+ *  Значение параметра по умолчанию (= BRIDGE_TIMEOUT_MS) работает как в Python:
+ *  вызов из двух аргументов получает его сам. */
+function sendWithTimeout(method, params, timeoutMs = BRIDGE_TIMEOUT_MS) {
   return Promise.race([
     bridge.send(method, params),
     // Конструктор промиса получает две функции: первой его завершают успехом,
     // второй — ошибкой. Успех таймеру не нужен, поэтому первая не названа
     new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('VK не ответил')), BRIDGE_TIMEOUT_MS)
+      setTimeout(() => reject(new Error('VK не ответил')), timeoutMs)
     }),
   ])
 }
@@ -52,8 +59,11 @@ export const vkPlatform = {
   async init() {
     launchParams = readLaunchParams()
     // VKWebAppInit — сигнал «приложение загрузилось, убирай прелоадер». Без
-    // него страница видна, но накрыта крутилкой VK, и тапы уходят сквозь неё
-    await bridge.send('VKWebAppInit', {})
+    // него страница видна, но накрыта крутилкой VK, и тапы уходят сквозь неё.
+    // Ответа ждём не дольше STARTUP_TIMEOUT_MS: в мобильном клиенте его может
+    // не прийти вовсе, а за этим await стоит mount() — молчание моста держало
+    // телефон на пустом фоне навсегда, десктоп при этом работал (01.09.2026)
+    await sendWithTimeout('VKWebAppInit', {}, STARTUP_TIMEOUT_MS)
   },
 
   /** Есть ли чем авторизоваться на этой платформе. */
@@ -94,13 +104,19 @@ export const vkPlatform = {
    *  Без этого над приложением висит белая полоса — на тёмном макете заметно. */
   async setHeaderColor() {
     try {
-      await bridge.send('VKWebAppSetViewSettings', {
-        // light — светлые значки на тёмном фоне (часы, батарея)
-        status_bar_style: 'light',
-        action_bar_color: BG,
-      })
+      await sendWithTimeout(
+        'VKWebAppSetViewSettings',
+        {
+          // light — светлые значки на тёмном фоне (часы, батарея)
+          status_bar_style: 'light',
+          action_bar_color: BG,
+        },
+        STARTUP_TIMEOUT_MS,
+      )
     } catch {
       // На desktop_web метода нет, и это не ошибка: шапку там рисует сама VK.
+      // Сюда же приходит таймаут: этот вызов стоит на пути к mount(), и ждать
+      // молчащий клиент дольше положенного значит держать пустой экран.
       // catch без переменной — «поймать и не смотреть что», нужен для тишины
     }
   },
