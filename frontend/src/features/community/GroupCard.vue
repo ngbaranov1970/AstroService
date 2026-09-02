@@ -13,8 +13,18 @@ import { onMounted, ref } from 'vue'
 
 import { useGroup } from '@/shared/composables/useGroup'
 
-const { status, joined, messagesAllowed, available, canPrompt, ensureLoaded, join, allow, deny } =
-  useGroup()
+const {
+  status,
+  joined,
+  enabled,
+  needsPrompt,
+  available,
+  canPrompt,
+  ensureLoaded,
+  join,
+  allow,
+  deny,
+} = useGroup()
 
 // Подпись под кнопками: и «открываем окно VK…», и текст отказа.
 // Пустая строка — подписи нет
@@ -66,7 +76,7 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
     <!-- Текст зависит от того, что человеку осталось сделать. v-if/v-else-if/
          v-else — ветвление прямо в разметке, как if/elif/else -->
     <p class="mt-2 font-read text-lead text-ink-muted">
-      <template v-if="messagesAllowed">
+      <template v-if="enabled">
         Каждое утро присылаем короткий разбор дня по твоей карте в личные
         сообщения.
       </template>
@@ -96,7 +106,7 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
            Идёт первой ветвью и без canPrompt: окна VK ей не нужны, а
            отписаться человек должен мочь из любого окружения -->
       <button
-        v-if="messagesAllowed"
+        v-if="enabled"
         type="button"
         :disabled="busy !== null"
         class="w-full cursor-pointer px-6 py-3 font-sans text-label tracking-label text-gold-dim uppercase transition-colors active:text-gold disabled:text-line-dim"
@@ -106,9 +116,11 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
       </button>
 
       <!-- Главная кнопка блока: ради разрешения писать всё и затевалось.
-           После согласия на её месте появляется обратная — «не присылать» -->
+           После согласия на её месте появляется обратная — «не присылать».
+           Окно VK нужно только тому, кто разрешения ещё не давал, — остальным
+           кнопка доступна везде, в том числе в браузере -->
       <button
-        v-else-if="canPrompt"
+        v-else-if="canPrompt || !needsPrompt"
         type="button"
         :disabled="busy !== null"
         class="w-full cursor-pointer rounded-card border border-gold px-6 py-4 font-sans text-label tracking-label text-gold uppercase transition-colors active:bg-gold/10 disabled:border-line-dim disabled:text-gold-dim"
@@ -121,8 +133,7 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
            разрешения показывает сам ВКонтакте. Кнопку в этом случае не рисуем
            вовсе — нажатие ушло бы в никуда и выглядело поломкой -->
       <p v-else class="font-sans text-meta text-ink-muted">
-        Включить можно только из приложения внутри ВКонтакте — открой его из
-        нашего сообщества.
+        Включить можно только из приложения внутри ВКонтакте — открой его из нашего сообщества.
       </p>
     </div>
 

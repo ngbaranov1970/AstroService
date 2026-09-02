@@ -198,6 +198,22 @@ def mark_vk_messages_denied(user: User) -> bool:
     return True
 
 
+def set_subscribed(user: User, value: bool) -> bool:
+    """Включить или выключить нашу рассылку; True — если значение изменилось.
+
+    Это решение человека о письмах, а не о канале: `vk_messages_allowed_at`
+    не трогаем. Разрешение VK стирать нельзя — список разрешивших VK не
+    отдаёт, и вернуть запись можно только новым окном Bridge, которого вне
+    Mini App нет вовсе.
+
+    Синхронная, в базу не ходит: правка уедет с ближайшим flush сессии.
+    """
+    if user.subscribed == value:
+        return False
+    user.subscribed = value
+    return True
+
+
 def clear_delivery_block(user: User) -> bool:
     """Снять отметку недоставляемости; True — если она была.
 

@@ -36,27 +36,36 @@ async def group_state(user: CurrentUser) -> GroupStateOut:
     if user.platform is not Platform.VK:
         # Не из VK — блока подписки на экране нет вовсе, и сетевой вызов был
         # бы напрасным.
-        return GroupStateOut(joined=None, messages_allowed=False, group_id=None)
+        return GroupStateOut(
+            joined=None, messages_allowed=False, subscribed=False, group_id=None
+        )
 
     joined = await vk_api.is_group_member(int(user.external_id))
     return GroupStateOut(
         joined=joined,
         messages_allowed=user.vk_messages_allowed_at is not None,
+        subscribed=user.subscribed,
         group_id=get_settings().vk_group_id,
     )
 
 
 @router.post("/messages-allowed", status_code=status.HTTP_204_NO_CONTENT)
 async def messages_allowed(user: CurrentUser, session: SessionDep) -> Response:
-    """Человек разрешил сообществу писать — запоминаем это у себя.
+    """Человек включил рассылку — поднимаем и разрешение, и подписку.
 
-    Зовётся после того, как VK Bridge ответил согласием на
-    `VKWebAppAllowMessagesFromGroup`. Ответ пустой: фронту от него ничего не
-    нужно, состояние он и так знает.
+    Зовётся после согласия в окне `VKWebAppAllowMessagesFromGroup`, а вне
+    Mini App — сам по себе: разрешение VK там уже записано, включить письма
+    обратно можно без окна. Ответ пустой: фронту от него ничего не нужно,
+    состояние он и так знает.
     """
     _require_vk(user)
 
-    if users_service.mark_vk_messages_allowed(user):
+    # Два флага разной природы: разрешение канала VK и согласие на письма.
+    # Событие пишем, если изменился любой, — оба означают «рассылка включена»,
+    # а повторное нажатие не должно добавлять в воронку лишнюю конверсию.
+    granted = users_service.mark_vk_messages_allowed(user)
+    resubscribed = users_service.set_subscribed(user, True)
+    if granted or resubscribed:
         await events.log(session, events.GROUP_MESSAGES_ALLOWED, user_id=user.id)
     # Согласие означает, что чёрного списка и запрета приватности больше нет.
     # Погашенный по коду 900/902 иначе в рассылку не вернётся.
@@ -67,15 +76,17 @@ async def messages_allowed(user: CurrentUser, session: SessionDep) -> Response:
 
 @router.post("/messages-denied", status_code=status.HTTP_204_NO_CONTENT)
 async def messages_denied(user: CurrentUser, session: SessionDep) -> Response:
-    """Человек отказался от писем — гасим разрешение у себя.
+    """Человек отказался от писем — гасим подписку, разрешение оставляем.
 
-    Обратного метода к `VKWebAppAllowMessagesFromGroup` у VK Bridge нет: на
-    стороне VK разрешение останется, но рассылка берёт получателей по нашему
-    флагу, и писать мы перестанем сразу.
+    Обратного метода к `VKWebAppAllowMessagesFromGroup` у VK Bridge нет, и
+    стирать `vk_messages_allowed_at` тут нельзя: в самом VK разрешение
+    остаётся, а вернуть нашу запись о нём можно только новым окном Bridge —
+    вне Mini App человек оказался бы отписан навсегда. Рассылка проверяет оба
+    флага, поэтому писать мы перестаём сразу.
     """
     _require_vk(user)
 
-    if users_service.mark_vk_messages_denied(user):
+    if users_service.set_subscribed(user, False):
         await events.log(session, events.GROUP_MESSAGES_DENIED, user_id=user.id)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
