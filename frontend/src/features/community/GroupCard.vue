@@ -3,15 +3,18 @@
 // сообщения. Показывают его конец готового разбора (ReportView) и профиль.
 // Данных снаружи не принимает — всё берёт из useGroup, общего на приложение.
 //
-// Вне VK не рисуется вовсе: окна подписки умеет открывать только VK Bridge.
-// Консоли в мобильном приложении VK нет, поэтому каждый отказ выводится
-// подписью под кнопками — молчащая кнопка неотличима от сломанного экрана.
+// Окна VK открывает только Bridge, а он жив лишь внутри Mini App — отсюда
+// canPrompt. Без него остаётся кнопка отказа: она гасит наш флаг рассылки и
+// работает хоть в браузере. Консоли в мобильном приложении VK нет, поэтому
+// каждый отказ выводится подписью под кнопками — молчащая кнопка неотличима
+// от сломанного экрана.
 
 import { onMounted, ref } from 'vue'
 
 import { useGroup } from '@/shared/composables/useGroup'
 
-const { status, joined, messagesAllowed, available, ensureLoaded, join, allow, deny } = useGroup()
+const { status, joined, messagesAllowed, available, canPrompt, ensureLoaded, join, allow, deny } =
+  useGroup()
 
 // Подпись под кнопками: и «открываем окно VK…», и текст отказа.
 // Пустая строка — подписи нет
@@ -76,9 +79,10 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
     <div class="mt-5 space-y-2">
       <!-- Подписка нужна не всем: joined === false — точно не подписан,
            null — выяснить не удалось, и кнопку показываем на всякий случай.
-           Подписанному (true) её не рисуем вовсе -->
+           Подписанному (true) её не рисуем вовсе. Вне Mini App прячем совсем:
+           окно подписки открывать нечем -->
       <button
-        v-if="joined !== true"
+        v-if="canPrompt && joined !== true"
         type="button"
         :disabled="busy !== null"
         class="w-full cursor-pointer rounded-card border border-line-gold px-6 py-4 font-sans text-label tracking-label text-gold uppercase transition-colors active:bg-gold/10 disabled:border-line-dim disabled:text-gold-dim"
@@ -87,10 +91,24 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
         Подписаться на сообщество
       </button>
 
+      <!-- Отказ выглядит скромнее согласия намеренно: это выход, а не
+           равнозначный выбор. Рамки нет, только приглушённая подпись.
+           Идёт первой ветвью и без canPrompt: окна VK ей не нужны, а
+           отписаться человек должен мочь из любого окружения -->
+      <button
+        v-if="messagesAllowed"
+        type="button"
+        :disabled="busy !== null"
+        class="w-full cursor-pointer px-6 py-3 font-sans text-label tracking-label text-gold-dim uppercase transition-colors active:text-gold disabled:text-line-dim"
+        @click="onDeny"
+      >
+        Не присылать
+      </button>
+
       <!-- Главная кнопка блока: ради разрешения писать всё и затевалось.
            После согласия на её месте появляется обратная — «не присылать» -->
       <button
-        v-if="!messagesAllowed"
+        v-else-if="canPrompt"
         type="button"
         :disabled="busy !== null"
         class="w-full cursor-pointer rounded-card border border-gold px-6 py-4 font-sans text-label tracking-label text-gold uppercase transition-colors active:bg-gold/10 disabled:border-line-dim disabled:text-gold-dim"
@@ -99,17 +117,13 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
         Присылать гороскоп дня
       </button>
 
-      <!-- Отказ выглядит скромнее согласия намеренно: это выход, а не
-           равнозначный выбор. Рамки нет, только приглушённая подпись -->
-      <button
-        v-else
-        type="button"
-        :disabled="busy !== null"
-        class="w-full cursor-pointer px-6 py-3 font-sans text-label tracking-label text-gold-dim uppercase transition-colors active:text-gold disabled:text-line-dim"
-        @click="onDeny"
-      >
-        Не присылать
-      </button>
+      <!-- Приложение открыто вне VK: включить рассылку отсюда нельзя, окно
+           разрешения показывает сам ВКонтакте. Кнопку в этом случае не рисуем
+           вовсе — нажатие ушло бы в никуда и выглядело поломкой -->
+      <p v-else class="font-sans text-meta text-ink-muted">
+        Включить можно только из приложения внутри ВКонтакте — открой его из
+        нашего сообщества.
+      </p>
     </div>
 
     <!-- Подпись о том, что произошло. Единственный способ сказать человеку об

@@ -123,10 +123,16 @@ export function useGroup() {
     status,
     joined,
     messagesAllowed,
-    // Показывать ли блок вообще: нужны и окна VK (в браузере их нет), и
-    // настроенное сообщество (пустой VK_GROUP_ID на сервере — кнопки молча
-    // ничего не делали бы)
-    available: computed(() => platform.supportsGroup() && groupId.value !== null),
+    // Показывать ли блок вообще. Условие одно — сообщество настроено: пустой
+    // VK_GROUP_ID на сервере отдаёт group_id: null, и кнопки молча ничего не
+    // делали бы. Вне VK сервер отдаёт null тоже, так что в вебе блока нет
+    available: computed(() => groupId.value !== null),
+    // Можно ли открывать окна VK. Отдельно от available потому, что окна
+    // нужны не всем кнопкам: «не присылать» гасит наш же флаг и работает
+    // везде, а «подписаться» и «присылать» без Bridge открыть нечего.
+    // Приложение легко оказывается вне Mini App: адрес с sign= остаётся в
+    // истории браузера и пускает внутрь, а Bridge там мёртв
+    canPrompt: computed(() => platform.supportsGroup()),
     ensureLoaded,
     join,
     allow,
