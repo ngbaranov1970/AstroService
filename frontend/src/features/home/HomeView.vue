@@ -6,6 +6,7 @@
 
 import { computed, watch } from 'vue'
 
+import GroupCard from '@/features/community/GroupCard.vue'
 import FullReportTile from '@/features/report/FullReportTile.vue'
 import { REPORT_STATUS } from '@/shared/api/endpoints'
 import { useCharts } from '@/shared/composables/useCharts'
@@ -133,6 +134,12 @@ watch(
            среди анонсов, оно читалось бы как ещё одно «скоро» -->
       <AddChartCard />
     </section>
+
+    <!-- Тот же блок стоит в конце разбора и в профиле: там его видит тот, кто
+         дочитал, здесь — тот, кто до разбора не дошёл. Показываться или нет,
+         решает сам GroupCard (вне VK кнопок нет), состояние у всех экранов
+         общее — оно живёт в useGroup -->
+    <GroupCard />
 
     <!-- Анонсы: то, чего ещё нет. Отдельный заголовок вместо подписи «скоро»
          под каждой плиткой -->
