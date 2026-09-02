@@ -18,7 +18,6 @@ import AstroBadges from './AstroBadges.vue'
 import ChartSwitcher from './ChartSwitcher.vue'
 import { buildHomeTiles, HOME_NOTE } from './homeTiles'
 import ReportTile from './ReportTile.vue'
-import TodayCard from './TodayCard.vue'
 
 // current — карта, выбранная в переключателе (по умолчанию самая свежая)
 const { current, detail, ensureDetail } = useCharts()
@@ -145,10 +144,6 @@ watch(
          под каждой плиткой -->
     <section class="space-y-3">
       <h2 class="font-sans text-label tracking-label text-gold-dim uppercase">Скоро</h2>
-
-      <!-- Транзитов в API нет — карточка дня стоит в состоянии-заглушке и
-           лежит среди анонсов. Место в макете за ней сохраняется -->
-      <TodayCard>Разбор дня появится здесь совсем скоро.</TodayCard>
 
       <ReportTile v-for="tile in soon.wide" :key="tile.key" :tile="tile" />
 
