@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     # раз внутри Mini App их нет (docs/astro-context.md).
     vk_group_id: int | None = None
 
+    # --- VK ID (вход в браузере) ------------------------------------------
+    # Идентификатор приложения VK ID (54750449). Это ДРУГОЕ приложение, не
+    # Mini App из vk_app_id выше (54687046): VK ID живёт в отдельном кабинете,
+    # и перенести туда мини-приложение нельзя. Секрета к нему не нужно —
+    # обмен кода идёт по PKCE (docs/astro-context.md, «Веб-вход через VK ID»).
+    vk_id_client_id: int | None = None
+
     # --- Сообщения от сообщества VK ---------------------------------------
     # Ключ доступа сообщества (Управление → Работа с API → Ключи доступа),
     # строка вида "vk1.a...". Им мы ДЕЙСТВУЕМ от имени группы: шлём
@@ -182,6 +189,7 @@ class Settings(BaseSettings):
         "admin_password",
         "vk_app_id",
         "vk_secure_key",
+        "vk_id_client_id",
         "vk_group_id",
         "vk_group_secure_key",
         "vk_callback_secret",
@@ -220,6 +228,21 @@ class Settings(BaseSettings):
         ошибку уже после успешного входа.
         """
         return self.vk_secure_key is not None and self.session_secret is not None
+
+    @property
+    def vk_id_enabled(self) -> bool:
+        """Можно ли пускать в приложение из браузера через VK ID.
+
+        Нужен и client_id, и ключ наших сессий: без второго обмен кода
+        пройдёт, а выдать человеку JWT будет нечем — та же логика, что у
+        vk_enabled выше. Публичный адрес нужен третьим: redirect_uri обязан
+        быть абсолютным и совпадать с записанным в кабинете VK.
+        """
+        return (
+            self.vk_id_client_id is not None
+            and self.session_secret is not None
+            and self.public_base_url is not None
+        )
 
     @property
     def vk_callback_enabled(self) -> bool:

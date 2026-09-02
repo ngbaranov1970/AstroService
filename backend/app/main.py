@@ -29,6 +29,7 @@ from app.web.routes.legal import router as legal_router
 from app.web.routes.pay import router as pay_router
 from app.web.routes.redirects import router as redirects_router
 from app.web.routes.vk_callback import router as vk_callback_router
+from app.web.routes.vkid import router as vkid_router
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,9 @@ def create_app() -> FastAPI:
     # маршруты конкретнее, чем «всё остальное», и порядок здесь читаемости
     # ради, пересечься им не с чем.
     app.include_router(redirects_router)
+    # Веб-вход через VK ID. Своей авторизации не требует по определению —
+    # он её и выдаёт; cookie попытки ставит сам, мимо middleware выше.
+    app.include_router(vkid_router)
     app.include_router(admin_router)
     # Страницы оплаты и вебхук ЮKassa. Своей авторизации у них нет
     # намеренно: платят из внешнего браузера, где нашей cookie не бывает.
