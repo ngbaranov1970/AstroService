@@ -10,7 +10,10 @@ import { ApiError, http, setToken, setTokenRefresher } from '@/shared/api/http'
 
 // ref — «коробочка» со значением, за которой следит Vue: меняем .value, и все
 // шаблоны, читающие эту переменную, перерисовываются сами
-const status = ref('idle') // idle | loading | ready | error
+// anon — войти нечем: в браузере человек ещё не входил через VK ID, в Mini App
+// приложение открыли не из VK. Отдельно от error, потому что чинится это не
+// повтором запроса, а входом
+const status = ref('idle') // idle | loading | ready | anon | error
 const user = ref(null) // {name, is_tester} — то, что вернул /auth/vk
 const error = ref(null) // фраза для человека, когда status === 'error'
 
@@ -54,11 +57,17 @@ async function start() {
   status.value = 'loading'
   error.value = null
 
-  // Платформа без авторизации (веб, Telegram) — не ошибка сети, а честное
-  // «здесь войти нечем»: отдельная ветка, чтобы не ловить это исключением
+  // Платформе нечем авторизовать — не ошибка сети, а честное «здесь войти
+  // нечем»: отдельная ветка, чтобы не ловить это исключением
   if (!platform.canAuth()) {
-    status.value = 'error'
-    error.value = 'Приложение открыто не из VK'
+    status.value = 'anon'
+    // authNotice — необязательный метод платформы: пояснение, почему войти
+    // нечем (например «вход не удался»). ?.() зовёт метод, только если он есть,
+    // ?? подставляет правое значение, когда левое null или undefined
+    error.value = platform.authNotice?.() ?? null
+    // Токен мог остаться от прошлой сессии — забываем: иначе запросы уйдут
+    // с чужим или протухшим и получат 401 по кругу
+    setToken(null)
     return
   }
 

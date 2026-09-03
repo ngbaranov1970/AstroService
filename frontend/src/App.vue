@@ -6,8 +6,10 @@
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { platform } from '@/app/platform'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useSession } from '@/shared/composables/useSession'
+import AppButton from '@/shared/ui/AppButton.vue'
 import BottomNav from '@/shared/ui/BottomNav.vue'
 
 // Деструктуризация: забираем из возвращённого объекта нужные поля по именам —
@@ -26,6 +28,26 @@ const isBooting = computed(() => status.value === 'idle' || status.value === 'lo
 
 // На онбординге навигации нет: оттуда ведёт только один путь — вперёд
 const showNav = computed(() => route.name !== 'onboarding')
+
+// Есть ли куда отправить за входом. Метод login есть только у веб-платформы:
+// в VK и Telegram личность приходит с запуском, предлагать там нечего.
+// Обычная константа, не computed: платформа за время работы не меняется
+const canLogin = typeof platform.login === 'function'
+
+// Гейт закрыт по двум разным причинам, и слова у них разные: anon — войти
+// нечем (это штатно), error — вход сорвался
+const gateTitle = computed(() =>
+  status.value === 'anon' ? 'Нужен вход' : 'Не получилось войти',
+)
+
+const gateText = computed(() => {
+  // Текст ошибки готовит useSession; при anon его может не быть вовсе
+  if (error.value) return error.value
+  if (status.value !== 'anon') return null
+  return canLogin
+    ? 'Карты и разборы привязаны к вашей странице VK'
+    : 'Приложение открыто не из VK'
+})
 
 // Вход запускаем отсюда, а не полагаемся на guard роутера: у онбординга в
 // guard ранний выход, и заход прямо на /onboarding остался бы без сессии.
@@ -73,25 +95,31 @@ async function retry() {
       <p class="animate-pulse font-display text-title text-ink-muted">Соединяемся…</p>
     </div>
 
-    <!-- 2. Вход не удался: подпись не сошлась, сеть отвалилась или на сервере
-         не настроен вход из VK. Текст готовит useSession, здесь только показ -->
+    <!-- 2. Сессии нет. Либо войти нечем (anon: в браузере ещё не входили,
+         в Mini App открыли не из VK), либо вход сорвался (error: подпись не
+         сошлась, сеть отвалилась, сервер не настроен). Разметка общая,
+         различаются подписи и набор кнопок -->
     <div
-      v-else-if="status === 'error'"
+      v-else-if="status === 'anon' || status === 'error'"
       class="flex flex-1 flex-col items-center justify-center gap-4 text-center"
     >
-      <h1 class="font-display text-title text-ink">Не получилось войти</h1>
       <!-- {{ }} — подстановка значения в текст, как f-строка в Python.
-           У ref в шаблоне .value не пишут: Vue разворачивает его сам -->
-      <p class="text-meta text-ink-muted">{{ error }}</p>
+           У ref и computed в шаблоне .value не пишут: Vue разворачивает их сам -->
+      <h1 class="font-display text-title text-ink">{{ gateTitle }}</h1>
+      <p v-if="gateText" class="text-meta text-ink-muted">{{ gateText }}</p>
 
-      <!-- Кнопка-заглушка: на шаге вёрстки станет компонентом AppButton
-           варианта outline (золотая рамка, капс, во всю ширину) -->
-      <button
-        class="mt-2 rounded-card border border-line-gold px-6 py-3 font-sans text-label tracking-label text-gold uppercase"
-        @click="retry"
-      >
-        Повторить
-      </button>
+      <!-- Кнопки во всю ширину колонки, но не шире max-w-xs: AppButton
+           тянется на весь родитель, а на широком экране это уродливо -->
+      <div class="mt-2 flex w-full max-w-xs flex-col gap-3">
+        <!-- Импортированный компонент и импортированный объект platform в
+             шаблоне доступны сами: всё, что объявлено в script setup на
+             верхнем уровне, видно разметке -->
+        <AppButton v-if="canLogin" @click="platform.login()">Войти через VK</AppButton>
+
+        <!-- Повтор предлагаем только после сорвавшегося входа: при anon
+             повторять нечего, там просто нет параметров запуска -->
+        <AppButton v-if="status === 'error'" @click="retry">Повторить</AppButton>
+      </div>
     </div>
 
     <!-- 3. Вход прошёл — дальше командует роутер. RouterView — «дырка», в
