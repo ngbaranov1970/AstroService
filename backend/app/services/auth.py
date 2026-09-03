@@ -19,6 +19,7 @@ import hmac
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from urllib.parse import urlencode
 
 import jwt
@@ -57,6 +58,24 @@ VK_PLATFORM_PARAM = "vk_platform"
 # то же самое значение пишет JSON-API, а зависимость api → web была бы
 # направлена не в ту сторону.
 SOURCE_VK = "vk"
+
+# Откуда открыто приложение ПРЯМО СЕЙЧАС. Это не то же самое, что
+# users.platform: после входа через VK ID человек сидит в браузере, а строка
+# у него VK-шная (одна личность на Mini App и сайт). Продавать можно только
+# на SURFACE_WEB — внутри Mini App оплата запрещена правилами площадки.
+SURFACE_VK = "vk"
+SURFACE_WEB = "web"
+
+# Имя claim в нашем JWT. Короткое: payload едет в каждом запросе.
+_SURFACE_CLAIM = "sfc"
+
+
+@dataclass(frozen=True, slots=True)
+class SessionInfo:
+    """Содержимое сессионного токена: кто вошёл и с какой площадки."""
+
+    user_id: int
+    surface: str
 
 
 class LaunchError(Exception):
@@ -154,12 +173,13 @@ def _check_freshness(params: Mapping[str, str]) -> None:
         raise LaunchError(f"Параметры запуска устарели: {age} с")
 
 
-def issue_session(user_id: int) -> str:
+def issue_session(user_id: int, surface: str) -> str:
     """Выпустить сессионный JWT на `SESSION_TTL`. Без ключа — `RuntimeError`.
 
-    В токен идёт только идентификатор пользователя: JWT подписан, но НЕ
-    зашифрован — payload читает любой, кто снимет base64. Имя, дата и место
-    рождения здесь появиться не должны.
+    `surface` — откуда вошли (`SURFACE_VK` или `SURFACE_WEB`), от него зависит
+    право продавать. В токен идёт только идентификатор пользователя и площадка:
+    JWT подписан, но НЕ зашифрован — payload читает любой, кто снимет base64.
+    Имя, дата и место рождения здесь появиться не должны.
     """
     settings = get_settings()
     if settings.session_secret is None:
@@ -169,14 +189,15 @@ def issue_session(user_id: int) -> str:
     payload = {
         # str: PyJWT с версии 2.10 требует строковый `sub` по RFC 7519.
         "sub": str(user_id),
+        _SURFACE_CLAIM: surface,
         "iat": now,
         "exp": now + SESSION_TTL,
     }
     return jwt.encode(payload, settings.session_secret.get_secret_value(), _ALGORITHM)
 
 
-def read_session(token: str) -> int | None:
-    """Достать `user_id` из токена; None, если он протух, подделан или битый.
+def read_session(token: str) -> SessionInfo | None:
+    """Достать из токена, кто вошёл и откуда; None, если он протух или битый.
 
     Причина неудачи вызывающему не нужна: ответ во всех случаях один —
     отправить человека открыть мини-приложение заново.
@@ -204,9 +225,19 @@ def read_session(token: str) -> int | None:
         return None
 
     try:
-        return int(payload["sub"])
+        user_id = int(payload["sub"])
     except (KeyError, TypeError, ValueError):
         # Токен подписан нами, но содержимое не то: остаток от прежней схемы
         # payload или ручная правка кода.
         logger.error("В сессионном токене нет пригодного sub")
         return None
+
+    # Токены, выпущенные до появления claim, считаем запуском из VK: в этом
+    # случае цена не покажется, а показать её внутри Mini App — претензия
+    # площадки к каталогу.
+    surface = payload.get(_SURFACE_CLAIM, SURFACE_VK)
+    if surface not in (SURFACE_VK, SURFACE_WEB):
+        logger.warning("В сессионном токене неизвестная площадка")
+        surface = SURFACE_VK
+
+    return SessionInfo(user_id=user_id, surface=surface)

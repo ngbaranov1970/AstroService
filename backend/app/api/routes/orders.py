@@ -26,11 +26,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import generation
-from app.api.deps import ChartByToken, CurrentUser, SessionDep
+from app.api.deps import Caller, ChartByToken, CurrentCaller, SessionDep
 from app.config import get_settings
-from app.models import Chart, Order, OrderStatus, Platform, ReportType, User
+from app.models import Chart, Order, OrderStatus, ReportType
 from app.payments import yookassa
 from app.schemas.orders import OrderCreated, OrderOut
+from app.services import auth
 from app.services import orders as orders_service
 from app.services import reports as reports_service
 
@@ -45,17 +46,18 @@ DEFAULT_TYPE = ReportType.FULL_NATAL
 
 @router.post("/charts/{token}/orders", response_model=OrderCreated)
 async def create_order(
-    chart: ChartByToken, user: CurrentUser, session: SessionDep
+    chart: ChartByToken, caller: CurrentCaller, session: SessionDep
 ) -> OrderCreated:
     """Завести заказ и платёж, вернуть адрес формы ЮKassa.
 
     Повторное нажатие безопасно: незакрытый заказ возвращается вместе с уже
     выданной ссылкой на форму, второго платежа не создаётся.
 
-    Отвечает 403 из VK и на чужую карту, 409 — если разбор уже оплачен,
+    Отвечает 403 из Mini App и на чужую карту, 409 — если разбор уже оплачен,
     503 — если платежи не настроены или их API недоступен.
     """
-    _forbid_vk(user)
+    _forbid_vk(caller)
+    user = caller.user
 
     if chart.user_id != user.id:
         # Заказ оформляется на владельца карты, и посторонний с ссылкой не
@@ -113,7 +115,7 @@ async def create_order(
 @router.get("/orders/{order_token}", response_model=OrderOut)
 async def get_order(
     order_token: str,
-    user: CurrentUser,
+    caller: CurrentCaller,
     session: SessionDep,
     background: BackgroundTasks,
 ) -> OrderOut:
@@ -124,9 +126,10 @@ async def get_order(
     ещё нет, здесь же ставится генерация — на случай, когда и вебхук, и
     страница возврата не сработали.
 
-    Отвечает 403 из VK и на чужой заказ, 404 — если заказа нет.
+    Отвечает 403 из Mini App и на чужой заказ, 404 — если заказа нет.
     """
-    _forbid_vk(user)
+    _forbid_vk(caller)
+    user = caller.user
 
     order = await orders_service.get_by_token(session, order_token)
     if order is None or order.user_id != user.id:
@@ -156,9 +159,13 @@ async def get_order(
 # --- Внутренние помощники --------------------------------------------------
 
 
-def _forbid_vk(user: User) -> None:
-    """403 пользователю из VK: внутри Mini App продавать нельзя."""
-    if user.platform is Platform.VK:
+def _forbid_vk(caller: Caller) -> None:
+    """403 открывшему Mini App: продавать внутри него нельзя.
+
+    Смотрим на площадку сессии, а не на users.platform: вошедший через VK ID
+    сидит в браузере со строкой платформы VK, и оплата ему доступна.
+    """
+    if caller.surface == auth.SURFACE_VK:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Оплата доступна только на сайте, вне приложения VK",

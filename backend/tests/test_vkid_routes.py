@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from app.db import get_session
 from app.main import app
 from app.models import Platform
+from app.services import auth
 from app.vk import id as vk_id
 from app.web.routes import vkid
 
@@ -58,7 +59,11 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(vkid.users_service, "get_or_create", fake_get_or_create)
     monkeypatch.setattr(vkid.events, "log", fake_log)
     monkeypatch.setattr(vkid.vk_id, "exchange_code", fake_exchange)
-    monkeypatch.setattr(vkid.auth, "issue_session", lambda user_id: TOKEN)
+    def fake_issue(user_id, surface):
+        recorded["surface"] = surface
+        return TOKEN
+
+    monkeypatch.setattr(vkid.auth, "issue_session", fake_issue)
 
     session = FakeSession()
 
@@ -127,6 +132,9 @@ def test_vozvrat_vpuskaet_v_prilozhenie(client: TestClient, calls: dict) -> None
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/app/?s={TOKEN}"
+    # Площадка web, а не vk: человек в браузере, и цену с кнопкой оплаты
+    # он видеть должен, хотя строка пользователя у него VK-шная.
+    assert calls["surface"] == auth.SURFACE_WEB
     assert calls["exchange"] == {"code": "kod", "device_id": "ustroystvo"}
     assert calls["session"].committed
 

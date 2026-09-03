@@ -76,7 +76,8 @@ async def login_vk(payload: VkLaunchIn, session: SessionDep) -> SessionOut:
     await session.commit()
 
     return SessionOut(
-        token=auth.issue_session(user.id),
+        # Запуск подписан VK — человек внутри Mini App, продавать ему нельзя.
+        token=auth.issue_session(user.id, auth.SURFACE_VK),
         expires_in=auth.SESSION_TTL,
         user=UserOut.model_validate(user),
     )
@@ -114,7 +115,7 @@ async def login_web(request: Request, session: SessionDep) -> SessionOut:
     await session.commit()
 
     return SessionOut(
-        token=auth.issue_session(user.id),
+        token=auth.issue_session(user.id, auth.SURFACE_WEB),
         expires_in=auth.SESSION_TTL,
         user=UserOut.model_validate(user),
     )

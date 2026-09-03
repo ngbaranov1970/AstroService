@@ -16,6 +16,7 @@ POST /auth/vk (app/api/routes/auth.py); незнакомый токен полу
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -44,11 +45,24 @@ _UNAUTHORIZED = HTTPException(
 )
 
 
-async def current_user(
+@dataclass(frozen=True, slots=True)
+class Caller:
+    """Кто прислал запрос и откуда открыл приложение.
+
+    Площадка живёт в токене, а не в users.platform: после входа через VK ID
+    строка пользователя VK-шная, а сидит человек в браузере, и продавать ему
+    можно (app/services/auth.py, SURFACE_*).
+    """
+
+    user: User
+    surface: str
+
+
+async def current_caller(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     session: SessionDep,
-) -> User:
-    """Пользователь по нашему JWT из заголовка; 401 на любую неудачу.
+) -> Caller:
+    """Владелец токена и его площадка; 401 на любую неудачу.
 
     Неудача — это отсутствующий заголовок, просроченный или подделанный
     токен и удалённый пользователь. Различать их в ответе не нужно: фронту
@@ -58,17 +72,29 @@ async def current_user(
     if credentials is None:
         raise _UNAUTHORIZED
 
-    user_id = auth.read_session(credentials.credentials)
-    if user_id is None:
+    info = auth.read_session(credentials.credentials)
+    if info is None:
         raise _UNAUTHORIZED
 
     # Подпись остаётся верной и после удаления пользователя — сам токен о
     # строке в базе ничего не знает, поэтому проверяем и её.
-    user = await users_service.get_by_id(session, user_id)
+    user = await users_service.get_by_id(session, info.user_id)
     if user is None:
         raise _UNAUTHORIZED
 
-    return user
+    return Caller(user=user, surface=info.surface)
+
+
+CurrentCaller = Annotated[Caller, Depends(current_caller)]
+
+
+async def current_user(caller: CurrentCaller) -> User:
+    """Только пользователь — для маршрутов, которым площадка безразлична.
+
+    Токен разбирается один раз: FastAPI кеширует зависимость в пределах
+    запроса, поэтому соседство CurrentUser и CurrentCaller ничего не стоит.
+    """
+    return caller.user
 
 
 CurrentUser = Annotated[User, Depends(current_user)]

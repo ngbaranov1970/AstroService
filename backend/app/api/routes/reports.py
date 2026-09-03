@@ -14,8 +14,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import generation
-from app.api.deps import ChartByToken, CurrentUser, SessionDep
-from app.models import Chart, Platform, ReportType, User
+from app.api.deps import Caller, ChartByToken, CurrentCaller, CurrentUser, SessionDep
+from app.models import Chart, ReportType
 from app.schemas.reports import (
     FeedbackIn,
     ReportOut,
@@ -23,7 +23,7 @@ from app.schemas.reports import (
     ReportStatus,
     SectionOut,
 )
-from app.services import events
+from app.services import auth, events
 from app.services import orders as orders_service
 from app.services import reports as reports_service
 
@@ -38,7 +38,7 @@ _NO_RETRY = frozenset(
 
 @router.get("/charts/{token}/reports", response_model=list[ReportOut])
 async def list_reports(
-    chart: ChartByToken, user: CurrentUser, session: SessionDep
+    chart: ChartByToken, caller: CurrentCaller, session: SessionDep
 ) -> list[ReportOut]:
     """Все виды разборов этой карты с текущим состоянием каждого.
 
@@ -49,8 +49,9 @@ async def list_reports(
     Текст видит любой, кто знает ссылку (её для того и пересылают), а вот
     цена считается от пришедшего: покупка привязана к человеку и карте.
     """
+    user = caller.user
     states = [
-        await _state(session, chart, report_type, user)
+        await _state(session, chart, report_type, caller)
         for report_type in reports_service.supported_types()
     ]
 
@@ -73,7 +74,7 @@ async def list_reports(
 async def request_report(
     payload: ReportRequest,
     chart: ChartByToken,
-    user: CurrentUser,
+    caller: CurrentCaller,
     session: SessionDep,
     background: BackgroundTasks,
 ) -> ReportOut:
@@ -88,6 +89,7 @@ async def request_report(
     Повторный запрос безопасен: готовый текст и уже идущая работа возвращают
     себя, не тратя ни лимита, ни денег.
     """
+    user = caller.user
     if chart.user_id != user.id:
         # 403, а не тихое согласие: посторонний с ссылкой не должен тратить
         # лимиты и деньги владельца карты.
@@ -96,7 +98,7 @@ async def request_report(
     if payload.type not in reports_service.supported_types():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Такой разбор пока не делаем")
 
-    state = await _state(session, chart, payload.type, user)
+    state = await _state(session, chart, payload.type, caller)
     if state.status in _NO_RETRY:
         return state
 
@@ -151,7 +153,7 @@ async def leave_feedback(
 
 
 async def _state(
-    session: AsyncSession, chart: Chart, report_type: ReportType, user: User
+    session: AsyncSession, chart: Chart, report_type: ReportType, caller: Caller
 ) -> ReportOut:
     """Состояние одного разбора: текст, очередь и право на покупку в одном ответе.
 
@@ -185,12 +187,12 @@ async def _state(
         return out.model_copy(update={"status": ReportStatus.RUNNING})
 
     if await reports_service.needs_purchase(
-        session, user=user, chart=chart, report_type=report_type
+        session, user=caller.user, chart=chart, report_type=report_type
     ):
         # Пейволл идёт впереди упавшей генерации: иначе фронт покажет ошибку
         # там, где на деле нужна покупка.
         #
-        # Цену видит кто угодно, кроме пришедшего из VK: внутри Mini App
+        # Цену видит кто угодно, кроме открывшего Mini App: внутри него
         # продавать нельзя ни на одной платформе (docs/astro-context.md), и
         # `locked` без цены фронт показывает как «этот разбор закрыт».
         # Ссылку оплаты не отдаём никому: веб-фронт ведёт на свой экран
@@ -198,7 +200,7 @@ async def _state(
         return out.model_copy(
             update={
                 "status": ReportStatus.LOCKED,
-                "price_rub": _price_for(user, report_type),
+                "price_rub": _price_for(caller, report_type),
             }
         )
 
@@ -214,12 +216,14 @@ async def _state(
     return out
 
 
-def _price_for(user: User, report_type: ReportType) -> int | None:
+def _price_for(caller: Caller, report_type: ReportType) -> int | None:
     """Цена разбора в рублях или None, если показывать её нельзя или нечего.
 
-    None означает ровно «кнопки покупки не будет»: из VK — по правилам
+    None означает ровно «кнопки покупки не будет»: из Mini App — по правилам
     площадки, у неоплачиваемого типа — потому что цены нет вовсе.
     """
-    if user.platform is Platform.VK or not orders_service.is_for_sale(report_type):
+    # Смотрим на площадку сессии, а не на users.platform: у вошедшего через
+    # VK ID строка VK-шная, а сидит он в браузере, и продавать ему можно.
+    if caller.surface == auth.SURFACE_VK or not orders_service.is_for_sale(report_type):
         return None
     return orders_service.price_rub(report_type)
