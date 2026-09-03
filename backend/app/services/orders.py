@@ -306,7 +306,13 @@ async def apply_notification(
     Бросает PaymentError, если их API недоступен — вот тогда 200 отдавать
     нельзя, повтор уведомления и есть наш второй шанс.
     """
-    payment = await yookassa.get_payment(payment_id)
+    try:
+        payment = await yookassa.get_payment(payment_id)
+    except yookassa.PaymentNotFoundError:
+        # Магазин про этот платёж не знает: уведомление подделано или пришло
+        # чужому магазину. Повтор ответа не изменит, поэтому не ошибка.
+        logger.warning("Уведомление о платеже %s: магазину он неизвестен", payment_id)
+        return None, False
 
     # FOR UPDATE: уведомление повторяется сутки и легко прилетает дважды
     # одновременно. Без блокировки строки оба обработчика увидели бы PENDING
@@ -331,12 +337,29 @@ async def sync_status(session: AsyncSession, order: Order) -> Order:
     смотрит на экран и хочет увидеть купленное. Ничего не делает, если
     платежа ещё нет или заказ уже закрыт.
 
+    Платёж, неизвестный магазину, закрывает заказ (CANCELED), а не бросает
+    ошибку: платить по нему нечем, и вызывающий заведёт новый.
+
     Бросает PaymentError.
     """
     if order.provider_payment_id is None or order.status is not OrderStatus.PENDING:
         return order
 
-    payment = await yookassa.get_payment(order.provider_payment_id)
+    payment_id = order.provider_payment_id
+    try:
+        payment = await yookassa.get_payment(payment_id)
+    except yookassa.PaymentNotFoundError:
+        # Платежа у магазина нет — заказ мёртв, и оставить его ждущим нельзя:
+        # он единственный открытый, а спросить его статус больше нечем, так
+        # что кнопка «купить» упиралась бы в него навсегда.
+        await session.refresh(order, with_for_update=True)
+        if order.status is OrderStatus.PENDING:
+            order.status = OrderStatus.CANCELED
+            logger.warning(
+                "Заказ %s отменён: платёж %s магазину неизвестен",
+                order.id, payment_id,
+            )
+        return order
 
     # Перечитываем строку под блокировкой, и только теперь применяем платёж:
     # вебхук про этот же платёж приходит одновременно с возвратом человека и

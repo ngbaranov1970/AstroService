@@ -71,6 +71,16 @@ class PaymentError(RuntimeError):
     """ЮKassa не ответила или ответила неожиданным (сеть, статус, формат)."""
 
 
+class PaymentNotFoundError(PaymentError):
+    """Платежа с таким id у нашего магазина нет — их 404.
+
+    Отделено от остальных сбоев, потому что лечится по-другому: сбой повторяют,
+    а на этот ответ платёж считают мёртвым и заводят новый. Так бывает после
+    смены ключей магазина (боевые ↔ тестовые): платёж остаётся у прежнего
+    shopId, и старый заказ иначе висит вечно — статус спросить нельзя.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class Payment:
     """Платёж на стороне ЮKassa — ровно те поля, которые нам нужны."""
@@ -165,7 +175,8 @@ async def create_payment(
 async def get_payment(payment_id: str) -> Payment:
     """Состояние платежа по их id — источник истины при разборе вебхука.
 
-    Бросает PaymentError, в том числе на 404 (чужой или выдуманный id).
+    Бросает PaymentNotFoundError на их 404 (платёж чужого магазина, выдуманный
+    id) и PaymentError на остальных сбоях.
     """
     return _parse(await _request("GET", f"/payments/{payment_id}"))
 
@@ -229,6 +240,10 @@ async def _request(
             else:
                 # Тело ошибки у них информативное (описание причины) и ПДн не
                 # содержит — мы их туда и не передаём.
+                if resp.status_code == 404:
+                    # Платежа у магазина нет; повторять и накапливать причины
+                    # нечего, а вызывающему нужен именно этот класс ошибки.
+                    raise PaymentNotFoundError(f"ЮKassa HTTP 404: {resp.text[:300]}")
                 last_error = PaymentError(
                     f"ЮKassa HTTP {resp.status_code}: {resp.text[:300]}"
                 )
