@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 
+from app.llm.prompts import promo
+
 VERSION = "astro_event_v1"
 
 # Как у разборов: один текст, один сюжет — вариативность здесь не нужна.
@@ -162,4 +164,6 @@ def render(text: str) -> str:
     # Абзацы разделяем пустой строкой: модель шлёт их одиночным переводом
     # строки, а в ленте VK такой текст слипается в полотно.
     body = "\n\n".join(par.strip() for par in post["body"].split("\n") if par.strip())
-    return f"{post['title']}\n\n{body}"
+    # Приписка последней строкой, а не после заголовка: пост о событии — один
+    # сюжет на 200 слов, и врезка в середине оборвала бы его на полумысли.
+    return f"{post['title']}\n\n{body}\n\n{promo.LINE}"

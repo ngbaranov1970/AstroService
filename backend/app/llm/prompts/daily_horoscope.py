@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
+from app.llm.prompts import promo
 from astro_core.natal import SIGNS_RU
 
 VERSION = "daily_horoscope_v6"
@@ -245,8 +246,11 @@ def render(text: str) -> str:
     if parsed is None:
         return text
     intro, signs = parsed
+    # Приписка идёт сразу за вступлением, а не в конце: пост из двенадцати
+    # абзацев сворачивается в ленте на «читать далее», и всё после первых
+    # строк видят единицы.
+    blocks = [intro.strip(), promo.LINE]
     # Знак и его абзац одной группой: в ленте VK заголовок в отдельной строке
     # — единственный способ разделить двенадцать кусков без разметки.
-    blocks = [intro.strip()]
     blocks += [f"{s['sign']}\n{s['text'].strip()}" for s in signs]
     return "\n\n".join(blocks)
