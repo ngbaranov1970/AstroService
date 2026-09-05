@@ -393,26 +393,96 @@ def exact_aspects(start: date, end: date, *, include_moon: bool = False) -> list
     for i, first in enumerate(bodies):
         for second in bodies[i + 1:]:
             for aspect, angle in ASPECT_ANGLES.items():
-                def gap(jd: float, _a=first, _b=second, _ang=angle) -> float:
-                    return _norm180(_lon_speed(jd, _a)[0] - _lon_speed(jd, _b)[0] - _ang)
+                for target in _aspect_targets(angle):
+                    def gap(jd: float, _a=first, _b=second, _t=target) -> float:
+                        return _norm180(_lon_speed(jd, _a)[0] - _lon_speed(jd, _b)[0] - _t)
 
-                for jd in _scan(gap, jd_start, jd_end, step, wrapped=True):
-                    lon = _lon_speed(jd, first)[0]
-                    if aspect == "conjunction":
-                        tail = f"с {_PLANET_FORMS[second].ins}"
-                    else:
-                        tail = f"к {_PLANET_FORMS[second].dat}"
-                    out.append(
-                        _event(
-                            "aspect", jd,
-                            f"{PLANETS_RU[first]} {_ASPECT_IN[aspect]} {tail}",
-                            body=first, body_ru=PLANETS_RU[first],
-                            body2=second, body2_ru=PLANETS_RU[second],
-                            aspect=aspect, aspect_ru=ASPECTS_RU[aspect],
-                            **_sign_fields(lon),
-                        )
-                    )
+                    for jd in _scan(gap, jd_start, jd_end, step, wrapped=True):
+                        out.append(_aspect_event("aspect", jd, first, second, aspect))
     return out
+
+
+def _aspect_targets(angle: float) -> tuple[float, ...]:
+    """Смещения, на которых аспект точен: у 0° и 180° одно, у остальных два.
+
+    Разность долгот проходит и +90, и −90, и это два разных момента — у Луны
+    с Солнцем первая и последняя четверть. Ищем оба: пока искали только
+    +angle, находилась ровно одна половина цикла, а какая именно — решал
+    порядок тел в _BODIES. За 2026 год так терялось 56 аспектов из 187.
+    """
+    return (angle,) if angle in (0.0, 180.0) else (angle, -angle)
+
+
+def _aspect_event(kind: str, jd: float, first: str, second: str, aspect: str) -> dict:
+    """Событие точного аспекта: заголовок с нужным падежом и поля обоих тел.
+
+    Вынесено из exact_aspects, потому что то же самое собирает moon_events:
+    два места, где падежи набираются отдельно, однажды разойдутся.
+    """
+    # Соединение просит творительный с «с», прочие аспекты — дательный с «к».
+    if aspect == "conjunction":
+        tail = f"с {_PLANET_FORMS[second].ins}"
+    else:
+        tail = f"к {_PLANET_FORMS[second].dat}"
+    return _event(
+        kind, jd,
+        f"{PLANETS_RU[first]} {_ASPECT_IN[aspect]} {tail}",
+        body=first, body_ru=PLANETS_RU[first],
+        body2=second, body2_ru=PLANETS_RU[second],
+        aspect=aspect, aspect_ru=ASPECTS_RU[aspect],
+        **_sign_fields(_lon_speed(jd, first)[0]),
+    )
+
+
+def moon_events(day: date) -> list[dict]:
+    """Ингресс Луны и её точные аспекты за сутки — данные для поста дня.
+
+    Отдельно от events_between: там Луна исключена намеренно (её ингресс
+    каждые два с половиной дня и по аспекту в несколько часов забивают
+    недельный календарь), а посту про небо суток нужны именно они.
+    Виды событий свои — moon_ingress и moon_aspect, чтобы отбор постов по
+    весу в services/content.py не спутал их с планетными.
+    """
+    jd_start = _to_jd(_day_start(day))
+    jd_end = _to_jd(_day_start(day + timedelta(days=1)))
+    out: list[dict] = []
+
+    # Шаг полсуток: 30° знака Луна проходит за 2.3 суток, границу не перескочит.
+    for jd in _scan_sign_change("Moon", jd_start, jd_end, 0.5):
+        fields = _sign_fields(_lon_speed(jd + 0.01, "Moon")[0])
+        out.append(
+            _event("moon_ingress", jd,
+                   f"Луна входит в знак {_SIGN_FORMS[fields['sign']].gen}",
+                   body="Moon", body_ru=PLANETS_RU["Moon"], **fields)
+        )
+
+    for second in (b for b in _BODIES if b != "Moon"):
+        for aspect, angle in ASPECT_ANGLES.items():
+            for target in _aspect_targets(angle):
+                def gap(jd: float, _b=second, _t=target) -> float:
+                    return _norm180(_lon_speed(jd, "Moon")[0] - _lon_speed(jd, _b)[0] - _t)
+
+                # Шаг шесть часов, как в exact_aspects с Луной: за них она
+                # проходит 3.3°, и разрыв угла на ±180 не выглядит корнем.
+                for jd in _scan(gap, jd_start, jd_end, 0.25, wrapped=True):
+                    out.append(_aspect_event("moon_aspect", jd, "Moon", second, aspect))
+
+    return sorted(out, key=lambda e: e["moment"])
+
+
+def next_lunation(day: date) -> dict | None:
+    """Ближайшее новолуние или полнолуние в этот день либо после него.
+
+    К полям события добавляет days_until — целое число суток до него по
+    календарю МСК (0 = сегодня). None не возвращается на практике: горизонт
+    поиска шире синодического месяца.
+    """
+    # 40 суток: между лунациями 14.8 в среднем, между одноимёнными 29.5.
+    ahead = sorted(lunations(day, day + timedelta(days=40)), key=lambda e: e["moment"])
+    for event in ahead:
+        if event["moment"].date() >= day:
+            return {**event, "days_until": (event["moment"].date() - day).days}
+    return None
 
 
 def events_between(start: date, end: date) -> list[dict]:
@@ -460,12 +530,17 @@ def day_sky(day: date) -> dict:
             for aspect, angle in ASPECT_ANGLES.items():
                 orb = abs(gap - angle)
                 if orb <= _DAY_ORBS[aspect]:
+                    delta = _orb_speed(noon, first, second, angle, orb)
                     active.append(
                         {
                             "body": first, "body_ru": PLANETS_RU[first],
                             "body2": second, "body2_ru": PLANETS_RU[second],
                             "aspect": aspect, "aspect_ru": ASPECTS_RU[aspect],
                             "orb": round(orb, 2),
+                            # Сходящийся аспект нарастает, расходящийся отпускает —
+                            # в тексте это разные советы на один и тот же аспект.
+                            "applying": delta < 0,
+                            "orb_delta_day": round(delta, 2),
                         }
                     )
 
@@ -475,7 +550,25 @@ def day_sky(day: date) -> dict:
         "moon": _moon_phase(noon),
         "aspects": sorted(active, key=lambda a: a["orb"]),
         "events": [e for e in events_between(day, day)],
+        # Луна отдельными ключами, а не внутри events: в events смотрит промпт
+        # 12-знакового гороскопа, и добавка туда переписала бы тексты рассылки.
+        "moon_events": moon_events(day),
+        "next_lunation": next_lunation(day),
     }
+
+
+def _orb_speed(jd: float, first: str, second: str, angle: float, orb: float) -> float:
+    """Насколько градусов изменится орб аспекта за сутки: минус — сходится.
+
+    Считает мгновенную скорость по короткому шагу, а не разницу орбов через
+    сутки: аспект, точный внутри этих суток, по концам отрезка выглядел бы
+    расходящимся при том, что сейчас он ещё сходится.
+    """
+    # Полчаса: Луна за них проходит 0.27° — сдвиг заметен на фоне округления
+    # до сотых, а знак производной ещё не успевает смениться.
+    step = 1 / 48
+    gap_next = abs(_norm180(_lon_speed(jd + step, first)[0] - _lon_speed(jd + step, second)[0]))
+    return (abs(gap_next - angle) - orb) / step
 
 
 def _moon_phase(jd: float) -> dict:
@@ -491,6 +584,10 @@ def _moon_phase(jd: float) -> dict:
         # проваливалась бы между двумя полуднями, не подписав ни одного дня.
         "phase_ru": _phase_name(angle, (moon_speed - sun_speed) / 2),
         "growing": angle < 180.0,
+        # Долю освещённого диска берём у swisseph, а не считаем от угла
+        # Луна–Солнце: угол этот геоцентрический, а освещённость задаёт
+        # солнечный фазовый угол, и у Луны они расходятся на градусы.
+        "illumination": round(swe.pheno_ut(jd, swe.MOON, swe.FLG_MOSEPH)[1] * 100),
         **_sign_fields(moon_lon),
     }
 

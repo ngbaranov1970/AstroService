@@ -38,12 +38,15 @@ class PostKind(str, enum.Enum):
     Значения совпадают с именами модулей в app/llm/prompts/: реестр в
     services/content.py связывает их напрямую, как _PROMPTS в reports.py.
 
-    DAILY_HOROSCOPE — гороскоп дня на 12 знаков одним постом.
+    DAILY_SKY — обзор неба дня одним текстом, единственный пост в ленту.
+    DAILY_HOROSCOPE — гороскоп дня на 12 знаков; с 05.09.2026 идёт только
+    в рассылку по личным сообщениям, в ленту не публикуется.
     ASTRO_EVENT — пост про одно событие календаря (лунация, затмение, станция).
     SIGN_PORTRAIT, CELEBRITY, INVITE — форматы из контент-сетки, промптов у них
     ещё нет; заведены сразу, чтобы добавление формата не требовало правки CHECK.
     """
 
+    DAILY_SKY = "daily_sky"
     DAILY_HOROSCOPE = "daily_horoscope"
     ASTRO_EVENT = "astro_event"
     SIGN_PORTRAIT = "sign_portrait"

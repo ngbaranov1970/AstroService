@@ -225,3 +225,145 @@ def test_titles_agree_in_gender() -> None:
 
     for event in t.ingresses(date(2026, 9, 1), date(2026, 9, 10)):
         assert "входит в знак" in event["title_ru"]
+
+
+def test_illumination_agrees_with_lunations() -> None:
+    """В новолуние диск тёмный, в полнолуние полный — сверка с самими лунациями.
+
+    Внешний эталон здесь не нужен: моменты лунаций уже сверены выше, а
+    освещённость приходит из другого вызова swisseph, чем долготы. Разойдись
+    они — пост сообщил бы «диск освещён на 40 %» в день новолуния.
+    """
+    expected = {"new_moon": 0, "full_moon": 100}
+    for event in t.lunations(date(2026, 1, 1), date(2026, 6, 30)):
+        got = t.day_sky(event["moment"].date())["moon"]["illumination"]
+        # Допуск 3 %: положения берутся на полдень, а лунация приходится на
+        # любой час суток, и за полдня диск успевает приоткрыться.
+        assert abs(got - expected[event["kind"]]) <= 3, (event["title_ru"], got)
+
+
+def test_moon_aspect_to_sun_is_the_lunation() -> None:
+    """Соединение Луны с Солнцем — это новолуние, оппозиция — полнолуние.
+
+    Два независимых пути к одному моменту: moon_events ищет аспект Луна—тело,
+    lunations — разность долгот через 0 и 180. Пропусти moon_events корень на
+    своём шаге в шесть часов, здесь это видно сразу.
+    """
+    pairs = {"new_moon": "conjunction", "full_moon": "opposition"}
+    for event in t.lunations(date(2026, 9, 1), date(2026, 10, 31)):
+        found = [
+            e for e in t.moon_events(event["moment"].date())
+            if e["kind"] == "moon_aspect"
+            and e["body2"] == "Sun"
+            and e["aspect"] == pairs[event["kind"]]
+        ]
+        assert len(found) == 1, event["title_ru"]
+        assert abs(found[0]["moment"] - event["moment"]) <= timedelta(minutes=1)
+
+
+def test_moon_events_are_exact_and_complete() -> None:
+    """Аспекты точны в свой момент, а ингрессы Луны за месяц никуда не делись.
+
+    Полнота проверяется счётом: знак Луна проходит за 2.3 суток, значит за
+    сентябрь смен знака 12-14. Меньше — сканирование потеряло корень.
+    """
+    events = [e for day in _september_2026() for e in t.moon_events(day)]
+    ingresses = [e for e in events if e["kind"] == "moon_ingress"]
+    assert 12 <= len(ingresses) <= 14, len(ingresses)
+
+    for event in ingresses:
+        jd = t._to_jd(event["moment"])
+        before = t._sign_index(t._lon_speed(jd - 0.02, "Moon")[0])
+        after = t._sign_index(t._lon_speed(jd + 0.02, "Moon")[0])
+        assert before != after, event["title_ru"]
+        assert after == t._SIGN_CODES.index(event["sign"])
+
+    for event in (e for e in events if e["kind"] == "moon_aspect"):
+        jd = t._to_jd(event["moment"])
+        gap = abs(t._norm180(
+            t._lon_speed(jd, "Moon")[0] - t._lon_speed(jd, event["body2"])[0]
+        ))
+        assert gap == pytest.approx(t.ASPECT_ANGLES[event["aspect"]], abs=0.01), (
+            event["title_ru"]
+        )
+
+
+def test_moon_aspects_match_the_month_long_scan() -> None:
+    """Посуточный поиск обязан дать те же аспекты, что сплошной за месяц.
+
+    Проверка полноты, которой не даёт сверка «найденный момент точен»: она
+    молчит о пропущенных. exact_aspects идёт по месяцу целиком и режет его
+    своим шагом, moon_events — каждые сутки заново, и совпадение двух разных
+    разбиений и есть доказательство, что ни один корень не потерян.
+    """
+    month = [e for day in _september_2026() for e in t.moon_events(day)
+             if e["kind"] == "moon_aspect"]
+    whole = [
+        e for e in t.exact_aspects(date(2026, 9, 1), date(2026, 9, 30), include_moon=True)
+        if "Moon" in (e["body"], e["body2"])
+    ]
+    assert len(whole) > 40, "за месяц Луна замыкает десятки аспектов, выборка мала"
+
+    assert sorted(e["moment"] for e in month) == sorted(e["moment"] for e in whole)
+
+
+def test_applying_flips_around_the_exact_moment() -> None:
+    """До точного аспекта он сходится, после — расходится.
+
+    Берём планетную пару, а не лунную: Луна выходит из орба за сутки, и
+    аспекта в соседнем дне может уже не быть.
+    """
+    exact = t.exact_aspects(date(2026, 9, 10), date(2026, 9, 20))
+    assert exact
+
+    checked = 0
+    for event in exact:
+        day = event["moment"].date()
+        for offset, applying in ((-1, True), (1, False)):
+            same = [
+                a for a in t.day_sky(day + timedelta(days=offset))["aspects"]
+                if a["body"] == event["body"]
+                and a["body2"] == event["body2"]
+                and a["aspect"] == event["aspect"]
+            ]
+            if not same:
+                continue
+            assert same[0]["applying"] is applying, (event["title_ru"], offset)
+            checked += 1
+    assert checked, "не нашлось ни одной пары для проверки — тест ничего не проверил"
+
+
+def test_orb_delta_agrees_with_applying_flag() -> None:
+    """Флаг и число не могут спорить: applying — это ровно знак orb_delta_day."""
+    for a in t.day_sky(date(2026, 9, 5))["aspects"]:
+        assert a["applying"] is (a["orb_delta_day"] < 0), a
+
+
+def test_next_lunation_is_the_first_one_ahead() -> None:
+    """Ближайшая лунация — та же, что первая в списке; в день лунации это 0 дней."""
+    for day in (date(2026, 9, 5), date(2026, 9, 11), date(2026, 9, 26)):
+        got = t.day_sky(day)["next_lunation"]
+        first = min(
+            (e for e in t.lunations(day, day + timedelta(days=40))
+             if e["moment"].date() >= day),
+            key=lambda e: e["moment"],
+        )
+        assert got["moment"] == first["moment"], day
+        assert got["days_until"] == (first["moment"].date() - day).days
+        assert got["days_until"] >= 0
+
+
+def test_moon_data_stays_out_of_events() -> None:
+    """Луна не попала в sky["events"] — иначе изменятся тексты рассылки.
+
+    Промпт daily_horoscope печатает events построчно, и добавка лунных
+    событий переписала бы гороскоп, который уходит подписчикам в личку.
+    Формат рассылки решено не трогать, поэтому проверка живёт в тестах.
+    """
+    for day in _september_2026():
+        kinds = {e["kind"] for e in t.day_sky(day)["events"]}
+        assert not kinds & {"moon_ingress", "moon_aspect"}, day
+
+
+def _september_2026() -> list[date]:
+    return [date(2026, 9, 1) + timedelta(days=i) for i in range(30)]
