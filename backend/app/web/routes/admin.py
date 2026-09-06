@@ -31,7 +31,7 @@ from starlette.responses import Response
 from app import generation
 from app.db import get_session
 from app.services import admin as admin_service
-from app.services import broadcast, content, events, reports
+from app.services import broadcast, card, content, events, reports
 from app.services import users as users_service
 from app.web.deps import require_admin
 from app.web.templating import templates
@@ -207,6 +207,16 @@ async def _content_response(
             "refresh": CONTENT_REFRESH_SECONDS if run is not None and run.running else None,
         },
     )
+
+
+@router.get("/content/card/{day}.png")
+async def content_card(day: date) -> Response:
+    """Картинка к посту в ленту: её прикладывают к тексту в отложке VK руками.
+
+    Ключ — дата, а не пост: карточка рисуется по небу суток и от текста не
+    зависит, поэтому в базу за постом ходить незачем.
+    """
+    return Response(card.render(day), media_type="image/png")
 
 
 @router.post("/content/generate")

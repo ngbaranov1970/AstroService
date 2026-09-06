@@ -24,6 +24,8 @@ dependencies = [
     "kerykeion>=4.9",
     "cnlunar>=0.1.2",
     "timezonefinder>=6.5",
+    # Рисование картинки к посту в ленту (app/services/card.py).
+    "pillow>=11.0",
 ]
 
 [project.optional-dependencies]

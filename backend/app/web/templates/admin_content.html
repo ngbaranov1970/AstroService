@@ -99,6 +99,22 @@
           · сгенерирован {{ item.post.created_at | msk }}
         </p>
 
+        {# Картинка есть только у обзора неба: карточка рисуется по суткам, а
+           не по событию поста. Грузится в отложку отдельным файлом, руками —
+           как и текст. #}
+        {% if item.post.kind.value == "daily_sky" %}
+          <p>
+            <a href="/admin/content/card/{{ item.post.target_date }}.png" download>
+              <img src="/admin/content/card/{{ item.post.target_date }}.png"
+                   alt="Карточка дня" width="200" height="200">
+            </a>
+            <br>
+            <a href="/admin/content/card/{{ item.post.target_date }}.png" download>
+              Скачать PNG
+            </a>
+          </p>
+        {% endif %}
+
         {# readonly, а не disabled: disabled-поле нельзя выделить, а копировать
            надо именно выделением — кнопка «скопировать» потребовала бы JS. #}
         <textarea class="post-text" readonly rows="14"
