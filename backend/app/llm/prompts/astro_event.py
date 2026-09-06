@@ -151,8 +151,10 @@ def parse(text: str) -> dict[str, str] | None:
     return {"title": title, "body": body}
 
 
-def render(text: str) -> str:
+def render(text: str, seed: int | None = None) -> str:
     """JSON-ответ модели → готовый к вставке пост: заголовок, пустая строка, тело.
+
+    seed выбирает приписку из promo.LINES — см. promo.line().
 
     Строки не переносятся и служебных пометок нет: этот текст копируют из
     /admin/content в отложку VK как есть, и любой перенос уехал бы в пост.
@@ -166,4 +168,4 @@ def render(text: str) -> str:
     body = "\n\n".join(par.strip() for par in post["body"].split("\n") if par.strip())
     # Приписка последней строкой, а не после заголовка: пост о событии — один
     # сюжет на 200 слов, и врезка в середине оборвала бы его на полумысли.
-    return f"{post['title']}\n\n{body}\n\n{promo.LINE}"
+    return f"{post['title']}\n\n{body}\n\n{promo.line(seed)}"

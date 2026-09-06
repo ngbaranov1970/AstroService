@@ -337,7 +337,9 @@ def render(post: Post) -> str:
     """
     module = _PROMPTS.get(post.kind)
     renderer = getattr(module, "render", None)
-    return renderer(post.text) if renderer else post.text
+    # id как зерно приписки: страница зовёт render() на каждую перезагрузку, и
+    # случайный выбор без зерна менял бы последнюю строку прямо под вычиткой.
+    return renderer(post.text, seed=post.id) if renderer else post.text
 
 
 # --- Генерация ------------------------------------------------------------

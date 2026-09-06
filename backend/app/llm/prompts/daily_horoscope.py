@@ -238,8 +238,11 @@ def parse(text: str) -> tuple[str, list[dict[str, str]]] | None:
     return intro, [{"sign": s, "text": by_sign[s]} for s in SIGN_ORDER]
 
 
-def render(text: str) -> str:
+def render(text: str, seed: int | None = None) -> str:
     """JSON-ответ модели → сплошной текст: вступление и знаки по порядку.
+
+    seed не используется: приписки здесь нет, а аргумент есть затем, что
+    content.render зовёт все рендеры постов одинаково.
 
     Показывает его /admin/content/mail — вычитать текст, который уйдёт в рассылку.
     Приписки про приложение здесь нет: в письме ту же работу делает кнопка
