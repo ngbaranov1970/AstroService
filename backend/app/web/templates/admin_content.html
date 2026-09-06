@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Посты сообщества{% endblock %}
+{% block title %}{{ title }}{% endblock %}
 
 {# Ширина админки: текст поста в узкой колонке под чтение теряет вид, а
    рядом с ним ещё и метаданные строкой. #}
@@ -16,7 +16,25 @@
 {% endblock %}
 
 {% block content %}
-  <h1>Посты сообщества</h1>
+  {# Вкладки каналов. Активная — не ссылка: клик по ней перезагрузил бы ту же
+     страницу, а глазом активную видно по начертанию. Пути голые, как в
+     admin.html: в админку ходят по Basic-паролю, токен сессии ей не нужен. #}
+  <p class="muted">
+    <a href="/admin">← Разборы</a> ·
+    {% if channel == "feed" %}
+      <strong>Посты в ленту</strong>
+    {% else %}
+      <a href="/admin/content">Посты в ленту</a>
+    {% endif %}
+    ·
+    {% if channel == "mail" %}
+      <strong>Гороскопы в рассылку</strong>
+    {% else %}
+      <a href="/admin/content/mail">Гороскопы в рассылку</a>
+    {% endif %}
+  </p>
+
+  <h1>{{ title }}</h1>
   <p class="lead">
     Неделя с {{ start.strftime("%d.%m.%Y") }}, {{ days }} дней ·
     постов в очереди: {{ items | length }}
@@ -31,6 +49,9 @@
       {# POST, а не ссылка: запуск тратит деньги, а ссылку браузер может
          дёрнуть сам — предзагрузкой или из истории. #}
       <form method="post" action="/admin/content/generate">
+        {# Прогон один на оба канала; поле говорит только, куда вернуть
+           человека после 303 — иначе с рассылки он попадал бы в ленту. #}
+        <input type="hidden" name="channel" value="{{ channel }}">
         <button type="submit" {% if run and run.running %}disabled{% endif %}>
           Сгенерировать неделю
         </button>
@@ -45,8 +66,10 @@
         <span class="error" role="alert">{{ run.error }}</span>
       {% elif run %}
         <span class="muted">
+          {# Счёт прогона общий на оба канала, а в списке ниже — только эта
+             половина: без оговорки числа выглядят как расхождение. #}
           Закончен в {{ run.finished_at | msk("%H:%M") }},
-          постов на неделе: {{ run.posts }}.
+          постов на неделе по обоим каналам: {{ run.posts }}.
         </span>
       {% else %}
         <span class="muted">
@@ -65,8 +88,6 @@
         <h2>
           {{ item.post.target_date.strftime("%d.%m") }} ·
           {{ item.post.title or "Гороскоп дня" }}
-          {# Пилюля с каналом: в ленту уходит не всё, что лежит в очереди. #}
-          {% if item.channel %}<span class="badge">{{ item.channel }}</span>{% endif %}
         </h2>
 
         <p class="meta-line muted">
@@ -92,6 +113,12 @@
 {% endblock %}
 
 {% block footer %}
-  Служебная страница. Тексты копируются отсюда в отложку сообщества руками:
-  публиковать через API мы не можем.
+  Служебная страница.
+  {% if channel == "mail" %}
+    Эти тексты никуда не копируются: рассылка сама берёт из них абзац знака
+    подписчика, отправка — на <a href="/admin/broadcast">странице рассылки</a>.
+  {% else %}
+    Тексты копируются отсюда в отложку сообщества руками: публиковать через
+    API мы не можем.
+  {% endif %}
 {% endblock %}

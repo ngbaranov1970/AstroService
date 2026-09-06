@@ -64,6 +64,19 @@ CONTENT_REFRESH_SECONDS = 15
 # не видно всей недели, больше — пусто, дальше ничего не сгенерировано.
 CONTENT_DAYS = 7
 
+# Страница вычитки на каждый канал: в ленту и в рассылку идут разные тексты,
+# и вперемешку их читать нельзя — в ленту публикуется руками, и лишний пост
+# уедет в сообщество. Адреса нужны и шаблону (вкладки), и редиректу с кнопки.
+CONTENT_PATHS: dict[content.Channel, str] = {
+    content.Channel.FEED: "/admin/content",
+    content.Channel.MAIL: "/admin/content/mail",
+}
+
+CONTENT_TITLES: dict[content.Channel, str] = {
+    content.Channel.FEED: "Посты в ленту",
+    content.Channel.MAIL: "Гороскопы в рассылку",
+}
+
 
 @router.get("")
 async def index(request: Request, session: SessionDep) -> Response:
@@ -139,14 +152,31 @@ async def compare(
 
 
 @router.get("/content")
-async def content_page(request: Request, session: SessionDep) -> Response:
-    """Пачка постов на неделю и кнопка прогона.
+async def content_feed_page(request: Request, session: SessionDep) -> Response:
+    """Неделя постов в ленту сообщества: обзор неба суток и события календаря."""
+    return await _content_response(request, session, content.Channel.FEED)
+
+
+@router.get("/content/mail")
+async def content_mail_page(request: Request, session: SessionDep) -> Response:
+    """Неделя гороскопов для личной рассылки — вычитка вперёд.
+
+    Те же тексты потом разбирает по знакам /admin/broadcast, но там виден
+    только сегодняшний день и стоит кнопка отправки.
+    """
+    return await _content_response(request, session, content.Channel.MAIL)
+
+
+async def _content_response(
+    request: Request, session: SessionDep, channel: content.Channel
+) -> Response:
+    """Одна страница вычитки на оба канала: список постов и кнопка прогона.
 
     Только читает: прогон длится минут десять и держал бы ответ всё это
     время — тем же порядком, что на странице разбора.
     """
     run = generation.content_state()
-    posts = await content.list_week(session, days=CONTENT_DAYS)
+    posts = await content.list_week(session, days=CONTENT_DAYS, channel=channel)
 
     return templates.TemplateResponse(
         request,
@@ -161,15 +191,16 @@ async def content_page(request: Request, session: SessionDep) -> Response:
                     "post": post,
                     "text": text,
                     "words": len(text.split()),
-                    # Канал печатаем словами: на день теперь два поста, и
-                    # какой из них не идёт в ленту, по kind видно не сразу.
-                    "channel": content.channel(post.kind),
                 }
                 for post, text in ((p, content.render(p)) for p in posts)
             ],
             "run": run,
             "start": content.today_msk(),
             "days": CONTENT_DAYS,
+            # Канал в контексте — чтобы шаблон подсветил активную вкладку и
+            # вернул кнопку прогона на эту же страницу.
+            "channel": channel.value,
+            "title": CONTENT_TITLES[channel],
             # Пока прогон идёт, страница перечитывает себя сама; как только
             # он кончился — перестаёт, иначе экран сам себе создаёт поток
             # запросов на всю ночь.
@@ -179,8 +210,14 @@ async def content_page(request: Request, session: SessionDep) -> Response:
 
 
 @router.post("/content/generate")
-async def content_generate(background: BackgroundTasks) -> Response:
+async def content_generate(
+    background: BackgroundTasks,
+    channel: Annotated[str | None, Form()] = None,
+) -> Response:
     """Кнопка «сгенерировать неделю»: ставит прогон в очередь и уводит обратно.
+
+    Прогон общий на оба канала, поэтому кнопка одна на две страницы, а
+    `channel` из формы говорит только, куда вернуть человека.
 
     Отказ замка (прогон уже идёт) отдельно не показываем: страница и так
     напишет, что прогон идёт с такого-то времени.
@@ -191,7 +228,19 @@ async def content_generate(background: BackgroundTasks) -> Response:
     # 303, а не 302: браузер обязан перейти GET'ом, иначе «обновить» на
     # странице переотправит форму и попробует запустить прогон снова.
     # Токен сессии не дописываем — в админку из VK не ходят, там Basic.
-    return RedirectResponse("/admin/content", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(_content_path(channel), status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _content_path(raw: str | None) -> str:
+    """«mail» → адрес страницы рассылки; пусто или мусор → страница ленты.
+
+    Мусор молча уводит на ленту, как и в _parse_day: опечатка в форме не
+    должна ронять ответ на кнопку, которая уже потратила деньги.
+    """
+    try:
+        return CONTENT_PATHS[content.Channel(raw)]
+    except ValueError:
+        return CONTENT_PATHS[content.Channel.FEED]
 
 
 @router.get("/broadcast")

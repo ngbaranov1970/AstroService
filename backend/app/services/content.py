@@ -20,6 +20,7 @@ DeepSeek снова. Событие входит в адрес, поэтому �
 
 from __future__ import annotations
 
+import enum
 import logging
 from datetime import date, datetime, timedelta
 from types import ModuleType
@@ -52,23 +53,36 @@ class ContentNotSupportedError(RuntimeError):
     """
 
 
+class Channel(str, enum.Enum):
+    """Куда уходит готовый текст: в ленту сообщества или в личную рассылку.
+
+    Значение, а не подпись для глаз: по каналу разделены страницы вычитки
+    (/admin/content и /admin/content/mail), а фильтровать по строке «В ленту»
+    нельзя. Подписи живут в шаблоне.
+    """
+
+    FEED = "feed"
+    MAIL = "mail"
+
+
 # Куда уходит готовый текст. С 05.09.2026 на день приходится два поста, и
 # перепутать их при вычитке легко: daily_horoscope выглядит как пост, но в
 # ленту не публикуется — его разбирает по знакам рассылка.
-_CHANNEL: dict[PostKind, str] = {
-    PostKind.DAILY_SKY: "В ленту",
-    PostKind.DAILY_HOROSCOPE: "В рассылку",
-    PostKind.ASTRO_EVENT: "В ленту",
+_CHANNEL: dict[PostKind, Channel] = {
+    PostKind.DAILY_SKY: Channel.FEED,
+    PostKind.DAILY_HOROSCOPE: Channel.MAIL,
+    PostKind.ASTRO_EVENT: Channel.FEED,
 }
 
 
-def channel(kind: PostKind) -> str:
-    """Назначение поста словами — пометка для вычитки на /admin/content.
+def kinds_for(channel: Channel) -> tuple[PostKind, ...]:
+    """Форматы постов этого канала — то, что показывает его страница вычитки.
 
-    Пустая строка у форматов, которым канал ещё не назначен (портрет знака,
-    карта известного человека, приглашение).
+    Форматы без канала (портрет знака, карта известного человека,
+    приглашение) не попадают ни в один список: назначить канал — дописать
+    строку в _CHANNEL, правки страниц при этом не нужно.
     """
-    return _CHANNEL.get(kind, "")
+    return tuple(kind for kind, value in _CHANNEL.items() if value is channel)
 
 
 def _prompt_module(kind: PostKind) -> ModuleType:
@@ -287,9 +301,17 @@ async def find_post(
 
 
 async def list_week(
-    session: AsyncSession, start: date | None = None, *, days: int = 7
+    session: AsyncSession,
+    start: date | None = None,
+    *,
+    days: int = 7,
+    channel: Channel | None = None,
 ) -> list[Post]:
     """Пачка постов на вычитку: всё, что стоит на этих датах, по порядку.
+
+    Канал не задан — отдаём неделю целиком (так считает итог прогона).
+    Задан — только форматы этого канала: страницы ленты и рассылки читают
+    одну и ту же неделю, но каждая свою половину.
 
     Версию промпта НЕ фильтруем, в отличие от find_post: после смены VERSION
     рядом лежат старый и новый текст одного дня, и увидеть надо оба — ровно
@@ -301,11 +323,13 @@ async def list_week(
         .where(Post.target_date >= start, Post.target_date < start + timedelta(days=days))
         .order_by(Post.target_date, Post.kind, Post.created_at)
     )
+    if channel is not None:
+        stmt = stmt.where(Post.kind.in_(kinds_for(channel)))
     return list(await session.scalars(stmt))
 
 
 def render(post: Post) -> str:
-    """Текст поста, готовый к вставке в отложку VK, — его и показывает /admin/content.
+    """Текст поста для вычитки — его показывают страницы /admin/content*.
 
     Разбирает ответ модели тем же модулем промпта, что его писал. Брак
     (модель ответила не JSON) отдаём как есть: за текст заплачено, и увидеть
