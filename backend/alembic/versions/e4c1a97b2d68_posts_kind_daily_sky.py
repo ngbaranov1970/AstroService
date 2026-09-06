@@ -26,6 +26,11 @@ KINDS = (
 )
 OLD_KINDS = tuple(k for k in KINDS if k != 'daily_sky')
 
+# Имя без префикса: в базе ограничение зовётся ck_posts_post_kind, но "ck_posts_"
+# дописывает naming_convention из app/db.py. Передать полное имя — получить
+# ck_posts_ck_posts_post_kind и падение миграции.
+CONSTRAINT = 'post_kind'
+
 
 def _values(kinds: Sequence[str]) -> str:
     return ', '.join(f"'{k}'" for k in kinds)
@@ -37,8 +42,8 @@ def upgrade() -> None:
     # см. Post.kind), поэтому новый формат поста добавляется не типом, а
     # пересозданием ограничения. Autogenerate этого не видит: для него колонка
     # как была VARCHAR, так и осталась.
-    op.drop_constraint('ck_posts_post_kind', 'posts', type_='check')
-    op.create_check_constraint('ck_posts_post_kind', 'posts', f"kind IN ({_values(KINDS)})")
+    op.drop_constraint(CONSTRAINT, 'posts', type_='check')
+    op.create_check_constraint(CONSTRAINT, 'posts', f"kind IN ({_values(KINDS)})")
 
 
 def downgrade() -> None:
@@ -47,5 +52,5 @@ def downgrade() -> None:
     # и создать его не дадут — удаляем их. Возврат назад означает отказ от
     # формата, тексты в нём смысла не имеют.
     op.execute("DELETE FROM posts WHERE kind = 'daily_sky'")
-    op.drop_constraint('ck_posts_post_kind', 'posts', type_='check')
-    op.create_check_constraint('ck_posts_post_kind', 'posts', f"kind IN ({_values(OLD_KINDS)})")
+    op.drop_constraint(CONSTRAINT, 'posts', type_='check')
+    op.create_check_constraint(CONSTRAINT, 'posts', f"kind IN ({_values(OLD_KINDS)})")
