@@ -65,6 +65,8 @@
         <h2>
           {{ item.post.target_date.strftime("%d.%m") }} ·
           {{ item.post.title or "Гороскоп дня" }}
+          {# Пилюля с каналом: в ленту уходит не всё, что лежит в очереди. #}
+          {% if item.channel %}<span class="badge">{{ item.channel }}</span>{% endif %}
         </h2>
 
         <p class="meta-line muted">

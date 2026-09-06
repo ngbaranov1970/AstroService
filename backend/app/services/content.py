@@ -28,7 +28,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm import client
-from app.llm.prompts import astro_event, daily_horoscope
+from app.llm.prompts import astro_event, daily_horoscope, daily_sky
 from app.models import Post, PostKind
 from astro_core import transits
 
@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Какой промпт отвечает за какой формат поста. Реестр вместо цепочки if:
 # добавить «портрет знака» = написать модуль промпта и дописать строку сюда.
 _PROMPTS: dict[PostKind, ModuleType] = {
+    PostKind.DAILY_SKY: daily_sky,
     PostKind.DAILY_HOROSCOPE: daily_horoscope,
     PostKind.ASTRO_EVENT: astro_event,
 }
@@ -49,6 +50,25 @@ class ContentNotSupportedError(RuntimeError):
     контент-сетки (портрет знака, карта известного человека, приглашение), и
     попытка сгенерировать такой пост должна сказать, чего не хватает.
     """
+
+
+# Куда уходит готовый текст. С 05.09.2026 на день приходится два поста, и
+# перепутать их при вычитке легко: daily_horoscope выглядит как пост, но в
+# ленту не публикуется — его разбирает по знакам рассылка.
+_CHANNEL: dict[PostKind, str] = {
+    PostKind.DAILY_SKY: "В ленту",
+    PostKind.DAILY_HOROSCOPE: "В рассылку",
+    PostKind.ASTRO_EVENT: "В ленту",
+}
+
+
+def channel(kind: PostKind) -> str:
+    """Назначение поста словами — пометка для вычитки на /admin/content.
+
+    Пустая строка у форматов, которым канал ещё не назначен (портрет знака,
+    карта известного человека, приглашение).
+    """
+    return _CHANNEL.get(kind, "")
 
 
 def _prompt_module(kind: PostKind) -> ModuleType:
@@ -314,10 +334,17 @@ async def _generate(
     module = _prompt_module(kind)
     temperature: float = getattr(module, "TEMPERATURE", client.DEFAULT_TEMPERATURE)
     max_tokens: int = getattr(module, "MAX_TOKENS", 4096)
+    # Модель у формата своя, если он её назвал: пост в ленту читают люди, и
+    # за него берём модель подороже, а рассылка остаётся на общей.
+    model: str = getattr(module, "MODEL", client.DEFAULT_MODEL)
 
     logger.info("Генерирую пост %s на %s (%s)", kind.value, target_date, module.VERSION)
     result = await client.chat(
-        module.SYSTEM, user_message, temperature=temperature, max_tokens=max_tokens
+        module.SYSTEM,
+        user_message,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
     post = Post(
@@ -398,41 +425,67 @@ async def generate_week(
     days: int = 7,
     events: int = EVENTS_PER_RUN,
 ) -> list[Post]:
-    """Готовит пачку постов на неделю: гороскоп на каждый день плюс события.
+    """Готовит пачку постов на неделю: два поста на каждый день плюс события.
 
     Возвращает всё, что стоит на этих датах, включая написанное прошлым
     запуском. Дневной потолок DAILY_GENERATION_LIMIT сюда не применяется: он
     охраняет расход на пользовательских разборах, а объём контента фиксирован
-    (порядка 9 вызовов в неделю), и остановка его на пике трафика была бы
+    (порядка 16 вызовов в неделю), и остановка его на пике трафика была бы
     ровно вредной.
 
     ТРАНЗАКЦИЮ КОММИТИТ САМ — в отличие от остальных сервисов. Прогон недели
-    это девять вызовов DeepSeek по минуте; одной транзакцией восемь оплаченных
-    текстов пропали бы из-за падения на девятом. По той же причине ошибка LLM
-    не прерывает прогон: она пишется в лог как ERROR, остальные посты
-    доделываются, а недостающие допишет следующий запуск.
+    это полтора десятка вызовов DeepSeek по минуте; одной транзакцией дюжина
+    оплаченных текстов пропала бы из-за падения на последнем. По той же
+    причине ошибка LLM не прерывает прогон: она пишется в лог как ERROR,
+    остальные посты доделываются, а недостающие допишет следующий запуск.
     """
     start = start or today_msk()
     end = start + timedelta(days=days - 1)
     await purge_old(session)
 
+    # Небо кануна недели: обзор дня сравнивает сутки с предыдущими, и первому
+    # дню сравнивать иначе не с чем. Дальше по циклу вчерашнее уже посчитано.
+    previous_sky = transits.day_sky(start - timedelta(days=1))
+
     for offset in range(days):
         day = start + timedelta(days=offset)
-        if await find_post(session, PostKind.DAILY_HOROSCOPE, day) is not None:
-            logger.debug("Гороскоп на %s уже есть — в LLM не идём", day)
-            continue
-        try:
-            await _generate(
-                session,
-                kind=PostKind.DAILY_HOROSCOPE,
-                target_date=day,
-                user_message=daily_horoscope.build_user(transits.day_sky(day)),
-            )
-        except Exception:
-            # Откат обязателен: после ошибки в сессии может висеть добавленный
-            # объект, и следующий commit записал бы его вместе со своим постом.
-            await session.rollback()
-            logger.exception("Гороскоп на %s не сгенерировался — иду дальше", day)
+        # Небо суток считается один раз на оба поста: 0.02 с, но оба промпта
+        # обязаны говорить об одном и том же дне одними и теми же числами.
+        sky = transits.day_sky(day)
+
+        # Какие форматы идут каждый день. Пара живёт здесь, а не в _PROMPTS:
+        # тот отвечает на вопрос «каким модулем писать формат», а «что выходит
+        # ежедневно» — продуктовое решение, и место ему на виду. DAILY_SKY —
+        # единственный пост в ленту, DAILY_HOROSCOPE с 05.09.2026 идёт только
+        # в рассылку по личным сообщениям (services/broadcast.py). Третьим
+        # полем — нужно ли промпту вчерашнее небо.
+        for kind, module, with_previous in (
+            (PostKind.DAILY_SKY, daily_sky, True),
+            (PostKind.DAILY_HOROSCOPE, daily_horoscope, False),
+        ):
+            if await find_post(session, kind, day) is not None:
+                logger.debug("Пост %s на %s уже есть — в LLM не идём", kind.value, day)
+                continue
+            try:
+                await _generate(
+                    session,
+                    kind=kind,
+                    target_date=day,
+                    user_message=(
+                        module.build_user(sky, previous_sky)
+                        if with_previous
+                        else module.build_user(sky)
+                    ),
+                )
+            except Exception:
+                # Откат обязателен: после ошибки в сессии может висеть добавленный
+                # объект, и следующий commit записал бы его вместе со своим постом.
+                await session.rollback()
+                logger.exception(
+                    "Пост %s на %s не сгенерировался — иду дальше", kind.value, day
+                )
+
+        previous_sky = sky
 
     for event in pick_events(start, end, events):
         day = event["moment"].date()

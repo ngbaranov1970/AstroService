@@ -239,9 +239,14 @@ def _event(kind: str, jd: float, title: str, **extra) -> dict:
 
 def _sign_fields(lon: float) -> dict:
     code = _SIGN_CODES[_sign_index(lon)]
+    forms = _SIGN_FORMS[code]
     return {
         "sign": code,
         "sign_ru": SIGNS_RU[code],
+        # Готовые падежи рядом с именительным: без них текст пишет их сам и
+        # ошибается («в Раку» в первом же прогоне daily_sky 05.09.2026).
+        "sign_gen": forms.gen,
+        "sign_loc": forms.loc,
         "deg_in_sign": round(lon % 30.0, 2),
     }
 
@@ -413,20 +418,31 @@ def _aspect_targets(angle: float) -> tuple[float, ...]:
     return (angle,) if angle in (0.0, 180.0) else (angle, -angle)
 
 
-def _aspect_event(kind: str, jd: float, first: str, second: str, aspect: str) -> dict:
-    """Событие точного аспекта: заголовок с нужным падежом и поля обоих тел.
+def aspect_phrase(first: str, second: str, aspect: str) -> str:
+    """«Юпитер в трине к Сатурну» — аспект фразой с падежами.
 
-    Вынесено из exact_aspects, потому что то же самое собирает moon_events:
-    два места, где падежи набираются отдельно, однажды разойдутся.
+    Нужна не только событиям: действующие аспекты в day_sky["aspects"] — не
+    события, готового title_ru у них нет, а собирать фразу из трёх слов в
+    именительном падеже текст поста не умеет («Юпитер в трине с Сатурном» в
+    прогоне 05.09.2026).
     """
     # Соединение просит творительный с «с», прочие аспекты — дательный с «к».
     if aspect == "conjunction":
         tail = f"с {_PLANET_FORMS[second].ins}"
     else:
         tail = f"к {_PLANET_FORMS[second].dat}"
+    return f"{PLANETS_RU[first]} {_ASPECT_IN[aspect]} {tail}"
+
+
+def _aspect_event(kind: str, jd: float, first: str, second: str, aspect: str) -> dict:
+    """Событие точного аспекта: заголовок с нужным падежом и поля обоих тел.
+
+    Вынесено из exact_aspects, потому что то же самое собирает moon_events:
+    два места, где падежи набираются отдельно, однажды разойдутся.
+    """
     return _event(
         kind, jd,
-        f"{PLANETS_RU[first]} {_ASPECT_IN[aspect]} {tail}",
+        aspect_phrase(first, second, aspect),
         body=first, body_ru=PLANETS_RU[first],
         body2=second, body2_ru=PLANETS_RU[second],
         aspect=aspect, aspect_ru=ASPECTS_RU[aspect],
@@ -450,10 +466,19 @@ def moon_events(day: date) -> list[dict]:
     # Шаг полсуток: 30° знака Луна проходит за 2.3 суток, границу не перескочит.
     for jd in _scan_sign_change("Moon", jd_start, jd_end, 0.5):
         fields = _sign_fields(_lon_speed(jd + 0.01, "Moon")[0])
+        # Знак, из которого Луна вышла: тексту нужно «до этого она в
+        # Близнецах». Считаем по долготе за четверть часа до момента, а не
+        # берём соседний слева по зодиаку — счёт по списку это догадка, а
+        # эфемериды знают ответ.
+        previous = _sign_fields(_lon_speed(jd - 0.01, "Moon")[0])
         out.append(
             _event("moon_ingress", jd,
                    f"Луна входит в знак {_SIGN_FORMS[fields['sign']].gen}",
-                   body="Moon", body_ru=PLANETS_RU["Moon"], **fields)
+                   body="Moon", body_ru=PLANETS_RU["Moon"],
+                   from_sign=previous["sign"],
+                   from_sign_ru=previous["sign_ru"],
+                   from_sign_loc=previous["sign_loc"],
+                   **fields)
         )
 
     for second in (b for b in _BODIES if b != "Moon"):

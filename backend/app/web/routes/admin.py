@@ -157,7 +157,14 @@ async def content_page(request: Request, session: SessionDep) -> Response:
                 # модели лежит в базе JSON'ом и разбирает его модуль промпта.
                 # Длина в словах — для калибровки промпта (рамки заданы в его
                 # SYSTEM), поэтому она рядом с текстом, а не внутри него.
-                {"post": post, "text": text, "words": len(text.split())}
+                {
+                    "post": post,
+                    "text": text,
+                    "words": len(text.split()),
+                    # Канал печатаем словами: на день теперь два поста, и
+                    # какой из них не идёт в ленту, по kind видно не сразу.
+                    "channel": content.channel(post.kind),
+                }
                 for post, text in ((p, content.render(p)) for p in posts)
             ],
             "run": run,
