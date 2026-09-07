@@ -1,0 +1,330 @@
+{# Лендинг на корне домена. Показывает его routes/redirects.py тому, кто пришёл
+   без launch params VK; заход из VK туда же не попадает — его редиректят в /app/.
+
+   От base.html не наследуется: там шапка и подвал стенда, дисклеймер и
+   vk-bridge. Здесь своя вёрстка и, главное, robots: index — эту страницу, в
+   отличие от остальных, надо находить в поиске. #}
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="index, follow">
+
+  <title>Звездочёт — натальная карта и разбор</title>
+  <meta name="description"
+        content="Натальная карта по швейцарским эфемеридам, с историческим часовым
+                 поясом места рождения, и разбор словами. Первый разбор бесплатный.">
+
+  {# Открытый граф: по этим тегам мессенджеры и VK рисуют превью ссылки.
+     Без них в переписке видно голый адрес. #}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Звездочёт — натальная карта и разбор">
+  <meta property="og:description"
+        content="Ваше небо в минуту рождения: планеты, дома и аспекты — и текст,
+                 который это объясняет. Бесплатно, без регистрации.">
+  <meta property="og:url" content="https://{{ merchant.site }}/">
+  <meta property="og:site_name" content="Звездочёт">
+
+  <link rel="stylesheet" href="/static/landing.css">
+</head>
+<body class="landing">
+
+<header class="top">
+  <div class="wrap top-inner">
+    <a class="brand" href="/">
+      {# Та же эмблема, что на онбординге приложения (SunEmblem.vue), но без
+         лучей и звёзд: в размере 26 px мелкие детали превращаются в грязь. #}
+      <svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+        <g stroke="currentColor" stroke-width="4" opacity="0.55">
+          <line x1="100" y1="6" x2="100" y2="34"/>
+          <line x1="100" y1="166" x2="100" y2="194"/>
+          <line x1="6" y1="100" x2="34" y2="100"/>
+          <line x1="166" y1="100" x2="194" y2="100"/>
+        </g>
+        <circle cx="100" cy="100" r="60" stroke="currentColor" stroke-width="3" opacity="0.35"/>
+        <circle cx="100" cy="100" r="50" stroke="currentColor" stroke-width="4"/>
+        <mask id="brand-crescent">
+          <rect width="200" height="200" fill="black"/>
+          <circle cx="106" cy="100" r="30" fill="white"/>
+          <circle cx="92" cy="94" r="29" fill="black"/>
+        </mask>
+        <rect width="200" height="200" fill="currentColor" mask="url(#brand-crescent)"/>
+      </svg>
+      <span>Звездочёт</span>
+    </a>
+    <nav class="top-nav">
+      <a href="#how">Как это работает</a>
+      <a href="#chart">Что в карте</a>
+      <a href="#faq">Вопросы</a>
+    </nav>
+    <a class="btn btn-sm" href="{{ app_path }}">Открыть</a>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap">
+    <section class="hero">
+      <div>
+        <p class="label">Натальная карта и разбор</p>
+        <h1>Небо в минуту вашего рождения — <em>посчитанное честно</em></h1>
+        <p class="hero-lead">
+          Планеты, дома и аспекты считаются по швейцарским эфемеридам, с тем часовым
+          поясом, который действовал в вашем городе в тот самый день. Дальше карта
+          превращается в текст — не в таблицу символов, которую ещё надо уметь читать.
+        </p>
+        <div class="hero-cta">
+          <a class="btn" href="{{ app_path }}">Собрать свою карту</a>
+          <a class="btn btn-quiet" href="#chart">Посмотреть пример</a>
+        </div>
+        <p class="hero-note">Бесплатно. Без регистрации и пароля — вход через VK&nbsp;ID.</p>
+      </div>
+
+      <div class="wheel-holder">
+        {# Пустой SVG заполняет landing.js: координаты каждой планеты считаются
+           из её долготы, иначе картинка разъедется с таблицей ниже. #}
+        <svg class="wheel" id="wheel" viewBox="0 0 400 400" role="img"
+             aria-label="Колесо натальной карты: планеты на своих градусах зодиака"></svg>
+        <p class="wheel-caption">11 мая 1990, 17:20 · Касимов — карта из наших тестовых эталонов</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section class="facts">
+      <div class="fact">
+        <p class="label">Точность</p>
+        <h3>Сверено с эталонами</h3>
+        <p>
+          Десять карт из разных эпох и полушарий сверены с astro-seek до минуты дуги
+          и проверяются автотестами при каждом изменении кода.
+        </p>
+      </div>
+      <div class="fact">
+        <p class="label">Часовые пояса</p>
+        <h3>По дате, а не по карте мира</h3>
+        <p>
+          Касимов в мае 1990-го жил по UTC+4, Москва в январе 1992-го — по UTC+2.
+          Промах на час здесь сдвигает асцендент на добрую половину знака.
+        </p>
+      </div>
+      <div class="fact">
+        <p class="label">Ваша карта</p>
+        <h3>А не гороскоп по знаку</h3>
+        <p>
+          Гороскоп на неделю написан для одной двенадцатой человечества. Здесь
+          считается ваш день, ваш час и ваш город — такое сочетание больше не
+          повторяется нигде.
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section class="block" id="how">
+      <div class="block-head">
+        <p class="label">Три шага</p>
+        <h2>От даты рождения до готового текста</h2>
+        <p>Занимает пару минут — почти всё время уходит на то, чтобы вспомнить, где именно вы родились.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <h3>Дата, время и место</h3>
+          <p>
+            Город ищется в базе на 70 тысяч населённых пунктов — координаты и пояс
+            подставляются сами. Времени не помните? Считаем от полудня и честно
+            помечаем, что асцендент приблизительный.
+          </p>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <h3>Расчёт карты</h3>
+          <p>
+            Двенадцать планет и точек, углы, дома по Плацидусу и аспекты между ними —
+            в градусах и минутах дуги. Это ровно те числа, с которыми работает астролог.
+          </p>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <h3>Разбор словами</h3>
+          <p>
+            Текст пишется по вашим положениям, а не выбирается из заготовок под знак
+            Солнца. Первый разбор — бесплатный, он же остаётся у вас в приложении.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section class="block" id="chart">
+      <div class="block-head">
+        <p class="label">Что вы получите</p>
+        <h2>Сначала числа, потом слова</h2>
+        <p>
+          Расчёт открыт целиком: любое утверждение разбора можно проверить по таблице.
+          Ниже — та самая карта из колеса вверху страницы.
+        </p>
+      </div>
+
+      <div class="chart-demo">
+        <div>
+          <div class="badges">
+            <div class="badge">
+              <div class="glyph">☉︎</div>
+              <div class="name">Телец</div>
+              <div class="deg">20°35′ · 8 дом</div>
+            </div>
+            <div class="badge">
+              <div class="glyph">☽︎</div>
+              <div class="name">Стрелец</div>
+              <div class="deg">9°36′ · 2 дом</div>
+            </div>
+            <div class="badge">
+              <div class="glyph">↑</div>
+              <div class="name">Весы</div>
+              <div class="deg">13°47′ · асцендент</div>
+            </div>
+          </div>
+          <p class="table-note">
+            Солнце, Луна и асцендент — три вещи, которые спрашивают первыми. Дальше в
+            приложении: полная таблица планет, куспиды всех двенадцати домов и 43 аспекта
+            этой карты с орбами.
+          </p>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Планета</th>
+                <th>Положение</th>
+                <th>Дом</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="glyph">☉︎</span>Солнце</td><td class="deg">20°35′ Телец</td><td class="dim">8</td></tr>
+              <tr><td><span class="glyph">☽︎</span>Луна</td><td class="deg">9°36′ Стрелец</td><td class="dim">2</td></tr>
+              <tr><td><span class="glyph">☿︎</span>Меркурий</td><td class="deg">9°03′ Телец</td><td class="dim">8 · R</td></tr>
+              <tr><td><span class="glyph">♀︎</span>Венера</td><td class="deg">8°20′ Овен</td><td class="dim">6</td></tr>
+              <tr><td><span class="glyph">♂︎</span>Марс</td><td class="deg">15°24′ Рыбы</td><td class="dim">5</td></tr>
+              <tr><td><span class="glyph">♃︎</span>Юпитер</td><td class="deg">8°48′ Рак</td><td class="dim">9</td></tr>
+              <tr><td><span class="glyph">♄︎</span>Сатурн</td><td class="deg">25°18′ Козерог</td><td class="dim">4 · R</td></tr>
+              <tr><td><span class="glyph">♅︎</span>Уран</td><td class="deg">9°17′ Козерог</td><td class="dim">3 · R</td></tr>
+              <tr><td><span class="glyph">♆︎</span>Нептун</td><td class="deg">14°24′ Козерог</td><td class="dim">3 · R</td></tr>
+              <tr><td><span class="glyph">♇︎</span>Плутон</td><td class="deg">16°17′ Скорпион</td><td class="dim">2 · R</td></tr>
+            </tbody>
+          </table>
+          <p class="table-note">R — ретроградное движение. Дома по системе Плацидуса.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section class="block">
+      <div class="block-head">
+        <p class="label">Как это читается</p>
+        <h2>Фрагмент бесплатного разбора</h2>
+      </div>
+      <blockquote class="excerpt">
+        <p>
+          Солнце в Тельце в восьмом доме — сочетание упрямое и небыстрое. Телец не любит
+          срываться с места, а восьмой дом раз за разом ставит вопросы, на которых
+          приходится меняться: чужие деньги, близость, то, что не делится пополам.
+        </p>
+        <p>
+          Луна в Стрельце в этой карте работает противовесом: ей нужен воздух, дорога и
+          возможность в любой момент сказать «а давайте иначе». Отсюда знакомое, наверное,
+          ощущение — устроиться прочно и почти сразу заскучать от прочности.
+        </p>
+        <p class="who">Начало разбора для карты 11 мая 1990 года.</p>
+      </blockquote>
+
+      {# Названия частей приходят из SECTION_TITLES промпта, а не переписаны
+         сюда руками: разойдись они — на витрине обещан не тот состав, который
+         человек получит. #}
+      <div class="parts">
+        <p class="label">Полный разбор — шесть частей</p>
+        <ul>
+          {% for title in full_sections %}
+            <li>{{ title }}</li>
+          {% endfor %}
+        </ul>
+        <p class="parts-note">
+          <a href="{{ url('/pricing') }}">Что входит и сколько стоит</a>
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section class="block" id="faq">
+      <div class="block-head">
+        <p class="label">Вопросы</p>
+        <h2>Что обычно спрашивают</h2>
+      </div>
+      <div class="faq">
+        <div>
+          <h3>Нужно ли точное время рождения?</h3>
+          <p>
+            Желательно: от него зависят дома и асцендент. Без времени карта всё равно
+            считается — от полудня, — но приблизительные места мы помечаем прямо в тексте,
+            а не выдаём за точные.
+          </p>
+        </div>
+        <div>
+          <h3>Нужно ли регистрироваться?</h3>
+          <p>
+            Нет. Вход через VK ID: ни почты, ни пароля, ни подтверждений. Карта
+            привязывается к вашей учётной записи и остаётся доступной при следующем заходе.
+          </p>
+        </div>
+        <div>
+          <h3>Откуда берутся координаты города?</h3>
+          <p>
+            Из офлайн-базы GeoNames — около 70 тысяч населённых пунктов. Часовой пояс
+            определяется по координатам и дате: исторические переводы стрелок учитываются.
+          </p>
+        </div>
+        <div>
+          <h3>Можно посчитать карту близкого?</h3>
+          <p>
+            Да, карт может быть несколько — ребёнок, родитель, тот, с кем интересно
+            сравнить. На каждую даётся свой бесплатный разбор, переключаться между
+            ними можно прямо на главном экране.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section class="final">
+      <h2>Ваша карта считается за полминуты</h2>
+      <p>Дата, время и город — всё, что нужно. Первый разбор бесплатный.</p>
+      <a class="btn" href="{{ app_path }}">Собрать свою карту</a>
+    </section>
+  </div>
+</main>
+
+<footer class="wrap">
+  <div class="foot-grid">
+    <div class="merchant">
+      <p>{{ merchant.name }}</p>
+      <p>{{ merchant.status }}</p>
+      <p>ИНН {{ merchant.inn }} · {{ merchant.email }}</p>
+    </div>
+    <nav class="foot-links">
+      <a href="{{ url('/pricing') }}">Что входит и сколько стоит</a>
+      <a href="{{ url('/offer') }}">Оферта</a>
+      <a href="{{ url('/privacy') }}">Обработка данных</a>
+      <a href="{{ url('/contacts') }}">Контакты</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/static/landing.js"></script>
+</body>
+</html>

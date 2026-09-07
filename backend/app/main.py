@@ -25,6 +25,7 @@ from app.payments import yookassa
 from app.session_cookie import install_session_cookie
 from app.vk import api as vk_api
 from app.web.routes.admin import router as admin_router
+from app.web.routes.landing import router as landing_router
 from app.web.routes.legal import router as legal_router
 from app.web.routes.pay import router as pay_router
 from app.web.routes.redirects import router as redirects_router
@@ -111,9 +112,10 @@ def create_app() -> FastAPI:
     # вне прода, но middleware ставится всегда: включать его по окружению
     # значит отлаживать в разработке не то, что поедет в бой.
     install_session_cookie(app)
-    # Корень и старые ссылки /r/<token> — на Vue. Стоит до остальных роутеров:
-    # маршруты конкретнее, чем «всё остальное», и порядок здесь читаемости
-    # ради, пересечься им не с чем.
+    # Корень домена: лендинг, а запуску из VK — переход в /app/. Стоит до
+    # остальных роутеров: порядок здесь читаемости ради, пересечься им не с чем.
+    app.include_router(landing_router)
+    # Старые ссылки /r/<token> из уже розданных разборов — на экран карты.
     app.include_router(redirects_router)
     # Веб-вход через VK ID. Своей авторизации не требует по определению —
     # он её и выдаёт; cookie попытки ставит сам, мимо middleware выше.
