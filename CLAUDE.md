@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Состояние проекта
 
-Backend работает, frontend на Vue 3 (чистый JavaScript, TypeScript в проекте не используется) покрывает основные экраны и заменяет собой веб-стенд. Расчётное ядро натальной карты и календарь астрособытий готовы и сверены (geo.py, natal.py, transits.py, золотые тесты); подробный статус и следующий шаг — в [docs/progress.md](docs/progress.md), читать его первым. Документов в `docs/` ровно пять, и у каждого своя роль:
+Backend работает, frontend на Vue 3 (чистый JavaScript, TypeScript в проекте не используется) покрывает основные экраны и заменяет собой веб-стенд. Расчётное ядро натальной карты и календарь астрособытий готовы и сверены (geo.py, natal.py, transits.py, золотые тесты); подробный статус и следующий шаг — в [docs/progress.md](docs/progress.md), читать его первым. Документов в `docs/` ровно шесть, и у каждого своя роль:
 
 - [docs/progress.md](docs/progress.md) — что сделано и что дальше; читать первым
 - [docs/astro-context.md](docs/astro-context.md) — **единственный документ решений**: «почему так, а не иначе». Рынок, платформенные ограничения, решения по платформам, грабли расчётов и эксплуатации, деплой, цены, юридическое
 - [docs/db-schema.md](docs/db-schema.md) — схема БД: связи таблиц, каскады удаления, индексы (обновлять вместе с `backend/app/models/`)
 - [docs/frontend-plan.md](docs/frontend-plan.md) — план Vue-фронта: экраны, токены, порядок работ
 - [docs/astro-prompts-v2.md](docs/astro-prompts-v2.md) — промпты
+- [docs/compatibility-plan.md](docs/compatibility-plan.md) — план раздела «Совместимость»: состояние работ, схема БД под пару, порядок фаз. Живёт до конца работ, потом решения уходят в `astro-context.md`, а сам файл удаляется
 
 Хронология работ (`progress-journal.md`) и план по неделям (`astro-project-plan.md`) удалены 2026-08-27 как протухшие; всё живое из них перенесено в `astro-context.md`, сама история осталась в git.
 
