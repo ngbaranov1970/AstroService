@@ -36,6 +36,7 @@ from app.models.report import ReportType
 
 if TYPE_CHECKING:
     from app.models.chart import Chart
+    from app.models.pair import Pair
     from app.models.user import User
 
 
@@ -106,13 +107,27 @@ class Order(Base):
         # Индекс ЧАСТИЧНЫЙ (только pending), потому что оплаченных и
         # отменённых заказов на ту же тройку бывает сколько угодно — это
         # история покупок, и запрещать её нельзя.
+        #
+        # Индексов два, и различает их pair_id — по той же причине, что у
+        # reports: у парного заказа chart_id заполнен картой-якорем, и один
+        # общий индекс запретил бы человеку одновременно ждать оплаты
+        # разборов «я + Маша» и «я + Лена». Выглядело бы как молчащая
+        # кнопка «купить» на второй паре.
         Index(
             "uq_orders_one_pending",
             "user_id",
             "chart_id",
             "report_type",
             unique=True,
-            postgresql_where=sql_text("status = 'pending'"),
+            postgresql_where=sql_text("status = 'pending' AND pair_id IS NULL"),
+        ),
+        Index(
+            "uq_orders_one_pending_pair",
+            "user_id",
+            "pair_id",
+            "report_type",
+            unique=True,
+            postgresql_where=sql_text("status = 'pending' AND pair_id IS NOT NULL"),
         ),
     )
 
@@ -150,6 +165,17 @@ class Order(Base):
     # Компромисс — заказ остаётся, но уже без ссылки на данные рождения.
     chart_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("charts.id", ondelete="SET NULL")
+    )
+
+    # Пара, за разбор которой платят; у натальных заказов NULL. SET NULL по
+    # той же причине, что у chart_id выше: пара уходит вместе с любой своей
+    # картой, а денежный факт остаётся.
+    #
+    # У парного заказа заполнены ОБЕ колонки: chart_id хранит карту
+    # инициатора (по ней заказ находится в «моих покупках» и попадает в
+    # каскады), pair_id — за что именно заплачено.
+    pair_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("pairs.id", ondelete="SET NULL")
     )
 
     # Что именно покупают. Тот же перечень, что у reports.type, — и это не
@@ -234,6 +260,10 @@ class Order(Base):
 
     user: Mapped[User] = relationship(back_populates="orders", lazy="raise_on_sql")
     chart: Mapped[Chart | None] = relationship(back_populates="orders", lazy="raise_on_sql")
+
+    # Без back_populates: список «заказы этой пары» нигде не показывается,
+    # а обратная связь потребовала бы объявления и в Pair.
+    pair: Mapped[Pair | None] = relationship(lazy="raise_on_sql")
 
     def __repr__(self) -> str:
         return (

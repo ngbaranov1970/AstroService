@@ -9,7 +9,7 @@ autogenerate как удалённая, а незагруженный класс
 а не из app.models.chart. Так пакет остаётся волен перекладывать классы
 между файлами, не трогая пятнадцать вызывающих модулей.
 
-Устройство файлов: user, chart, report, order — продуктовое ядро, они
+Устройство файлов: user, chart, report, order, pair — продуктовое ядро, они
 ссылаются друг на друга; event — аналитика, post — контент сообщества, эти
 двое не связаны ни с кем. Связи внутри ядра объявлены типами
 (`Mapped[list[Chart]]`), поэтому файлы импортируют друг друга под
@@ -42,6 +42,7 @@ autogenerate как удалённая, а незагруженный класс
 from app.models.chart import Chart
 from app.models.event import Event
 from app.models.order import Order, OrderStatus
+from app.models.pair import Pair, PairKind
 from app.models.post import Post, PostKind
 from app.models.report import Report, ReportType
 from app.models.user import Platform, User
@@ -51,6 +52,8 @@ __all__ = [
     "Event",
     "Order",
     "OrderStatus",
+    "Pair",
+    "PairKind",
     "Platform",
     "Post",
     "PostKind",

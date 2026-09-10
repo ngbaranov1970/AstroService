@@ -20,7 +20,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy import (
@@ -37,6 +36,7 @@ from app.db import Base
 
 if TYPE_CHECKING:
     from app.models.chart import Chart
+    from app.models.pair import Pair
 
 
 class ReportType(str, enum.Enum):
@@ -44,12 +44,16 @@ class ReportType(str, enum.Enum):
 
     FREE_NATAL — бесплатная приманка, короткий разбор натальной карты.
     FULL_NATAL — платный полный разбор посекционно.
+    PAIR_FREE, PAIR_FULL — совместимость: тизер и платный разбор пары.
+    Их адрес в кеше — pair_id, а не chart_id (см. индексы у Report).
     MATRIX, EASTERN — заготовки под Матрицу Судьбы и восточный гороскоп;
     заведены сразу, чтобы добавление продукта не требовало правки CHECK.
     """
 
     FREE_NATAL = "free_natal"
     FULL_NATAL = "full_natal"
+    PAIR_FREE = "pair_free"
+    PAIR_FULL = "pair_full"
     MATRIX = "matrix"
     EASTERN = "eastern"
 
@@ -67,9 +71,9 @@ class Report(Base):
     по-новому), из-за чего выглядит, будто мы что-то напутали. Поэтому
     сначала ищем текст здесь и, если он есть, отдаём его.
 
-    Ищем по «адресу» из трёх частей — это и есть UniqueConstraint ниже:
+    Ищем по «адресу» из трёх частей — это и есть уникальные индексы ниже:
 
-        chart_id       — чья карта
+        chart_id       — чья карта (у совместимости вместо неё pair_id)
         type           — какой продукт (бесплатный разбор, полный, …)
         prompt_version — по какой инструкции написан ("free_natal_v1")
 
@@ -102,7 +106,28 @@ class Report(Base):
     __tablename__ = "reports"
 
     __table_args__ = (
-        UniqueConstraint("chart_id", "type", "prompt_version"),
+        # Адрес отчёта: у обычного разбора это карта, у парного — пара.
+        # Два ЧАСТИЧНЫХ индекса вместо одного общего, потому что в Postgres
+        # два NULL в UNIQUE не равны: ограничение вида
+        # (chart_id, pair_id, type, version) сняло бы защиту от дублей со
+        # всех натальных отчётов разом, а на ней держится главное правило
+        # «за один текст платим один раз».
+        Index(
+            "uq_reports_chart_type_version",
+            "chart_id",
+            "type",
+            "prompt_version",
+            unique=True,
+            postgresql_where=sql_text("pair_id IS NULL"),
+        ),
+        Index(
+            "uq_reports_pair_type_version",
+            "pair_id",
+            "type",
+            "prompt_version",
+            unique=True,
+            postgresql_where=sql_text("pair_id IS NOT NULL"),
+        ),
         # Под проверку лимита бесплатных генераций: COUNT по (user_id, type)
         # выполняется перед каждым разбором. Внешний ключ сам по себе индекс
         # в Postgres НЕ создаёт — без этой строки был бы полный проход по
@@ -112,8 +137,19 @@ class Report(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
+    # У парного разбора здесь лежит карта инициатора — якорь, а не адрес
+    # кеша. Колонка остаётся NOT NULL, чтобы на ней продолжали держаться
+    # денормализация user_id, каскад удаления и дневной потолок трат.
     chart_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("charts.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Заполнен только у совместимости; для натальных разборов NULL, и это
+    # различие читают частичные индексы выше. CASCADE: в тексте парного
+    # разбора персональные данные обоих, а пара сама уходит вместе с любой
+    # из своих карт.
+    pair_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("pairs.id", ondelete="CASCADE")
     )
 
     # Денормализация: владельца видно и через chart.user_id. Дублируем,
@@ -164,5 +200,10 @@ class Report(Base):
 
     chart: Mapped[Chart] = relationship(back_populates="reports", lazy="raise_on_sql")
 
+    # Без back_populates: списка «тексты этой пары» продукт не показывает —
+    # у пары их всегда максимум два, и берутся они по адресу кеша.
+    pair: Mapped[Pair | None] = relationship(lazy="raise_on_sql")
+
     def __repr__(self) -> str:
-        return f"<Report id={self.id} chart_id={self.chart_id} {self.type.value}/{self.prompt_version}>"
+        target = f"pair_id={self.pair_id}" if self.pair_id else f"chart_id={self.chart_id}"
+        return f"<Report id={self.id} {target} {self.type.value}/{self.prompt_version}>"
