@@ -35,7 +35,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import Chart, Order, OrderStatus, ReportType, User
+from app.models import Chart, Order, OrderStatus, Pair, ReportType, User
 from app.payments import yookassa
 from app.services import events
 
@@ -59,12 +59,17 @@ class NotForSaleError(OrderError):
 # разойдясь, они дадут повод для спора, в котором мы неправы по документу.
 PRICES: dict[ReportType, int] = {
     ReportType.FULL_NATAL: 29_000,
+    # 390 ₽ — пересчитано от якоря 290 ₽ за полный натал: совместимость
+    # дороже одиночного разбора, но остаётся в том же ряду цен.
+    ReportType.PAIR_FULL: 39_000,
 }
 
 # Что человек видит в форме оплаты и в выписке банка. Персональных данных
-# тут быть не может по устройству: название товара одно на всех.
+# тут быть не может по устройству: название товара одно на всех — имён
+# сторон в названии парного разбора нет по этой же причине.
 TITLES: dict[ReportType, str] = {
     ReportType.FULL_NATAL: "Полный разбор натальной карты",
+    ReportType.PAIR_FULL: "Разбор совместимости",
 }
 
 
@@ -101,8 +106,11 @@ BACK_APP = "app"  # веб-фронт на Vue: возвращаем редир�
 BACK_VK = "vk"    # Mini App: ссылкой vk.com/app<id>, редирект туда не годится
 
 
-def payment_url(chart_token: str, report_type: ReportType) -> str | None:
+def payment_url(token: str, report_type: ReportType) -> str | None:
     """Адрес страницы оплаты для кнопки «купить». None — платежи не настроены.
+
+    token — публичный токен карты или пары, смотря что покупают; страница
+    /pay/<token> сама разбирается, что ей дали.
 
     Без ключей ЮKassa или PUBLIC_BASE_URL кнопка привела бы человека на
     страницу, которая честно скажет «не получилось перейти к оплате»; лучше
@@ -115,7 +123,7 @@ def payment_url(chart_token: str, report_type: ReportType) -> str | None:
     base = settings.public_base_url
     if not settings.payments_enabled or base is None:
         return None
-    return f"{base.rstrip('/')}/pay/{chart_token}?type={report_type.value}"
+    return f"{base.rstrip('/')}/pay/{token}?type={report_type.value}"
 
 
 async def get_by_token(session: AsyncSession, token: str) -> Order | None:
@@ -132,24 +140,37 @@ async def has_paid(
     session: AsyncSession,
     *,
     user_id: int,
-    chart_id: int,
+    chart_id: int | None = None,
     report_type: ReportType,
+    pair_id: int | None = None,
 ) -> bool:
-    """Оплачен ли этим человеком этот разбор этой карты.
+    """Оплачен ли этим человеком этот разбор этой карты или этой пары.
 
-    Именно тройка: заказ на чужую карту доступа к своей не даёт, а купленный
-    полный разбор одной карты не открывает полный разбор второй — платят за
-    текст, а не за подписку.
+    Адрес покупки ровно один: либо chart_id, либо pair_id — иначе запрос
+    нашёл бы любой заказ человека с таким типом и открыл доступ к чужому
+    тексту. Бросает ValueError, если задано и то, и другое или ничего.
+
+    Купленный разбор одной карты не открывает разбор второй, и точно так же
+    с парами: платят за текст, а не за подписку.
 
     Возврат (REFUNDED) снова закрывает доступ: статус меняется, и запрос
     перестаёт находить строку.
     """
+    if (chart_id is None) == (pair_id is None):
+        raise ValueError("has_paid: нужен ровно один адрес — chart_id или pair_id")
+
     stmt = select(Order.id).where(
         Order.user_id == user_id,
-        Order.chart_id == chart_id,
         Order.report_type == report_type,
         Order.status == OrderStatus.PAID,
     )
+    if pair_id is not None:
+        stmt = stmt.where(Order.pair_id == pair_id)
+    else:
+        # pair_id IS NULL обязателен: у парного заказа chart_id заполнен
+        # картой инициатора, и без этого условия покупка «я + Маша» открыла
+        # бы «я + Лена» — карта-якорь и тип у них одни и те же.
+        stmt = stmt.where(Order.chart_id == chart_id, Order.pair_id.is_(None))
     return await session.scalar(stmt.limit(1)) is not None
 
 
@@ -157,10 +178,16 @@ async def get_or_create_order(
     session: AsyncSession,
     *,
     user: User,
-    chart: Chart,
+    chart: Chart | None = None,
     report_type: ReportType,
+    pair: Pair | None = None,
 ) -> Order:
     """Заказ на этот разбор: уже существующий или новый.
+
+    Покупают либо разбор карты (chart), либо разбор пары (pair) — ровно
+    одно из двух, иначе ValueError. У парного заказа заполнены обе колонки:
+    chart_id хранит карту инициатора, чтобы заказ попал в «мои покупки» и в
+    каскады, а платят по pair_id.
 
     Существующий возвращается в двух случаях — он оплачен (значит, платить
     больше не за что) или ещё ждёт оплаты (человек вернулся по ссылке или
@@ -168,23 +195,41 @@ async def get_or_create_order(
     заводится новый заказ, потому что платёж в ЮKassa у отменённого мёртв.
 
     Транзакцию не коммитим — как и в соседних сервисах, это дело вызывающего.
-    Бросает NotForSaleError.
+    Бросает NotForSaleError и ValueError.
     """
     amount = price(report_type)
 
+    # Развилка адреса. Ветвями, а не одним условием: так типизатор видит,
+    # что в каждой ветке нужный объект не None.
+    if pair is not None:
+        if chart is not None:
+            raise ValueError("get_or_create_order: chart и pair сразу")
+        if pair.user_id != user.id:
+            raise ValueError("pair belongs to another user")
+        # Карта-якорь у парного заказа — сторона A. Берём из pair.chart_a_id,
+        # а не запросом в базу: значение уже в объекте.
+        chart_id = pair.chart_a_id
+        pair_id = pair.id
+    elif chart is not None:
+        chart_id = chart.id
+        pair_id = None
+    else:
+        raise ValueError("get_or_create_order: нужен chart или pair")
+
     async def find_open() -> Order | None:
         # Свежие вперёд: если заказов накопилось несколько, работаем с последним.
-        return await session.scalar(
-            select(Order)
-            .where(
-                Order.user_id == user.id,
-                Order.chart_id == chart.id,
-                Order.report_type == report_type,
-                Order.status.in_((OrderStatus.PAID, OrderStatus.PENDING)),
-            )
-            .order_by(Order.id.desc())
-            .limit(1)
+        stmt = select(Order).where(
+            Order.user_id == user.id,
+            Order.report_type == report_type,
+            Order.status.in_((OrderStatus.PAID, OrderStatus.PENDING)),
         )
+        # Тот же разбор адреса, что в has_paid: без условия на pair_id
+        # ждущий заказ на одну пару нашёлся бы как заказ на другую.
+        if pair_id is not None:
+            stmt = stmt.where(Order.pair_id == pair_id)
+        else:
+            stmt = stmt.where(Order.chart_id == chart_id, Order.pair_id.is_(None))
+        return await session.scalar(stmt.order_by(Order.id.desc()).limit(1))
 
     existing = await find_open()
     if existing is not None:
@@ -192,7 +237,8 @@ async def get_or_create_order(
 
     order = Order(
         user_id=user.id,
-        chart_id=chart.id,
+        chart_id=chart_id,
+        pair_id=pair_id,
         report_type=report_type,
         amount=amount,
         status=OrderStatus.PENDING,
@@ -209,8 +255,9 @@ async def get_or_create_order(
         conflicting = await find_open()
         if conflicting is not None:
             logger.info(
-                "Заказ на «%s» для карты %s уже завёл параллельный запрос — беру его",
-                report_type.value, chart.id,
+                "Заказ на «%s» (карта %s, пара %s) уже завёл параллельный "
+                "запрос — беру его",
+                report_type.value, chart_id, pair_id,
             )
             return conflicting
         # Конфликт не про дубль заказа (например, карту успели удалить) —
@@ -226,8 +273,8 @@ async def get_or_create_order(
         amount=amount,
     )
     logger.info(
-        "Заказ %s создан: %s, %d коп., пользователь %s, карта %s",
-        order.id, report_type.value, amount, user.id, chart.id,
+        "Заказ %s создан: %s, %d коп., пользователь %s, карта %s, пара %s",
+        order.id, report_type.value, amount, user.id, chart_id, pair_id,
     )
     return order
 

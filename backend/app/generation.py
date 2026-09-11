@@ -45,8 +45,8 @@ from datetime import UTC, datetime
 from fastapi import BackgroundTasks
 
 from app.db import get_sessionmaker
-from app.models import Chart, ReportType
-from app.services import charts, content, events, reports, users
+from app.models import Chart, Pair, ReportType
+from app.services import charts, content, events, pairs, reports, users
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,8 @@ class Generation:
     error_code: str | None = None
 
 
-# Реестр «что сейчас генерируется». Ключ — карта и тип отчёта: генерации
-# разных разборов друг другу не мешают.
+# Реестр «что сейчас генерируется». Ключ — адрес отчёта (карта или пара) и
+# тип: генерации разных разборов друг другу не мешают.
 #
 # Чем платим за словарь вместо таблицы: состояние теряется при перезапуске
 # процесса и не видно второму процессу. Оба случая безобидны — страница
@@ -74,11 +74,26 @@ class Generation:
 # нажатие ничего не сломает и денег не потратит: готовый текст возьмётся из
 # кеша по (chart_id, type, prompt_version). Когда генерация уедет в очередь
 # задач, это место заменит статус в базе.
-_REGISTRY: dict[tuple[int, str], Generation] = {}
+_REGISTRY: dict[tuple[str, str], Generation] = {}
 
 
-def _key(chart_id: int, report_type: ReportType) -> tuple[int, str]:
-    return (chart_id, report_type.value)
+def _subject(chart_id: int, pair_id: int | None) -> str:
+    """Кого называет строка лога — пару или карту. Только идентификаторы."""
+    return f"пары {pair_id}" if pair_id is not None else f"карты {chart_id}"
+
+
+def _key(
+    report_type: ReportType, *, chart_id: int | None = None, pair_id: int | None = None
+) -> tuple[str, str]:
+    """Адрес генерации: («c42» или «p7», тип отчёта).
+
+    Префикс c/p обязателен: карты и пары нумеруются независимо, и без него
+    разбор пары 7 делил бы запись с натальным разбором карты 7 — страница
+    показывала бы «готовим» чужого текста. Тот же приём в замке
+    app/services/reports.py.
+    """
+    owner = f"p{pair_id}" if pair_id is not None else f"c{chart_id}"
+    return (owner, report_type.value)
 
 
 def state(chart_id: int, report_type: ReportType) -> Generation | None:
@@ -88,7 +103,12 @@ def state(chart_id: int, report_type: ReportType) -> Generation | None:
     успешно закончилась. Различать их не нужно — в обоих случаях страница
     смотрит в базу, а не сюда.
     """
-    return _REGISTRY.get(_key(chart_id, report_type))
+    return _REGISTRY.get(_key(report_type, chart_id=chart_id))
+
+
+def pair_state(pair_id: int, report_type: ReportType) -> Generation | None:
+    """То же, что state, но для разбора пары."""
+    return _REGISTRY.get(_key(report_type, pair_id=pair_id))
 
 
 def schedule(
@@ -102,18 +122,66 @@ def schedule(
     кнопку вместо «готовим».
 
     Генерация всегда считается от имени ВЛАДЕЛЬЦА карты (chart.user_id), а
-    не того, кто нажал кнопку: лимиты бесплатных разборов и — позже —
-    оплата суть свойства владельца.
+    не того, кто нажал кнопку: лимиты бесплатных разборов и оплата суть
+    свойства владельца.
 
     BackgroundTasks приходит аргументом от вызывающего маршрута. Объект
     FastAPI здесь допустим — модуль не в app/services/, где запрет на
     объекты фреймворка нужен ради бота; бот эту очередь не использует.
     """
-    _REGISTRY[_key(chart.id, report_type)] = Generation(running=True)
-    background.add_task(_run, chart.id, chart.user_id, report_type)
+    _schedule(
+        background,
+        chart_id=chart.id,
+        user_id=chart.user_id,
+        report_type=report_type,
+        pair_id=None,
+    )
 
 
-async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
+def schedule_pair(
+    background: BackgroundTasks, pair: Pair, report_type: ReportType
+) -> None:
+    """То же для разбора совместимости.
+
+    Карта в аргументах не нужна: якорь (сторона A) и владелец лежат в самой
+    паре. Отдельная функция, а не необязательный аргумент у schedule, по той
+    же причине, что get_pair_report в services/reports.py — адрес ровно один
+    из двух, и общая сигнатура позволила бы позвать её без адреса вовсе.
+    """
+    _schedule(
+        background,
+        chart_id=pair.chart_a_id,
+        user_id=pair.user_id,
+        report_type=report_type,
+        pair_id=pair.id,
+    )
+
+
+def _schedule(
+    background: BackgroundTasks,
+    *,
+    chart_id: int,
+    user_id: int,
+    report_type: ReportType,
+    pair_id: int | None,
+) -> None:
+    """Общая часть обеих постановок: отметка «идёт» и сама задача.
+
+    Одной функцией, чтобы отметка и задача не разъехались между двумя
+    копиями: запись в реестр без задачи даёт вечное «готовим».
+    """
+    _REGISTRY[_key(report_type, chart_id=chart_id, pair_id=pair_id)] = Generation(
+        running=True
+    )
+    background.add_task(_run, chart_id, user_id, report_type, pair_id)
+
+
+async def _run(
+    chart_id: int,
+    user_id: int,
+    report_type: ReportType,
+    pair_id: int | None = None,
+) -> None:
     """Сходить в DeepSeek и записать отчёт. Выполняется после ответа браузеру.
 
     Ловим здесь ВСЁ, и это не перестраховка: исключение из фоновой задачи
@@ -124,7 +192,7 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
     Аргументы — идентификаторы, а не объекты Chart и User: см. пункт 1
     в шапке файла.
     """
-    key = _key(chart_id, report_type)
+    key = _key(report_type, chart_id=chart_id, pair_id=pair_id)
 
     # Своя сессия и своя транзакция: с запросом у этой работы уже нет
     # ничего общего.
@@ -141,12 +209,25 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
                 _REGISTRY.pop(key, None)
                 return
 
+            pair = None
+            if pair_id is not None:
+                pair = await pairs.get_pair(session, pair_id)
+                if pair is None:
+                    # Пара уходит каскадом вместе с любой своей картой —
+                    # партнёра могли удалить, пока задача ждала очереди.
+                    logger.warning(
+                        "Фоновая генерация отменена: пара %s исчезла", pair_id
+                    )
+                    _REGISTRY.pop(key, None)
+                    return
+
             await reports.get_or_create_report(
-                session, chart=chart, user=user, report_type=report_type
+                session, chart=chart, user=user, report_type=report_type, pair=pair
             )
             await events.log(
                 session, events.REPORT_READY,
                 user_id=user_id, chart_id=chart_id, type=report_type.value,
+                pair_id=pair_id,
             )
             await session.commit()
             # Успех: убираем отметку. Дальше страница смотрит в базу.
@@ -158,15 +239,15 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
             # человеческий текст.
             await session.rollback()
             logger.info(
-                "Отказ в генерации %s для карты %s: %s",
-                report_type.value, chart_id, exc,
+                "Отказ в генерации %s для %s: %s",
+                report_type.value, _subject(chart_id, pair_id), exc,
             )
             code, text = _failure(exc)
             _REGISTRY[key] = Generation(running=False, error=text, error_code=code)
             await events.log(
                 session, events.REPORT_DENIED,
                 user_id=user_id, chart_id=chart_id, type=report_type.value,
-                reason=type(exc).__name__,
+                pair_id=pair_id, reason=type(exc).__name__,
             )
             await session.commit()
 
@@ -175,8 +256,8 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
             # exc_info в лог обязателен — это единственный след случившегося.
             await session.rollback()
             logger.exception(
-                "Фоновая генерация %s для карты %s провалилась",
-                report_type.value, chart_id,
+                "Фоновая генерация %s для %s провалилась",
+                report_type.value, _subject(chart_id, pair_id),
             )
             _REGISTRY[key] = Generation(
                 running=False,
@@ -186,6 +267,7 @@ async def _run(chart_id: int, user_id: int, report_type: ReportType) -> None:
             await events.log(
                 session, events.REPORT_FAILED,
                 user_id=user_id, chart_id=chart_id, type=report_type.value,
+                pair_id=pair_id,
             )
             await session.commit()
 

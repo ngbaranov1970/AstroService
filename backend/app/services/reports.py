@@ -18,7 +18,11 @@
 Генерация стоит денег и полминуты времени, поэтому каждый текст имеет
 «адрес» из трёх частей — (chart_id, type, prompt_version) — и по этому
 адресу в базе может лежать только одна строка (UniqueConstraint в модели
-Report). Человек открыл разбор второй раз — отдаём тот же текст, а не
+Report). У разборов совместимости первая часть адреса другая: pair_id
+вместо chart_id, потому что текст описывает двоих (индексы в модели
+Report на это и разведены). Дальше всё одинаково, и чаще всего «адрес»
+ниже читается как «карта или пара». Человек открыл разбор второй раз —
+отдаём тот же текст, а не
 пишем новый: иначе мы платим дважды, он ждёт дважды, и текст приходит
 ДРУГОЙ (нейросеть каждый раз пишет по-новому), будто мы что-то напутали.
 
@@ -72,7 +76,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.llm import client
 from app.llm.prompts import free_natal, full_natal
-from app.models import Chart, Report, ReportType, User
+from app.models import Chart, Pair, Report, ReportType, User
 from app.services import events, orders
 
 # Логи здесь важнее, чем в соседних модулях: генерацию запускает фоновая
@@ -110,7 +114,17 @@ def _limits() -> dict[ReportType, int]:
 # Платные типы: сгенерировать можно после оплаты этой карты (или тестеру).
 # Проверка — оплаченный заказ в services/orders.py, а не галочка в отчёте:
 # заказов на один текст бывает несколько, и каждый денежный факт нужен целым.
-_PAID_TYPES: frozenset[ReportType] = frozenset({ReportType.FULL_NATAL})
+_PAID_TYPES: frozenset[ReportType] = frozenset(
+    {ReportType.FULL_NATAL, ReportType.PAIR_FULL}
+)
+
+# Типы, адресуемые парой, а не картой. Список короткий и без реестра можно
+# было бы обойтись проверкой имени, но именно по нему supported_types()
+# решает, что показывать на главной: там плитки строятся прямо из ответа
+# (frontend/src/.../homeTiles.js), и парный тип дал бы плитку в никуда.
+_PAIR_TYPES: frozenset[ReportType] = frozenset(
+    {ReportType.PAIR_FREE, ReportType.PAIR_FULL}
+)
 
 # Как разбор называется для человека. Отличается от TITLES в services/orders.py:
 # там название товара для банковской выписки («Полный разбор натальной карты»),
@@ -120,6 +134,8 @@ _TITLES: dict[ReportType, str] = {
     ReportType.FULL_NATAL: "Полный разбор",
     ReportType.MATRIX: "Матрица Судьбы",
     ReportType.EASTERN: "Восточный гороскоп",
+    ReportType.PAIR_FREE: "Совместимость: коротко",
+    ReportType.PAIR_FULL: "Разбор совместимости",
 }
 
 
@@ -179,13 +195,28 @@ def prompt_version(report_type: ReportType) -> str:
 
 
 async def _find(
-    session: AsyncSession, chart_id: int, report_type: ReportType, version: str
+    session: AsyncSession,
+    *,
+    chart_id: int | None = None,
+    pair_id: int | None = None,
+    report_type: ReportType,
+    version: str,
 ) -> Report | None:
+    """Готовый текст по адресу. Адрес — либо карта, либо пара, ровно один."""
+    if (chart_id is None) == (pair_id is None):
+        raise ValueError("_find: нужен ровно один адрес — chart_id или pair_id")
+
     stmt = select(Report).where(
-        Report.chart_id == chart_id,
         Report.type == report_type,
         Report.prompt_version == version,
     )
+    if pair_id is not None:
+        stmt = stmt.where(Report.pair_id == pair_id)
+    else:
+        # pair_id IS NULL обязателен: у парного отчёта chart_id заполнен
+        # картой инициатора, и без этого условия натальный запрос нашёл бы
+        # чужой по смыслу текст. Тем же условием разведены индексы в модели.
+        stmt = stmt.where(Report.chart_id == chart_id, Report.pair_id.is_(None))
     return await session.scalar(stmt)
 
 
@@ -198,7 +229,29 @@ async def get_report(
     готовим»: None означает, что генерация либо не запускалась, либо идёт
     прямо сейчас, либо упала — по базе эти случаи неразличимы (см. шапку).
     """
-    return await _find(session, chart_id, report_type, prompt_version(report_type))
+    return await _find(
+        session,
+        chart_id=chart_id,
+        report_type=report_type,
+        version=prompt_version(report_type),
+    )
+
+
+async def get_pair_report(
+    session: AsyncSession, pair_id: int, report_type: ReportType
+) -> Report | None:
+    """То же, что get_report, но для разбора пары.
+
+    Отдельная функция, а не необязательный аргумент у get_report: адрес
+    ровно один из двух, и развилка внутри одной сигнатуры позволила бы
+    позвать её без адреса вовсе.
+    """
+    return await _find(
+        session,
+        pair_id=pair_id,
+        report_type=report_type,
+        version=prompt_version(report_type),
+    )
 
 
 async def list_reports(session: AsyncSession, chart_id: int) -> list[Report]:
@@ -257,9 +310,14 @@ def sections(report: Report) -> list[Section]:
 
 
 async def needs_purchase(
-    session: AsyncSession, *, user: User | None, chart: Chart, report_type: ReportType
+    session: AsyncSession,
+    *,
+    user: User | None,
+    chart: Chart,
+    report_type: ReportType,
+    pair: Pair | None = None,
 ) -> bool:
-    """Надо ли этому человеку заплатить за этот разбор этой карты.
+    """Надо ли этому человеку заплатить за этот разбор этой карты или пары.
 
     user=None — читатель, которого мы не опознали (зашёл по ссылке и ничего
     ещё не нажимал): платный тип для него закрыт, покупок за ним нет.
@@ -282,19 +340,32 @@ async def needs_purchase(
         return True
     if user.is_tester:
         return False
+    if pair is not None:
+        return not await orders.has_paid(
+            session, user_id=user.id, pair_id=pair.id, report_type=report_type
+        )
     return not await orders.has_paid(
         session, user_id=user.id, chart_id=chart.id, report_type=report_type
     )
 
 
 def supported_types() -> list[ReportType]:
-    """Виды разборов, которые сейчас можно получить, — те, у кого есть промпт.
+    """Разборы карты, которые сейчас можно получить, — те, у кого есть промпт.
 
     В ReportType заранее заведены MATRIX и EASTERN, чтобы добавление продукта
     не требовало миграции CHECK. Интерфейсу их показывать нельзя: генерация
     такого типа кончится ReportNotSupportedError.
+
+    Парные типы отсюда исключены: главная строит плитки прямо из этого
+    списка, а разбор пары начинается не с карты, а с выбора партнёра — и
+    плитка на главной вела бы в никуда.
     """
-    return list(_PROMPTS)
+    return [t for t in _PROMPTS if t not in _PAIR_TYPES]
+
+
+def supported_pair_types() -> list[ReportType]:
+    """То же для совместимости — их показывает экран пары, а не главная."""
+    return [t for t in _PROMPTS if t in _PAIR_TYPES]
 
 
 def title(report_type: ReportType) -> str:
@@ -386,6 +457,19 @@ class _LockEntry:
 _locks: dict[str, _LockEntry] = {}
 
 
+def _lock_key(
+    *, chart_id: int | None, pair_id: int | None, report_type: ReportType, version: str
+) -> str:
+    """Адрес отчёта строкой — ключ замка и реестра генераций.
+
+    Префикс c/p обязателен: идентификаторы карт и пар нумеруются независимо,
+    и без него пара 5 и карта 5 делили бы один замок — генерация разбора
+    пары держала бы в очереди чужой натальный разбор.
+    """
+    owner = f"p{pair_id}" if pair_id is not None else f"c{chart_id}"
+    return f"{owner}:{report_type.value}:{version}"
+
+
 @asynccontextmanager
 async def _generation_lock(key: str) -> AsyncIterator[_LockEntry]:
     """Встать в очередь за правом генерировать отчёт по этому адресу.
@@ -415,11 +499,16 @@ async def get_or_create_report(
     user: User,
     report_type: ReportType = ReportType.FREE_NATAL,
     name: str | None = None,
+    pair: Pair | None = None,
 ) -> Report:
     """Главная функция модуля: вернуть текст разбора, сгенерировав при нужде.
 
     Возвращает либо готовый отчёт из базы (мгновенно), либо только что
     написанный DeepSeek (30–60 секунд). Для вызывающего разницы нет.
+
+    pair задан — разбор совместимости: адресом кеша становится пара, вход
+    промпта берётся из pair.calc, а chart обязан быть стороной A (он же
+    остаётся в reports.chart_id якорем ради каскадов и счётчика трат).
 
     Почему user передаётся отдельно, хотя владелец известен из chart.user_id:
     нужен ещё и is_tester, а связи в моделях объявлены с lazy="raise_on_sql" —
@@ -445,30 +534,54 @@ async def get_or_create_report(
     module = _prompt_module(report_type)
     version: str = module.VERSION
 
+    _check_address(chart=chart, report_type=report_type, pair=pair)
+    pair_id = pair.id if pair is not None else None
+    # Кого показываем в логах: пару или карту. Идентификаторы, а не имена —
+    # персональных данных в логах нет ни на одном слое.
+    subject = f"пары {pair_id}" if pair_id is not None else f"карты {chart.id}"
+
     # Шаг 1: быстрый путь. Текст по этому адресу уже есть — отдаём и уходим:
     # ни замка, ни лимитов, ни DeepSeek. По этому пути идёт большинство
     # запросов, потому что страница разбора перечитывает себя раз в пять
     # секунд, а текст пишется один раз.
-    cached = await _find(session, chart.id, report_type, version)
+    # Адрес кеша: у парного разбора это пара, у остальных — карта. chart_id
+    # при паре передавать нельзя, _find принимает ровно один из двух.
+    chart_key = None if pair_id is not None else chart.id
+    cached = await _find(
+        session,
+        chart_id=chart_key,
+        pair_id=pair_id,
+        report_type=report_type,
+        version=version,
+    )
     if cached is not None:
         # DEBUG, а не INFO: страница перечитывает себя каждые пять секунд,
         # на INFO это залило бы лог одинаковыми строками.
-        logger.debug("Кеш: отчёт %s/%s для карты %s уже есть", report_type.value,
-                     version, chart.id)
+        logger.debug("Кеш: отчёт %s/%s для %s уже есть", report_type.value,
+                     version, subject)
         return cached
 
     # Шаг 2: очередь за замком. Ключ — тот самый адрес отчёта: генерации
     # РАЗНЫХ отчётов друг другу не мешают, а параллельные попытки написать
     # ОДИН выстраиваются в очередь.
-    async with _generation_lock(f"{chart.id}:{report_type.value}:{version}") as slot:
+    key = _lock_key(
+        chart_id=chart.id, pair_id=pair_id, report_type=report_type, version=version
+    )
+    async with _generation_lock(key) as slot:
         # Пока стояли в очереди, конкурент мог всё сделать за нас и успеть
         # закоммитить — тогда его строка уже видна и работы не осталось.
-        cached = await _find(session, chart.id, report_type, version)
+        cached = await _find(
+            session,
+            chart_id=chart_key,
+            pair_id=pair_id,
+            report_type=report_type,
+            version=version,
+        )
         if cached is not None:
             return cached
 
         await _check_allowed(
-            session, user=user, chart=chart, report_type=report_type
+            session, user=user, chart=chart, report_type=report_type, pair=pair
         )
 
         # Необязательные настройки промпта. getattr с дефолтом из client.py,
@@ -485,14 +598,12 @@ async def get_or_create_report(
         # время вызова: 30–60 секунд.
         result = slot.result
         if result is None:
-            natal = chart.calc["natal"]
-            # Имя берём из карты — «чья это карта» заполняется в форме
-            # стенда; аргумент name перекрывает его, когда имя приходит
-            # от платформы (профиль VK).
-            user_message = module.build_user(natal, name or chart.person_name)
+            user_message = await _user_message(
+                session, module, chart=chart, pair=pair, name=name
+            )
             logger.info(
-                "Генерирую отчёт %s/%s для карты %s (пользователь %s, temperature=%s)",
-                report_type.value, version, chart.id, chart.user_id, temperature,
+                "Генерирую отчёт %s/%s для %s (пользователь %s, temperature=%s)",
+                report_type.value, version, subject, chart.user_id, temperature,
             )
             started = time.perf_counter()
             try:
@@ -507,13 +618,13 @@ async def get_or_create_report(
                 # какой карты: без этой строки авария не привязывается к
                 # человеку, который смотрит на вечное «готовим разбор».
                 logger.exception(
-                    "Генерация %s/%s для карты %s провалилась через %.1f с",
-                    report_type.value, version, chart.id, time.perf_counter() - started,
+                    "Генерация %s/%s для %s провалилась через %.1f с",
+                    report_type.value, version, subject, time.perf_counter() - started,
                 )
                 raise
             logger.info(
-                "Отчёт %s/%s для карты %s готов за %.1f с, %d ток. ответа",
-                report_type.value, version, chart.id,
+                "Отчёт %s/%s для %s готов за %.1f с, %d ток. ответа",
+                report_type.value, version, subject,
                 time.perf_counter() - started, result.usage.completion_tokens,
             )
             slot.result = result
@@ -521,8 +632,8 @@ async def get_or_create_report(
             # Замок сработал: пока мы стояли в очереди, текст оплатил и
             # получил конкурент. Второго вызова DeepSeek не будет.
             logger.info(
-                "Беру текст %s/%s для карты %s у параллельного запроса — в LLM не идём",
-                report_type.value, version, chart.id,
+                "Беру текст %s/%s для %s у параллельного запроса — в LLM не идём",
+                report_type.value, version, subject,
             )
 
         # Шаг 4: сохраняем текст ВМЕСТЕ с паспортом генерации (модель,
@@ -531,7 +642,11 @@ async def get_or_create_report(
         # при каких настройках получилась ерунда. А сам корпус текстов —
         # материал для будущего пост-фильтра под модерацию VK.
         report = Report(
+            # chart_id заполнен ВСЕГДА, в том числе у парного разбора: на нём
+            # держатся каскады, денормализованный user_id и дневной потолок
+            # трат. За что заплачено, говорит pair_id.
             chart_id=chart.id,
+            pair_id=pair_id,
             user_id=chart.user_id,
             type=report_type,
             prompt_version=version,
@@ -556,15 +671,21 @@ async def get_or_create_report(
                 session.add(report)
             return report
         except IntegrityError:
-            existing = await _find(session, chart.id, report_type, version)
+            existing = await _find(
+                session,
+                chart_id=chart_key,
+                pair_id=pair_id,
+                report_type=report_type,
+                version=version,
+            )
             if existing is not None:
                 # Нормальный исход, не авария: другой процесс закоммитил тот
                 # же отчёт раньше нас. Видеть это в логе полезно — частые
                 # такие строки означают, что замок процесса не справляется и
                 # генерацию пора выносить в общую очередь задач.
                 logger.info(
-                    "Отчёт %s/%s для карты %s записал другой процесс — беру его строку",
-                    report_type.value, version, chart.id,
+                    "Отчёт %s/%s для %s записал другой процесс — беру его строку",
+                    report_type.value, version, subject,
                 )
                 return existing
             # Сюда попадаем, если конфликт был не про дубль отчёта (например,
@@ -573,8 +694,70 @@ async def get_or_create_report(
             raise
 
 
+def _check_address(
+    *, chart: Chart, report_type: ReportType, pair: Pair | None
+) -> None:
+    """Сверяет тип отчёта с переданным адресом. Ошибка вызывающего — ValueError.
+
+    Три запрета сразу: парный тип без пары (текст не из чего собрать),
+    пара при натальном типе (кеш ушёл бы по чужому адресу) и чужая карта
+    в якоре — chart обязан быть стороной A, иначе reports.chart_id уедет
+    на карту партнёра и вместе с ним каскады и «мои разборы».
+    """
+    if pair is None:
+        if report_type in _PAIR_TYPES:
+            raise ValueError(f"Отчёт «{report_type.value}» требует пары")
+        return
+
+    if report_type not in _PAIR_TYPES:
+        raise ValueError(f"Отчёт «{report_type.value}» не бывает парным")
+    if chart.id != pair.chart_a_id:
+        raise ValueError("Якорная карта парного отчёта — сторона A пары")
+    if pair.calc is None:
+        raise ValueError(f"Пара {pair.id} не собрана: синастрия не посчитана")
+
+
+async def _user_message(
+    session: AsyncSession,
+    module: ModuleType,
+    *,
+    chart: Chart,
+    pair: Pair | None,
+    name: str | None,
+) -> str:
+    """Собрать сообщение промпту: натальное по карте, парное по паре.
+
+    Контракт парного промпта отличается от натального (build_user(natal,
+    name)) и объявлен здесь: build_user(calc, kind=..., name_a=..., name_b=...).
+    Имена сторон в промпт идут намеренно — читают текст двое, и без них
+    он звучит как «первый и второй человек»; в логи имена не попадают.
+    """
+    if pair is None:
+        # Имя берём из карты — «чья это карта» заполняется в форме; аргумент
+        # name перекрывает его, когда имя приходит от платформы (профиль VK).
+        return module.build_user(chart.calc["natal"], name or chart.person_name)
+
+    # Карту партнёра тянем через session.get, а не pair.chart_b: связи
+    # объявлены lazy="raise_on_sql" и из async-кода бросают исключение.
+    chart_b = await session.get(Chart, pair.chart_b_id)
+    if chart_b is None:
+        raise ValueError(f"Пара {pair.id}: карта стороны B не найдена")
+
+    return module.build_user(
+        pair.calc,
+        kind=pair.kind.value,
+        name_a=name or chart.person_name,
+        name_b=chart_b.person_name,
+    )
+
+
 async def _check_allowed(
-    session: AsyncSession, *, user: User, chart: Chart, report_type: ReportType
+    session: AsyncSession,
+    *,
+    user: User,
+    chart: Chart,
+    report_type: ReportType,
+    pair: Pair | None = None,
 ) -> None:
     """Можно ли этому человеку сгенерировать ещё один отчёт этого типа.
 
@@ -586,7 +769,13 @@ async def _check_allowed(
     # потолку, и проверке доступа ниже. Для бесплатных типов в базу не идём,
     # условие обрывается на первой половине.
     paid = report_type in _PAID_TYPES and await orders.has_paid(
-        session, user_id=user.id, chart_id=chart.id, report_type=report_type
+        session,
+        user_id=user.id,
+        # Адрес покупки тот же, что у кеша: за пару платят по pair_id, и
+        # заказ на «я + Маша» не должен открывать «я + Лена».
+        chart_id=None if pair is not None else chart.id,
+        pair_id=pair.id if pair is not None else None,
+        report_type=report_type,
     )
 
     # Дневной потолок считает только неоплаченные генерации. Оплаченная себя
@@ -620,8 +809,9 @@ async def _check_allowed(
 
     if report_type in _PAID_TYPES and not paid:
         logger.info(
-            "Отказ пользователю %s: «%s» для карты %s не оплачен",
-            user.id, report_type.value, chart.id,
+            "Отказ пользователю %s: «%s» для %s не оплачен",
+            user.id, report_type.value,
+            f"пары {pair.id}" if pair is not None else f"карты {chart.id}",
         )
         raise ReportForbiddenError(f"Разбор «{report_type.value}» ещё не оплачен")
 
@@ -658,6 +848,7 @@ async def leave_feedback(
     report_type: ReportType,
     rating: int,
     comment: str = "",
+    pair: Pair | None = None,
 ) -> None:
     """Записать оценку разбора: 1–5 и необязательное «что не так».
 
@@ -674,7 +865,10 @@ async def leave_feedback(
     # Оценивают конкретную редакцию текста, а не карту: без report_id звёзды
     # после смены VERSION молча переехали бы на новый разбор, которого человек
     # не видел, — и админка сравнивала бы версии по чужим оценкам.
-    report = await get_report(session, chart.id, report_type)
+    if pair is not None:
+        report = await get_pair_report(session, pair.id, report_type)
+    else:
+        report = await get_report(session, chart.id, report_type)
 
     # Правило «в props нет ПДн» здесь держится на самом человеке: он может
     # процитировать в жалобе дату рождения. Проверить это нечем, и потому
