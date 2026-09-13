@@ -25,7 +25,10 @@ depends_on: Union[str, Sequence[str], None] = None
 TYPES = ('free_natal', 'full_natal', 'pair_free', 'pair_full', 'matrix', 'eastern')
 OLD_TYPES = tuple(t for t in TYPES if not t.startswith('pair_'))
 
-KINDS = ('romance', 'family', 'friends', 'work')
+# Видов связи два: дружба и работа сняты 12.09.2026 до первого выката
+# (см. PairKind в app/models/pair.py). Правится сама миграция, а не вторая
+# поверх: в проде этой таблицы ещё нет.
+KINDS = ('romance', 'family')
 
 # Имена без префикса: naming_convention из app/db.py дописывает "ck_<таблица>_".
 # Передать полное имя — получить ck_reports_ck_reports_report_type и падение.

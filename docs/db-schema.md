@@ -61,7 +61,7 @@ erDiagram
         bigint   user_id FK    "инициатор, сторона A — его"
         bigint   chart_a_id FK "«моя» карта"
         bigint   chart_b_id FK "nullable: NULL, пока ждём партнёра"
-        enum     kind          "romance / family / friends / work"
+        enum     kind          "romance / family"
         varchar  inviter_label "как назвать инициатора партнёру"
         jsonb    calc          "выход compute_synastry; NULL без стороны B"
         varchar  calc_version  "версия синастрии, своя от charts"
