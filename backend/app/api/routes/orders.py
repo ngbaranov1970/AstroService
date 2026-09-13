@@ -26,9 +26,9 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import generation
-from app.api.deps import Caller, ChartByToken, CurrentCaller, SessionDep
+from app.api.deps import Caller, ChartByToken, CurrentCaller, PairByToken, SessionDep
 from app.config import get_settings
-from app.models import Chart, Order, OrderStatus, ReportType
+from app.models import Chart, Order, OrderStatus, Pair, ReportType, User
 from app.payments import yookassa
 from app.schemas.orders import OrderCreated, OrderOut
 from app.services import auth
@@ -39,9 +39,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["orders"])
 
-# Что продаётся, если фронт не назвал тип. Единственный платный вид на
-# сегодня; прайс живёт в services/orders.py.
+# Что продаётся по каждому из двух входов: по карте — полный натальный
+# разбор, по паре — совместимость. Прайс живёт в services/orders.py.
 DEFAULT_TYPE = ReportType.FULL_NATAL
+DEFAULT_PAIR_TYPE = ReportType.PAIR_FULL
 
 
 @router.post("/charts/{token}/orders", response_model=OrderCreated)
@@ -57,59 +58,45 @@ async def create_order(
     503 — если платежи не настроены или их API недоступен.
     """
     _forbid_vk(caller)
-    user = caller.user
 
-    if chart.user_id != user.id:
+    if chart.user_id != caller.user.id:
         # Заказ оформляется на владельца карты, и посторонний с ссылкой не
         # должен заводить ему платежи.
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это чужая карта")
 
-    report_type = DEFAULT_TYPE
-    if await orders_service.has_paid(
-        session, user_id=user.id, chart_id=chart.id, report_type=report_type
-    ):
-        # 409, а не тихий успех: платить второй раз за тот же текст не за что,
-        # и фронт по этому коду уводит читать купленное.
-        raise HTTPException(status.HTTP_409_CONFLICT, "Этот разбор уже оплачен")
+    return await _checkout(
+        session,
+        user=caller.user,
+        report_type=DEFAULT_TYPE,
+        chart=chart,
+        pay_token=chart.token,
+        subject=f"карты {chart.id}",
+    )
 
-    try:
-        order = await orders_service.get_or_create_order(
-            session, user=user, chart=chart, report_type=report_type
-        )
-        # Заказ мог достаться от прошлого захода вместе со ссылкой на форму.
-        # ЮKassa закрывает неоплаченные платежи сама, а уведомление об этом
-        # могло не дойти — без проверки человек при каждом нажатии уезжал бы
-        # на мёртвую форму (та же развилка, что в web/routes/pay.py).
-        if order.confirmation_url:
-            await orders_service.sync_status(session, order)
-            if order.is_paid:
-                await session.commit()
-                raise HTTPException(status.HTTP_409_CONFLICT, "Этот разбор уже оплачен")
-            if order.status is not OrderStatus.PENDING:
-                # Платёж закрыт, платить по нему нечем: заводим новый заказ.
-                # Тем же он быть не может — ключом идемпотентности служит его
-                # токен, и ЮKassa вернула бы по нему тот же мёртвый платёж.
-                order = await orders_service.get_or_create_order(
-                    session, user=user, chart=chart, report_type=report_type
-                )
-        confirmation_url = await orders_service.start_payment(
-            session, order, return_url=_return_url(chart.token, order.token)
-        )
-    except (orders_service.OrderError, yookassa.PaymentError) as e:
-        # Заказ мог успеть записаться, а платёж — нет; откатываем, чтобы не
-        # копить строки, за которые никто не платил.
-        chart_id = chart.id
-        await session.rollback()
-        logger.warning("Оплата карты %s не началась: %s", chart_id, e)
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Не получилось перейти к оплате. Попробуйте ещё раз через минуту.",
-        ) from e
 
-    # Коммит ДО ответа: следом человек уходит на чужой сайт, и без
-    # сохранённого provider_payment_id вебхук не найдёт заказ.
-    await session.commit()
-    return OrderCreated(token=order.token, confirmation_url=confirmation_url)
+@router.post("/pairs/{token}/orders", response_model=OrderCreated)
+async def create_pair_order(
+    pair: PairByToken, caller: CurrentCaller, session: SessionDep
+) -> OrderCreated:
+    """Завести заказ на разбор совместимости, вернуть адрес формы ЮKassa.
+
+    Отличий от покупки разбора карты два: адрес покупки — пара, и 409 на
+    паре без второй стороны (разбора, за который платят, ещё не существует).
+    Чужая пара сюда не дойдёт — PairByToken отвечает 404 раньше.
+    """
+    _forbid_vk(caller)
+
+    if not pair.is_complete:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Партнёр ещё не пришёл")
+
+    return await _checkout(
+        session,
+        user=caller.user,
+        report_type=DEFAULT_PAIR_TYPE,
+        pair=pair,
+        pay_token=pair.token,
+        subject=f"пары {pair.id}",
+    )
 
 
 @router.get("/orders/{order_token}", response_model=OrderOut)
@@ -159,6 +146,72 @@ async def get_order(
 # --- Внутренние помощники --------------------------------------------------
 
 
+async def _checkout(
+    session: AsyncSession,
+    *,
+    user: User,
+    report_type: ReportType,
+    chart: Chart | None = None,
+    pair: Pair | None = None,
+    pay_token: str,
+    subject: str,
+) -> OrderCreated:
+    """Общая покупка: заказ, платёж и адрес формы ЮKassa.
+
+    Одна на обе ручки, а не копия на каждую: развилок с оплатой здесь
+    четыре (уже оплачено, мёртвая форма, отказ их API, коммит до ответа), и
+    две копии чинились бы порознь — с деньгами в руках у покупателя.
+
+    `subject` идёт только в лог и персональных данных не несёт: карта или
+    пара по идентификатору.
+    """
+    address = {"pair_id": pair.id} if pair is not None else {"chart_id": chart.id}
+    if await orders_service.has_paid(
+        session, user_id=user.id, report_type=report_type, **address
+    ):
+        # 409, а не тихий успех: платить второй раз за тот же текст не за что,
+        # и фронт по этому коду уводит читать купленное.
+        raise HTTPException(status.HTTP_409_CONFLICT, "Этот разбор уже оплачен")
+
+    try:
+        order = await orders_service.get_or_create_order(
+            session, user=user, chart=chart, pair=pair, report_type=report_type
+        )
+        # Заказ мог достаться от прошлого захода вместе со ссылкой на форму.
+        # ЮKassa закрывает неоплаченные платежи сама, а уведомление об этом
+        # могло не дойти — без проверки человек при каждом нажатии уезжал бы
+        # на мёртвую форму (та же развилка, что в web/routes/pay.py).
+        if order.confirmation_url:
+            await orders_service.sync_status(session, order)
+            if order.is_paid:
+                await session.commit()
+                raise HTTPException(status.HTTP_409_CONFLICT, "Этот разбор уже оплачен")
+            if order.status is not OrderStatus.PENDING:
+                # Платёж закрыт, платить по нему нечем: заводим новый заказ.
+                # Тем же он быть не может — ключом идемпотентности служит его
+                # токен, и ЮKassa вернула бы по нему тот же мёртвый платёж.
+                order = await orders_service.get_or_create_order(
+                    session, user=user, chart=chart, pair=pair, report_type=report_type
+                )
+        confirmation_url = await orders_service.start_payment(
+            session, order, return_url=_return_url(pay_token, order.token)
+        )
+    except (orders_service.OrderError, yookassa.PaymentError) as e:
+        # Заказ мог успеть записаться, а платёж — нет; откатываем, чтобы не
+        # копить строки, за которые никто не платил.
+        await session.rollback()
+        logger.warning("Оплата %s не началась: %s", subject, e)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Не получилось перейти к оплате. Попробуйте ещё раз через минуту.",
+        ) from e
+
+    # Коммит ДО ответа: следом человек уходит на чужой сайт, и без
+    # сохранённого provider_payment_id вебхук не найдёт заказ.
+    await session.commit()
+    return OrderCreated(token=order.token, confirmation_url=confirmation_url)
+
+
 def _forbid_vk(caller: Caller) -> None:
     """403 открывшему Mini App: продавать внутри него нельзя.
 
@@ -172,8 +225,11 @@ def _forbid_vk(caller: Caller) -> None:
         )
 
 
-def _return_url(chart_token: str, order_token: str) -> str:
+def _return_url(pay_token: str, order_token: str) -> str:
     """Адрес, куда ЮKassa вернёт человека с формы оплаты.
+
+    `pay_token` — токен того, что купили: карты или пары. Страница /pay
+    различает их сама, форма адреса от этого не меняется.
 
     Абсолютный: относительный путь на их домене не годится. Домен берём из
     настроек, а не из заголовков запроса — Host подделывается клиентом.
@@ -183,7 +239,7 @@ def _return_url(chart_token: str, order_token: str) -> str:
     if base is None:
         raise orders_service.OrderError("В .env не задан PUBLIC_BASE_URL — платить некуда")
     return (
-        f"{base.rstrip('/')}/pay/{chart_token}/done"
+        f"{base.rstrip('/')}/pay/{pay_token}/done"
         f"?order={order_token}&back={orders_service.BACK_APP}"
     )
 
@@ -195,7 +251,24 @@ async def _ensure_generation(
 
     Проверка «текста нет» обязательна: экран возврата фронт опрашивает, и
     без неё каждый опрос плодил бы фоновую задачу.
+
+    Адрес берём из заказа, а не из типа: у парного заказа заполнены обе
+    колонки — chart_id хранит якорную карту, — и генерация по ней запустила
+    бы парный промпт без пары, то есть падала бы на каждом опросе.
     """
+    if order.pair_id is not None:
+        if await reports_service.get_pair_report(
+            session, order.pair_id, order.report_type
+        ):
+            return
+        pair = await session.get(Pair, order.pair_id)
+        # Пару сносит каскадом удаление любой из двух карт; у половинки
+        # пары calc пуст, и писать текст не из чего.
+        if pair is None or not pair.is_complete:
+            return
+        generation.schedule_pair(background, pair, order.report_type)
+        return
+
     if order.chart_id is None:
         # Карту удалили вместе с персональными данными — генерировать нечего.
         return

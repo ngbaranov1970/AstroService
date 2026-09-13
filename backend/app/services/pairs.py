@@ -15,9 +15,10 @@ from __future__ import annotations
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import Chart, Pair, PairKind
 from astro_core.synastry import VERSION, compute_synastry
@@ -31,6 +32,15 @@ CALC_VERSION = VERSION
 # Сколько живёт ссылка-приглашение. Без срока забытое приглашение остаётся
 # открытым входом в аккаунт инициатора навсегда.
 INVITE_TTL = timedelta(days=7)
+
+
+def _with_sides(stmt: Select[tuple[Pair]]) -> Select[tuple[Pair]]:
+    """Дописывает к запросу загрузку карт обеих сторон.
+
+    selectinload, а не join: сторона B бывает пустой, и отдельный запрос по
+    списку id не превращает LEFT JOIN в дубли строк.
+    """
+    return stmt.options(selectinload(Pair.chart_a), selectinload(Pair.chart_b))
 
 
 def _synastry(chart_a: Chart, chart_b: Chart) -> dict:
@@ -165,8 +175,8 @@ def invite_is_open(pair: Pair, *, now: datetime | None = None) -> bool:
     return pair.invite_expires_at > (now or datetime.now(UTC))
 
 
-async def create_invite(session: AsyncSession, pair: Pair) -> str:
-    """Выдаёт ссылке-приглашению токен и срок, возвращает токен.
+async def create_invite(session: AsyncSession, pair: Pair) -> tuple[str, datetime]:
+    """Выдаёт ссылке-приглашению токен и срок, возвращает оба.
 
     Живое приглашение не перевыпускается: поле одно, и новый токен молча
     сломал бы ссылку, уже отправленную партнёру.
@@ -176,32 +186,44 @@ async def create_invite(session: AsyncSession, pair: Pair) -> str:
     if pair.chart_b_id is not None:
         raise ValueError("pair is already complete")
 
-    # Токен держим в локальной переменной и её же возвращаем. Колонка
-    # объявлена str | None, а сужения через invite_is_open типизатор не
-    # видит — с прямым `return pair.invite_token` Pylance ругается на тип.
+    # Токен и срок держим в локальных переменных и их же возвращаем. Колонки
+    # объявлены нужного типа | None, а сужения через invite_is_open
+    # типизатор не видит — с прямым return он ругается на тип.
     issued = pair.invite_token
-    if issued is not None and invite_is_open(pair):
-        return issued
+    expires = pair.invite_expires_at
+    if issued is not None and expires is not None and invite_is_open(pair):
+        return issued, expires
 
     # 24 случайных байта, как у Chart.token: токен по смыслу пароль, и
     # перебором его не достать. В логи не пишем нигде и никогда.
     issued = secrets.token_urlsafe(24)
+    expires = datetime.now(UTC) + INVITE_TTL
     pair.invite_token = issued
-    pair.invite_expires_at = datetime.now(UTC) + INVITE_TTL
+    pair.invite_expires_at = expires
     pair.invite_used_at = None
     await session.flush()
-    return issued
+    return issued, expires
 
 
-async def get_pair_by_invite(session: AsyncSession, invite_token: str) -> Pair | None:
+async def get_pair_by_invite(
+    session: AsyncSession, invite_token: str, *, open_only: bool = True
+) -> Pair | None:
     """Пара по токену приглашения — вход для анонимного экрана партнёра.
 
     None означает и «нет такого токена», и «протух», и «уже использован»:
     вызывающий обязан отвечать на все три одинаковым 404, иначе разные
     ответы подтверждают существование токена тому, кто перебирает.
+
+    open_only=False снимает проверку живости — это чтение уже принятого
+    приглашения: партнёр читает тизер про себя по той же ссылке, которой
+    вошёл, а она к тому моменту закрыта (invite_used_at проставлен).
+    Живость в этом случае проверяет вызывающий по смыслу своего маршрута.
     """
-    pair = await session.scalar(select(Pair).where(Pair.invite_token == invite_token))
-    if pair is None or not invite_is_open(pair):
+    stmt = select(Pair).where(Pair.invite_token == invite_token)
+    pair = await session.scalar(_with_sides(stmt))
+    if pair is None:
+        return None
+    if open_only and not invite_is_open(pair):
         return None
     return pair
 
@@ -291,8 +313,26 @@ async def get_pair_by_token(session: AsyncSession, token: str, *, user_id: int) 
     get_chart_by_token, где проверки нет намеренно. Карта — данные одного
     человека, и он сам решает, кому переслать ссылку; пара — данные двоих,
     и второй ссылку не давал.
+
+    Карты сторон приходят загруженными: без них экран пары не подписать, а
+    связи объявлены lazy="raise_on_sql" и по требованию не подтянутся.
     """
     stmt = select(Pair).where(Pair.token == token, Pair.user_id == user_id)
+    return await session.scalar(_with_sides(stmt))
+
+
+async def get_pair_for_payment(session: AsyncSession, token: str) -> Pair | None:
+    """Пара по публичному токену БЕЗ проверки владельца — только для оплаты.
+
+    Отдельное имя вместо необязательного user_id у get_pair_by_token: там
+    забытый аргумент открыл бы чужую пару молча, здесь место вызова названо
+    прямо. Звать можно ровно из app/web/routes/pay.py.
+
+    Проверки нет потому, что платить человек уходит во внешний браузер, где
+    ни cookie, ни токена VK нет (см. шапку pay.py). Персональных данных
+    страница оплаты по паре не показывает — только название товара и цену.
+    """
+    stmt = select(Pair).where(Pair.token == token)
     return await session.scalar(stmt)
 
 
@@ -300,6 +340,7 @@ async def list_pairs(session: AsyncSession, user_id: int) -> list[Pair]:
     """Все пары пользователя, свежие первыми.
 
     Ждущие партнёра тоже здесь: на экране они и есть «приглашение отправлено».
+    Карты сторон загружены — см. get_pair_by_token.
     """
     stmt = select(Pair).where(Pair.user_id == user_id).order_by(Pair.created_at.desc())
-    return list(await session.scalars(stmt))
+    return list(await session.scalars(_with_sides(stmt)))

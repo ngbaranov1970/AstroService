@@ -43,15 +43,20 @@ templates.env.globals["merchant"] = MERCHANT
 # автоматически нечем.
 PRICE_RUB = orders.price_rub(ReportType.FULL_NATAL)
 
+# Второй платный товар — разбор совместимости. Отдельная цифра, а не «цена»
+# вообще: оферта обязана называть стоимость каждой услуги.
+PAIR_PRICE_RUB = orders.price_rub(ReportType.PAIR_FULL)
+
 # Тоже глобал: цену называет не только /pricing, но и анонс полного разбора
 # на странице карты. Разойдись они — на модерации это читается как «цена на
 # сайте не та, что в оферте». Глобалом, а не импортом в router.py: роутер
 # отдаёт этому модулю templates, обратный импорт замкнул бы круг.
 templates.env.globals["price_rub"] = PRICE_RUB
+templates.env.globals["pair_price_rub"] = PAIR_PRICE_RUB
 
 # Дата редакции оферты и политики. Меняется вместе с текстом: человек должен
 # видеть, ту ли версию он принимал.
-REVISION_DATE = "10 августа 2026 г."
+REVISION_DATE = "13 сентября 2026 г."
 
 router = APIRouter(include_in_schema=False)
 
@@ -61,7 +66,12 @@ def _page(request: Request, template: str) -> Response:
     return templates.TemplateResponse(
         request,
         template,
-        {"merchant": MERCHANT, "price": PRICE_RUB, "revision": REVISION_DATE},
+        {
+            "merchant": MERCHANT,
+            "price": PRICE_RUB,
+            "pair_price": PAIR_PRICE_RUB,
+            "revision": REVISION_DATE,
+        },
     )
 
 

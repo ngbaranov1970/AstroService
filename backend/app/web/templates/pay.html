@@ -19,12 +19,19 @@
     <p><a href="{{ chart_url }}">Открыть разбор</a></p>
 
   {% else %}
-    <p class="muted">
-      Карта{% if person_name %} на имя {{ person_name }}{% endif %}:
-      {{ chart.birth_local.strftime("%d.%m.%Y") }}
-      {%- if chart.time_known %} в {{ chart.birth_local.strftime("%H:%M") }}{% endif %}
-      · {{ chart.place_name }}
-    </p>
+    {# Данные рождения показываем только у разбора одной карты. У пары их
+       здесь нет: ссылку на оплату открывает кто угодно, а за парой стоят
+       двое, и второй согласия на показ своей даты не давал. #}
+    {% if is_pair %}
+      <p class="muted">Разбор совместимости двух карт.</p>
+    {% else %}
+      <p class="muted">
+        Карта{% if person_name %} на имя {{ person_name }}{% endif %}:
+        {{ chart.birth_local.strftime("%d.%m.%Y") }}
+        {%- if chart.time_known %} в {{ chart.birth_local.strftime("%H:%M") }}{% endif %}
+        · {{ chart.place_name }}
+      </p>
+    {% endif %}
 
     {% if titles %}
       <ul class="teaser">

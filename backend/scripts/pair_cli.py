@@ -228,8 +228,8 @@ async def _cmd_make(session: AsyncSession, args: argparse.Namespace) -> None:
     if args.invite:
         if chart_b is not None:
             sys.exit("--invite на собранной паре бессмысленно: звать некого")
-        token = await pairs_service.create_invite(session, pair)
-        print(f"Приглашение: {token}")
+        token, expires = await pairs_service.create_invite(session, pair)
+        print(f"Приглашение: {token} (до {expires:%d.%m.%Y %H:%M} UTC)")
 
     await _print_pair(session, pair)
 

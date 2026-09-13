@@ -75,7 +75,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.llm import client
-from app.llm.prompts import free_natal, full_natal
+from app.llm.prompts import free_natal, full_natal, pair_free, pair_full
 from app.models import Chart, Pair, Report, ReportType, User
 from app.services import events, orders
 
@@ -95,6 +95,10 @@ logger = logging.getLogger(__name__)
 _PROMPTS: dict[ReportType, ModuleType] = {
     ReportType.FREE_NATAL: free_natal,
     ReportType.FULL_NATAL: full_natal,
+    # У парных модулей контракт build_user шире натального (kind и два
+    # имени) — его объявляет _user_message ниже, реестр к нему безразличен.
+    ReportType.PAIR_FREE: pair_free,
+    ReportType.PAIR_FULL: pair_full,
 }
 
 def _limits() -> dict[ReportType, int]:

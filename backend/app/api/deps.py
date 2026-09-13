@@ -24,9 +24,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import Chart, User
+from app.models import Chart, Pair, User
 from app.services import auth
 from app.services import charts as charts_service
+from app.services import pairs as pairs_service
 from app.services import users as users_service
 
 # auto_error=False — иначе FastAPI сам ответит 403 на запрос без заголовка,
@@ -119,3 +120,22 @@ async def chart_by_token(token: str, _user: CurrentUser, session: SessionDep) ->
 
 
 ChartByToken = Annotated[Chart, Depends(chart_by_token)]
+
+
+async def pair_by_token(token: str, user: CurrentUser, session: SessionDep) -> Pair:
+    """Пара по токену из пути; 404, если её нет или она чужая.
+
+    Владельца проверяем обязательно — осознанное отличие от chart_by_token
+    выше. Карта — данные одного человека, и он сам решает, кому переслать
+    ссылку; пара — данные двоих, и второй согласия не давал.
+
+    Чужая пара отвечает 404, а не 403: 403 подтвердил бы, что такой токен
+    существует, тому, кто их перебирает.
+    """
+    pair = await pairs_service.get_pair_by_token(session, token, user_id=user.id)
+    if pair is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такой пары нет")
+    return pair
+
+
+PairByToken = Annotated[Pair, Depends(pair_by_token)]

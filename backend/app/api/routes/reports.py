@@ -14,8 +14,15 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import generation
-from app.api.deps import Caller, ChartByToken, CurrentCaller, CurrentUser, SessionDep
-from app.models import Chart, ReportType
+from app.api.deps import (
+    Caller,
+    ChartByToken,
+    CurrentCaller,
+    CurrentUser,
+    PairByToken,
+    SessionDep,
+)
+from app.models import Chart, Pair, ReportType
 from app.schemas.reports import (
     FeedbackIn,
     ReportOut,
@@ -125,6 +132,87 @@ async def request_report(
     )
 
 
+@router.get("/pairs/{token}/reports", response_model=list[ReportOut])
+async def list_pair_reports(
+    pair: PairByToken, caller: CurrentCaller, session: SessionDep
+) -> list[ReportOut]:
+    """Разборы совместимости этой пары: тизер и платный, с их состоянием.
+
+    У пары, ждущей партнёра, список пуст: расчёта нет, и писать текст не из
+    чего — фронт на этом месте показывает «приглашение отправлено».
+
+    Владельца проверяет сама зависимость PairByToken. Чужой по ссылке сюда
+    не попадёт вовсе — в отличие от разборов карты, которые открыты всем,
+    кто знает ссылку.
+    """
+    if not pair.is_complete:
+        return []
+
+    states = [
+        await _state(session, pair.chart_a, report_type, caller, pair=pair)
+        for report_type in reports_service.supported_pair_types()
+    ]
+
+    # Показ цены пишем по pair_id, а не по chart_id: якорная карта общая у
+    # всех пар этого человека, и ключ по ней посчитал бы показ на «я и Маша»
+    # показом на «я и Лена».
+    locked = any(state.status is ReportStatus.LOCKED for state in states)
+    if locked and not await events.already_logged(
+        session, events.PAYWALL_SHOWN, user_id=caller.user.id, pair_id=pair.id
+    ):
+        await events.log(
+            session, events.PAYWALL_SHOWN, user_id=caller.user.id, pair_id=pair.id
+        )
+        await session.commit()
+
+    return states
+
+
+@router.post("/pairs/{token}/reports", response_model=ReportOut)
+async def request_pair_report(
+    payload: ReportRequest,
+    pair: PairByToken,
+    caller: CurrentCaller,
+    session: SessionDep,
+    background: BackgroundTasks,
+) -> ReportOut:
+    """Попросить разбор совместимости. Отвечает состоянием, генерация в фоне.
+
+    Устроено как request_report для карты; отличие одно — 409 на паре без
+    второй стороны: там нечего считать, и просьба означает ошибку фронта.
+
+    Чужой паре сюда не дойти: PairByToken отдаёт 404 ещё до этого кода,
+    поэтому отдельной проверки владельца, как у карты, здесь нет.
+    """
+    if not pair.is_complete:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Партнёр ещё не пришёл")
+
+    if payload.type not in reports_service.supported_pair_types():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Такой разбор пока не делаем")
+
+    state = await _state(session, pair.chart_a, payload.type, caller, pair=pair)
+    if state.status in _NO_RETRY:
+        return state
+
+    await events.log(
+        session,
+        events.REPORT_REQUESTED,
+        user_id=caller.user.id,
+        pair_id=pair.id,
+        type=payload.type.value,
+    )
+    await session.commit()
+
+    generation.schedule_pair(background, pair, payload.type)
+    return state.model_copy(
+        update={
+            "status": ReportStatus.RUNNING,
+            "error": None,
+            "error_code": None,
+        }
+    )
+
+
 @router.post(
     "/charts/{token}/feedback", status_code=status.HTTP_204_NO_CONTENT
 )
@@ -153,12 +241,20 @@ async def leave_feedback(
 
 
 async def _state(
-    session: AsyncSession, chart: Chart, report_type: ReportType, caller: Caller
+    session: AsyncSession,
+    chart: Chart,
+    report_type: ReportType,
+    caller: Caller,
+    pair: Pair | None = None,
 ) -> ReportOut:
     """Состояние одного разбора: текст, очередь и право на покупку в одном ответе.
 
     Порядок проверок и есть смысл функции — состояния взаимоисключающие, а
     источников у них три (база, реестр генераций, заказы).
+
+    pair задан — разбор совместимости: адресом кеша и покупки становится
+    пара, а chart остаётся якорем (сторона A). Общая функция, а не вторая
+    копия: отличий три строки, и раздельные копии чинились бы порознь.
     """
     out = ReportOut(
         type=report_type,
@@ -167,7 +263,11 @@ async def _state(
         section_titles=reports_service.section_titles(report_type),
     )
 
-    report = await reports_service.get_report(session, chart.id, report_type)
+    report = (
+        await reports_service.get_pair_report(session, pair.id, report_type)
+        if pair is not None
+        else await reports_service.get_report(session, chart.id, report_type)
+    )
     if report is not None:
         # Текст есть — остальное неважно: написанное открыто всегда, в том
         # числе тому, кому переслали ссылку.
@@ -182,12 +282,16 @@ async def _state(
             }
         )
 
-    gen = generation.state(chart.id, report_type)
+    gen = (
+        generation.pair_state(pair.id, report_type)
+        if pair is not None
+        else generation.state(chart.id, report_type)
+    )
     if gen is not None and gen.running:
         return out.model_copy(update={"status": ReportStatus.RUNNING})
 
     if await reports_service.needs_purchase(
-        session, user=caller.user, chart=chart, report_type=report_type
+        session, user=caller.user, chart=chart, report_type=report_type, pair=pair
     ):
         # Пейволл идёт впереди упавшей генерации: иначе фронт покажет ошибку
         # там, где на деле нужна покупка.

@@ -12,13 +12,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.routes import auth, charts, orders, reports, vk
+from app.api.routes import auth, charts, invites, orders, pairs, reports, vk
 
 API_PREFIX = "/api/v1"
 
 api_router = APIRouter(prefix=API_PREFIX)
 api_router.include_router(auth.router)
 api_router.include_router(charts.router)
+api_router.include_router(pairs.router)
+# Анонимный роутер — единственный без Bearer, см. его шапку.
+api_router.include_router(invites.router)
 api_router.include_router(reports.router)
 api_router.include_router(orders.router)
 api_router.include_router(vk.router)
