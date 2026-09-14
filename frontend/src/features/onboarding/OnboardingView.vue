@@ -12,10 +12,10 @@ import { useCharts } from '@/shared/composables/useCharts'
 import AppButton from '@/shared/ui/AppButton.vue'
 import StepDots from '@/shared/ui/StepDots.vue'
 import SunEmblem from '@/shared/ui/SunEmblem.vue'
-import DateStep from './steps/DateStep.vue'
-import NameStep from './steps/NameStep.vue'
-import PlaceStep from './steps/PlaceStep.vue'
-import TimeStep from './steps/TimeStep.vue'
+import DateStep from '@/shared/birth/steps/DateStep.vue'
+import NameStep from '@/shared/birth/steps/NameStep.vue'
+import PlaceStep from '@/shared/birth/steps/PlaceStep.vue'
+import TimeStep from '@/shared/birth/steps/TimeStep.vue'
 
 const TOTAL = 4
 
