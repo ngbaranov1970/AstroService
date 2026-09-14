@@ -1,44 +1,126 @@
 <script setup>
 // Шаг 1: дата рождения. Показывает его OnboardingView, значение отдаёт
-// строкой 'YYYY-MM-DD' через v-model. Своего состояния не держит.
+// строкой 'YYYY-MM-DD' через v-model. Три отдельных поля вместо системного
+// календаря: дату рождения не выбирают листанием, её набирают по памяти.
 
-import { computed, useTemplateRef } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 
 const model = defineModel({ type: String, default: '' })
 
-const inputEl = useTemplateRef('input')
-
-/** Открыть системный календарь по нажатию на поле. */
-function openPicker() {
-  // Клик по прозрачному input на десктопе только ставит фокус: календарь
-  // там открывает иконка справа, а её не видно. Зовём выбор сами
-  try {
-    inputEl.value?.showPicker()
-  } catch {
-    // Метода нет (старый движок) или пикер уже открыт самим браузером —
-    // в обоих случаях поле остаётся в фокусе и принимает ввод с клавиатуры
-  }
-}
-
-// Родительный падеж: «14 ноября», а не «14 ноябрь». Штатный Intl умеет так
-// же, но приписывает « г.» в конце — проще держать список, чем вырезать
-const MONTHS = [
+// Два падежа: в списке месяц стоит сам по себе («ноябрь»), в подписи под
+// полями — при числе («14 ноября»)
+const MONTHS_NOM = [
+  'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+]
+const MONTHS_GEN = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ]
 
-// Сегодня в местной зоне в виде 'YYYY-MM-DD'. Локаль 'sv-SE' выбрана не
-// ради Швеции: её формат даты совпадает с ISO, а toISOString() перевёл бы
-// время в UTC и вечером 31-го числа вернул завтрашний день
-const today = new Date().toLocaleDateString('sv-SE')
+const MIN_YEAR = 1900
 
-// Дату разбираем строкой, не через new Date(): конструктор трактует
-// 'YYYY-MM-DD' как UTC-полночь и в минусовых поясах сдвигает день назад
-const pretty = computed(() => {
-  if (!model.value) return ''
-  const [year, month, day] = model.value.split('-')
-  return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`
+// Сегодняшняя полночь. С ней сравниваем введённое: родиться сегодня можно,
+// завтра — уже опечатка
+const now = new Date()
+const TODAY = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+// Поля держим строками: пустое поле — это '', а не 0, и ведущий ноль в «05»
+// не должен пропадать сам по себе прямо во время набора
+const day = ref('')
+const month = ref('') // '1'…'12' — номер месяца, значение выбранного <option>
+const year = ref('')
+
+const monthEl = useTemplateRef('month')
+const yearEl = useTemplateRef('year')
+
+// Пришли со второго шага назад — показываем то, что уже введено. Компонент
+// при возврате создаётся заново (в мастере он под v-if), своё состояние не
+// переживает, и восстановить его можно только из модели
+if (model.value) {
+  const [y, m, d] = model.value.split('-')
+  year.value = y
+  month.value = String(Number(m))
+  day.value = String(Number(d))
+}
+
+// Разбор трёх полей: либо готовая дата, либо причина, почему её нет.
+// Одной computed, а не тремя: и дата, и текст ошибки — результат одной и той
+// же проверки, разнесённые они разъедутся
+const checked = computed(() => {
+  const d = Number(day.value)
+  const m = Number(month.value)
+  const y = Number(year.value)
+
+  // Человек ещё набирает — молчим: ругаться на незаконченный ввод некрасиво
+  if (!day.value || !month.value || year.value.length < 4) {
+    return { date: null, error: null }
+  }
+
+  if (y < MIN_YEAR) return { date: null, error: `Раньше ${MIN_YEAR} года карту не считаем` }
+
+  const probe = new Date(y, m - 1, d)
+  // Date молча «чинит» 31 февраля в 3 марта — сверяем, что числа не уехали
+  if (probe.getDate() !== d || probe.getMonth() !== m - 1) {
+    return { date: null, error: 'Такой даты не существует' }
+  }
+  if (probe > TODAY) return { date: null, error: 'Эта дата ещё не наступила' }
+
+  return { date: probe, error: null }
 })
+
+// Собранная дата человеческими словами — подтверждение, что поля поняты так,
+// как он задумал
+const pretty = computed(() => {
+  const date = checked.value.date
+  if (!date) return ''
+  return `${date.getDate()} ${MONTHS_GEN[date.getMonth()]} ${date.getFullYear()}`
+})
+
+/** Число в две цифры: 5 → '05'. */
+function pad(value) {
+  // padStart дополняет строку слева до нужной длины — как zfill(2) в Python
+  return String(value).padStart(2, '0')
+}
+
+// Наверх отдаём только настоящую дату. Пока она не собралась, модель пустая,
+// и кнопка «Дальше» у мастера остаётся заблокированной — отдельного признака
+// «поле заполнено верно» ему не нужно
+watch(
+  () => checked.value.date,
+  (date) => {
+    model.value = date
+      ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+      : ''
+  },
+)
+
+/** Оставить в поле только цифры, не больше max, и вернуть результат. */
+function onlyDigits(event, max) {
+  // \D — «не цифра»; replace с флагом g вычищает все такие символы разом
+  const clean = event.target.value.replace(/\D/g, '').slice(0, max)
+  // Пишем очищенное и обратно в само поле. Если набрали букву, наша строка не
+  // изменилась, Vue перерисовывать нечего — и буква осталась бы на экране
+  event.target.value = clean
+  return clean
+}
+
+function onDayInput(event) {
+  day.value = onlyDigits(event, 2)
+  // Двух цифр хватило — идём дальше. Одной цифры хватает с 4: месяца, где
+  // есть 40-е число, не бывает, ждать второй цифры незачем
+  if (day.value.length === 2 || Number(day.value) > 3) monthEl.value?.focus()
+}
+
+function onYearInput(event) {
+  year.value = onlyDigits(event, 4)
+}
+
+function onMonthChange() {
+  // Год ещё пуст — ставим курсор туда: на мобильном это сразу открывает
+  // клавиатуру, лишний тап не нужен
+  if (!year.value) yearEl.value?.focus()
+}
 </script>
 
 <template>
@@ -48,27 +130,69 @@ const pretty = computed(() => {
       По ней рассчитаем положение планет — до градуса
     </p>
 
-    <!-- Поле из макета: своего вида у системного выбора даты нет, поэтому
-         рисуем текст сами, а настоящий <input type="date"> кладём поверх
-         прозрачным (inset-0 — растянуть на весь родительский блок).
-         Тап попадает в него и открывает системный календарь, на экране
-         остаётся наша вёрстка. min/max отдают проверку границ браузеру:
-         раньше 1900-го карту не считаем, дата в будущем — опечатка -->
-    <div class="relative mt-10" @click="openPicker">
-      <p
-        class="border-b border-line-gold pb-3 font-display text-2xl"
-        :class="pretty ? 'text-ink' : 'text-ink-muted/50'"
-      >
-        {{ pretty || 'Выберите дату' }}
-      </p>
-      <input
-        ref="input"
-        v-model="model"
-        type="date"
-        min="1900-01-01"
-        :max="today"
-        class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      />
+    <!-- Три поля в ряд: день узкий, месяц забирает остаток, год под четыре
+         цифры. Каждое завёрнуто в <label>, поэтому нажатие на подпись под
+         полем тоже ставит в него курсор -->
+    <div class="mt-10 flex items-start gap-3">
+      <label class="flex w-14 shrink-0 flex-col">
+        <!-- :value + @input вместо v-model: значение чистим от нецифр по
+             дороге, а v-model записал бы в поле всё подряд.
+             inputmode="numeric" просит у мобильной клавиатуры цифры -->
+        <input
+          :value="day"
+          type="text"
+          inputmode="numeric"
+          placeholder="14"
+          autocomplete="off"
+          class="w-full border-b border-line-gold bg-transparent pb-3 text-center font-display text-2xl text-ink caret-gold placeholder:text-ink-muted/40 focus:outline-none"
+          @input="onDayInput"
+        />
+        <span class="mt-2 text-label tracking-label text-ink-muted/60 uppercase">день</span>
+      </label>
+
+      <label class="flex flex-1 flex-col">
+        <!-- appearance-none снимает системную стрелку и рамку выпадашки.
+             Список рисует сама система, поэтому цвет на <option> задан
+             отдельно: наш тёмный фон на него не распространяется -->
+        <select
+          ref="month"
+          v-model="month"
+          class="w-full appearance-none border-b border-line-gold bg-transparent pb-3 text-center font-display text-2xl focus:outline-none"
+          :class="month ? 'text-ink' : 'text-ink-muted/40'"
+          @change="onMonthChange"
+        >
+          <option value="" disabled>месяц</option>
+          <option
+            v-for="(name, index) in MONTHS_NOM"
+            :key="name"
+            :value="String(index + 1)"
+            class="bg-bg-card text-ink"
+          >
+            {{ name }}
+          </option>
+        </select>
+        <span class="mt-2 text-label tracking-label text-ink-muted/60 uppercase">месяц</span>
+      </label>
+
+      <label class="flex w-24 shrink-0 flex-col">
+        <input
+          ref="year"
+          :value="year"
+          type="text"
+          inputmode="numeric"
+          placeholder="1975"
+          autocomplete="off"
+          class="w-full border-b border-line-gold bg-transparent pb-3 text-center font-display text-2xl text-ink caret-gold placeholder:text-ink-muted/40 focus:outline-none"
+          @input="onYearInput"
+        />
+        <span class="mt-2 text-label tracking-label text-ink-muted/60 uppercase">год</span>
+      </label>
     </div>
+
+    <!-- Строка под полями держит высоту всегда (min-h), иначе появление
+         подписи дёргало бы вёрстку вверх-вниз при каждом наборе -->
+    <p class="mt-6 min-h-6 font-display text-lead" :class="pretty ? 'text-gold' : 'text-ink-muted'">
+      {{ pretty || checked.error }}
+    </p>
   </div>
 </template>
