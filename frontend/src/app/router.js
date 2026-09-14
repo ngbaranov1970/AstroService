@@ -18,6 +18,10 @@ const routes = [
     path: '/onboarding',
     name: 'onboarding',
     component: () => import('@/features/onboarding/OnboardingView.vue'),
+    // meta — произвольные пометки на роуте, роутер их только передаёт. Наш
+    // флаг public означает «экран открыт без карты»: guard ниже не гонит
+    // отсюда в онбординг (заводить первую карту как раз здесь)
+    meta: { public: true },
   },
   {
     path: '/home',
@@ -38,6 +42,28 @@ const routes = [
     path: '/profile',
     name: 'profile',
     component: () => import('@/features/profile/ProfileView.vue'),
+  },
+  // Пара: сама пара и её разборы. Разборы показывает тот же ReportView, что и
+  // у карты, — форма ответа API у них одна, а чей это разбор, он узнаёт из
+  // meta.scope. Второй копии экрана поэтому нет
+  {
+    path: '/pair/:token',
+    name: 'pair',
+    component: () => import('@/features/pair/PairView.vue'),
+  },
+  {
+    path: '/pair/:token/report/:type',
+    name: 'pair-report',
+    component: () => import('@/features/report/ReportView.vue'),
+    meta: { scope: 'pair' },
+  },
+  // Витрина оплаты пары. Возврата с оплаты своего нет: сервер приводит всех
+  // на /paid/<token>, а чей это токен, тот экран узнаёт из типа в заказе
+  {
+    path: '/pair/:token/pay',
+    name: 'pair-pay',
+    component: () => import('@/features/pay/PayView.vue'),
+    meta: { scope: 'pair' },
   },
   // Витрина оплаты и возврат с неё. Экраны веб-ветки: в VK продавать нельзя,
   // и пришедшего оттуда PayView сам уводит на разбор
@@ -78,8 +104,11 @@ export const router = createRouter({
 // beforeEach — проверка перед каждым переходом. Возврат true пропускает,
 // объект с именем роута перенаправляет
 router.beforeEach(async (to) => {
-  // Онбординг открыт всегда: именно на нём заводят первую карту
-  if (to.name === 'onboarding') return true
+  // Публичные экраны пропускаем целиком: на онбординге заводят первую карту,
+  // а экран приглашения открывает человек, которого у нас вообще нет в базе.
+  // Флагом, а не именем роута: имён станет больше одного, и список в guard
+  // разъедется с таблицей адресов при первом же новом экране
+  if (to.meta.public) return true
 
   const { status, start } = useSession()
   // start() безопасно звать повторно: готовая сессия возвращается сразу,

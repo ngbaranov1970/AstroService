@@ -21,13 +21,28 @@ const { reload: reloadCharts } = useCharts()
 const router = useRouter()
 const route = useRoute()
 
+// Экран, которому наша личность не нужна вовсе, — приглашение по ссылке.
+// Его открывает партнёр, которого у нас нет в базе: ни ждать сессию, ни
+// предлагать ему вход незачем, иначе виральная ветка упрётся в гейт.
+// meta.public («открыт без карты») для этого мало: онбординг тоже public, но
+// без токена отправить форму не сможет — ему гейт как раз нужен
+const isGuest = computed(() => route.meta.guest === true)
+
 // idle показываем так же, как loading. App монтируется раньше, чем роутер
 // довёл первый переход до конца, и без этой ветки на кадр мелькнул бы пустой
 // RouterView
-const isBooting = computed(() => status.value === 'idle' || status.value === 'loading')
+const isBooting = computed(
+  () => !isGuest.value && (status.value === 'idle' || status.value === 'loading'),
+)
 
-// На онбординге навигации нет: оттуда ведёт только один путь — вперёд
-const showNav = computed(() => route.name !== 'onboarding')
+// Сессии нет и предложить нечего. На гостевом экране это не повод закрываться
+const isGateClosed = computed(
+  () => !isGuest.value && (status.value === 'anon' || status.value === 'error'),
+)
+
+// На публичных экранах навигации нет: с онбординга ведёт один путь — вперёд,
+// а гостю некуда идти вовсе, его аккаунт не наш
+const showNav = computed(() => !route.meta.public)
 
 // Есть ли куда отправить за входом. Метод login есть только у веб-платформы:
 // в VK и Telegram личность приходит с запуском, предлагать там нечего.
@@ -98,9 +113,11 @@ async function retry() {
     <!-- 2. Сессии нет. Либо войти нечем (anon: в браузере ещё не входили,
          в Mini App открыли не из VK), либо вход сорвался (error: подпись не
          сошлась, сеть отвалилась, сервер не настроен). Разметка общая,
-         различаются подписи и набор кнопок -->
+         различаются подписи и набор кнопок.
+         На гостевом экране эта ветка выключена: там отсутствие сессии —
+         норма, а не поломка -->
     <div
-      v-else-if="status === 'anon' || status === 'error'"
+      v-else-if="isGateClosed"
       class="flex flex-1 flex-col items-center justify-center gap-4 text-center"
     >
       <!-- {{ }} — подстановка значения в текст, как f-строка в Python.

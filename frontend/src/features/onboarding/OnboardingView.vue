@@ -1,23 +1,15 @@
 <script setup>
-// Онбординг: мастер из четырёх шагов (дата → время → город → имя), который
-// заводит первую карту. Показывает его роутер по адресу /onboarding, снаружи
-// данных не принимает. Всё состояние формы держит этот файл — шаги только
-// рисуют своё поле и отдают значение назад через v-model.
+// Онбординг: экран, который заводит первую карту. Показывает его роутер по
+// адресу /onboarding, снаружи данных не принимает. Сами четыре шага рисует
+// BirthWizard — здесь только то, что делать с собранными данными: отправить
+// на сервер, запомнить карту и увести на главную.
 
-import { computed, reactive, ref } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { createChart } from '@/shared/api/endpoints'
+import BirthWizard from '@/shared/birth/BirthWizard.vue'
 import { useCharts } from '@/shared/composables/useCharts'
-import AppButton from '@/shared/ui/AppButton.vue'
-import StepDots from '@/shared/ui/StepDots.vue'
-import SunEmblem from '@/shared/ui/SunEmblem.vue'
-import DateStep from '@/shared/birth/steps/DateStep.vue'
-import NameStep from '@/shared/birth/steps/NameStep.vue'
-import PlaceStep from '@/shared/birth/steps/PlaceStep.vue'
-import TimeStep from '@/shared/birth/steps/TimeStep.vue'
-
-const TOTAL = 4
 
 const router = useRouter()
 // hasCharts — есть ли у человека хоть одна карта. От этого зависит, можно ли
@@ -25,51 +17,18 @@ const router = useRouter()
 // вернёт его сюда же
 const { hasCharts, remember } = useCharts()
 
-const step = ref(1)
 const submitting = ref(false)
 const error = ref(null)
 
-// reactive — тот же ref, но для объекта целиком: следим за всеми полями сразу
-// и пишем form.birthDate без .value. Для одиночных значений берут ref, для
-// формы из нескольких полей — reactive; смешивать в одном месте незачем
-const form = reactive({
-  birthDate: '', // 'YYYY-MM-DD' — ровно в таком виде отдаёт <input type="date">
-  birthTime: '', // 'HH:MM'
-  timeUnknown: false, // «не помню время» → в API уедет birth_time: null
-  place: null, // {label, lat, lon} — выбранная подсказка из GET /places
-  personName: '',
-})
-
-// Кнопка «Дальше» заблокирована, пока шаг не заполнен. Имя необязательно,
-// время может быть неизвестно — на этих шагах пройти можно всегда
-const canGoNext = computed(() => {
-  if (step.value === 1) return form.birthDate !== ''
-  if (step.value === 2) return form.timeUnknown || form.birthTime !== ''
-  if (step.value === 3) return form.place !== null
-  return true
-})
-
-const nextLabel = computed(() => (step.value < TOTAL ? 'Дальше' : 'Готово'))
-
-/** Отправить форму и увести на главную. Ошибку показываем на месте:
- *  данные уже введены, терять их из-за обрыва сети нельзя. */
-async function submit() {
+/** Отправить данные рождения и увести на главную. Ошибку показываем на месте:
+ *  данные уже введены, терять их из-за обрыва сети нельзя.
+ *  payload — готовое тело запроса, его собрал мастер. */
+async function submit(payload) {
   submitting.value = true
   error.value = null
 
   try {
-    const chart = await createChart({
-      // Пустое имя отправляем как null: на сервере пустая строка всё равно
-      // станет NULL, но лучше не гонять по сети то, чего нет
-      person_name: form.personName.trim() || null,
-      birth_date: form.birthDate,
-      birth_time: form.timeUnknown ? null : form.birthTime,
-      // Координаты берём из подсказки, а не из набранного текста: одинаковых
-      // названий много, а часовой пояс сервер считает именно по координатам
-      lat: form.place.lat,
-      lon: form.place.lon,
-      place_name: form.place.label,
-    })
+    const chart = await createChart(payload)
 
     // Кладём карту в общий список сразу: иначе guard роутера, увидев пустой
     // список, развернёт нас с главной обратно в онбординг
@@ -86,79 +45,22 @@ async function submit() {
   }
 }
 
-function next() {
-  if (!canGoNext.value) return
-  if (step.value < TOTAL) {
-    step.value += 1
-    return
-  }
-  submit()
-}
-
-// Нижняя кнопка делает разное на первом шаге и на остальных: там выход из
-// мастера, тут возврат к предыдущему полю
-const backLabel = computed(() => (step.value > 1 ? 'Назад' : 'Отмена'))
-
-// Показываем её всегда, кроме первого шага у человека без карт: ему уходить
-// некуда, и «Отмена» вела бы на главную, откуда guard тут же вернёт назад
-const showBack = computed(() => step.value > 1 || hasCharts.value)
-
-function back() {
-  if (step.value > 1) {
-    step.value -= 1
-    return
-  }
-
-  // Первый шаг: сюда пришли из переключателя за второй картой и передумали.
-  // replace, а не push: брошенный мастер в истории никому не нужен
+// Сюда пришли из переключателя за второй картой и передумали. replace, а не
+// push: брошенный мастер в истории никому не нужен
+function cancel() {
   router.replace({ name: 'home' })
 }
 </script>
 
 <template>
-  <section class="flex flex-1 flex-col">
-    <!-- Верхний блок с эмблемой и полем растянут (flex-1) и центрирован, а
-         кнопка прижата к низу — композиция макета B_1 -->
-    <div class="flex flex-1 flex-col items-center justify-center gap-7">
-      <SunEmblem class="w-[45%] text-gold" />
-      <StepDots :current="step" :total="TOTAL" />
-
-      <!-- Шаги показываем ветвлением, а не динамическим компонентом: у
-           каждого своя пара v-model, и явные строки читаются лучше.
-           v-model="form.birthDate" — двусторонняя связь: шаг пишет значение
-           прямо в нашу форму -->
-      <DateStep v-if="step === 1" v-model="form.birthDate" />
-      <TimeStep
-        v-else-if="step === 2"
-        v-model="form.birthTime"
-        v-model:unknown="form.timeUnknown"
-      />
-      <PlaceStep v-else-if="step === 3" v-model="form.place" />
-      <NameStep v-else v-model="form.personName" />
-    </div>
-
-    <!-- Отказ сервера: показываем над кнопкой, введённое не стираем -->
-    <p v-if="error" class="mb-3 text-center text-meta text-ink-muted">{{ error }}</p>
-
-    <AppButton
-      :disabled="!canGoNext"
-      :loading="submitting"
-      loading-text="Считаем карту…"
-      @click="next"
-    >
-      {{ nextLabel }}
-    </AppButton>
-
-    <!-- Возврат на предыдущий шаг, а на первом — выход из мастера. На макете
-         кнопки нет, но без неё опечатка в дате исправляется только
-         перезапуском приложения, а брошенный мастер вообще не закрыть -->
-    <button
-      v-if="showBack"
-      type="button"
-      class="mt-4 py-2 font-sans text-label tracking-label text-gold-dim uppercase"
-      @click="back"
-    >
-      {{ backLabel }}
-    </button>
-  </section>
+  <!-- @submit="submit" — слушаем событие мастера: он отдаёт готовое тело
+       запроса, мы решаем, куда его девать. :can-cancel отдаёт мастеру право
+       показать «Отмену» на первом шаге -->
+  <BirthWizard
+    :busy="submitting"
+    :error="error"
+    :can-cancel="hasCharts"
+    @submit="submit"
+    @cancel="cancel"
+  />
 </template>

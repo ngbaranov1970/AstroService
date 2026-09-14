@@ -119,3 +119,99 @@ export function denyGroupMessages() {
 export function getOrder(orderToken) {
   return http.get(`/orders/${orderToken}`)
 }
+
+// ─── Пары (совместимость) ──────────────────────────────────────────────────
+// Ручки делятся на две группы, и граница между ними не техническая:
+// /pairs требует Bearer и работает с данными двоих, /invites открыт без входа
+// вовсе — по ссылке его открывает партнёр, которого у нас в базе нет.
+
+/** Типы связи — то же перечисление, что PairKind в backend/app/models/pair.py.
+ *  Подписей для человека здесь нет намеренно: их место на экране сборки пары,
+ *  а сюда попадают только значения, которые уезжают на сервер. */
+export const PAIR_KIND = Object.freeze({
+  ROMANCE: 'romance',
+  FAMILY: 'family',
+})
+
+/** Пары пользователя, свежие первыми: [{token, kind, is_complete, created_at,
+ *  person_a, person_b, invite_open}].
+ *  is_complete === false — пара ждёт партнёра по ссылке: расчёта и текстов
+ *  ещё нет, на экране это «приглашение отправлено». */
+export function listPairs() {
+  return http.get('/pairs')
+}
+
+/** Собрать пару. data: {chart_a_token, chart_b_token?, kind, inviter_label?}.
+ *
+ *  Без chart_b_token создаётся пара, ждущая партнёра, — следующим шагом
+ *  просим для неё приглашение. Повтор того же состава вернёт ту же пару.
+ *  inviter_label — как назвать инициатора партнёру на анонимном экране;
+ *  это отдельное поле, а не имя карты: имя карты человек вводил для себя.
+ *  400 означает «так пару не собрать» (чужая карта или карта с самой собой). */
+export function createPair(data) {
+  return http.post('/pairs', data)
+}
+
+/** Пара вместе с расчётом синастрии: поля списка плюс calc (aspects, summary,
+ *  meta с таблицей орбов). calc === null, пока партнёр не пришёл.
+ *  404 приходит и на чужую пару — в отличие от карты, ссылкой на пару
+ *  делиться нельзя: за ней стоят двое, и второй согласия не давал. */
+export function getPair(token) {
+  return http.get(`/pairs/${token}`)
+}
+
+/** Выдать ссылку-приглашение: {invite_token, expires_at}.
+ *  Единственное место, где токен приглашения приходит наружу, — сам адрес
+ *  ссылки собирает фронт. Живое приглашение не перевыпускается: повтор
+ *  вернёт тот же токен, иначе уже отправленная ссылка перестала бы работать.
+ *  409 — партнёр уже пришёл, звать некого. */
+export function createInvite(token) {
+  return http.post(`/pairs/${token}/invite`)
+}
+
+/** Состояние разборов этой пары — та же форма ответа, что у listReports.
+ *  Поэтому экран разбора, опрос и разбор секций переиспользуются как есть. */
+export function listPairReports(token) {
+  return http.get(`/pairs/${token}/reports`)
+}
+
+/** Попросить разбор по паре (pair_free или pair_full). Повтор безопасен. */
+export function requestPairReport(token, type) {
+  return http.post(`/pairs/${token}/reports`, { type })
+}
+
+/** Завести заказ на платный разбор пары. Отвечает {token, confirmation_url}.
+ *  Внутри VK отвечает 403, как и заказ по карте: продавать в Mini App нельзя. */
+export function createPairOrder(token) {
+  return http.post(`/pairs/${token}/orders`)
+}
+
+/** Кто зовёт и на какой разбор: {kind, inviter_label}. Вход по ссылке,
+ *  авторизации не требует. inviter_label === null — инициатор не подписался,
+ *  экран скажет безличное «вас приглашают».
+ *  404 отвечает одинаково на «нет токена», «протух» и «уже использован»:
+ *  различать их значит подтверждать существование токена тому, кто перебирает.
+ *
+ *  anonymous: true — заголовок с токеном этому запросу не нужен. Партнёр нам
+ *  никем не представлен, и его 401 не должен запускать перевыпуск сессии. */
+export function readInvite(inviteToken) {
+  return http.get(`/invites/${inviteToken}`, { anonymous: true })
+}
+
+/** Партнёр вводит свои данные: пара достраивается, тизер уходит в работу.
+ *  data — то же тело, что у createChart. Отвечает состоянием тизера (ReportOut),
+ *  дальше его догоняем опросом readInviteReport.
+ *
+ *  Карта заводится в аккаунте ИНИЦИАТОРА — своего аккаунта у партнёра может
+ *  не быть. Экран обязан предупредить об этом прямым текстом (152-ФЗ).
+ *  400 — введённые данные совпали с данными пригласившего. */
+export function acceptInvite(inviteToken, data) {
+  return http.post(`/invites/${inviteToken}`, data, { anonymous: true })
+}
+
+/** Состояние тизера по принятому приглашению — тот же ReportOut.
+ *  Ключ всё тот же invite_token: ссылка, которой партнёр вошёл, — его
+ *  единственный вход к тексту про него самого. */
+export function readInviteReport(inviteToken) {
+  return http.get(`/invites/${inviteToken}/report`, { anonymous: true })
+}

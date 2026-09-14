@@ -16,11 +16,16 @@ import { usePolling } from '@/shared/composables/usePolling'
 import { useReports } from '@/shared/composables/useReports'
 import AppButton from '@/shared/ui/AppButton.vue'
 
-const PAID_TYPE = 'full_natal'
+// К чему относится купленный разбор. Смотрим на тип из заказа, а не на
+// маршрут: адрес возврата у сервера один на карту и пару (/paid/<token>),
+// и в токене из адреса не написано, чей он
+const SCOPE_BY_TYPE = Object.freeze({
+  full_natal: 'chart',
+  pair_full: 'pair',
+})
 
 const route = useRoute()
 const router = useRouter()
-const { reload } = useReports()
 
 const token = computed(() => String(route.params.token ?? ''))
 // Токен заказа приходит в адресе от страницы возврата. Пусто — сюда зашли
@@ -36,6 +41,12 @@ const paid = computed(() => order.value?.paid === true)
 // Ничего ещё не знаем: первый ответ не пришёл, а ошибки не было
 const isLoading = computed(() => order.value === null && !failed.value)
 
+// Пока заказ не пришёл, разборы перечитывать нечему: тип неизвестен, а
+// гадать нельзя — токен из адреса может оказаться и парой, и картой
+const scope = computed(() => SCOPE_BY_TYPE[order.value?.report_type] ?? null)
+// useReports зовём внутри computed: scope известен не сразу, а с ответом
+const api = computed(() => (scope.value ? useReports(scope.value) : null))
+
 /** Спросить состояние заказа. Сервер при этом сверяется с ЮKassa и, если
  *  деньги на месте, ставит разбор в очередь. */
 async function refresh() {
@@ -47,7 +58,7 @@ async function refresh() {
     failed.value = false
     // Разбор только что открылся — список разборов на других экранах об этом
     // ещё не знает, и без перечитывания там остался бы «заперт»
-    if (fresh.paid) await reload(token.value)
+    if (fresh.paid && api.value) await api.value.reload(token.value)
   } catch {
     // catch без переменной: какая именно ошибка, экрану неважно — текст один
     failed.value = true
@@ -60,10 +71,26 @@ async function refresh() {
 const waiting = computed(() => Boolean(orderToken.value) && !paid.value)
 const { timedOut } = usePolling(refresh, waiting, { intervalMs: 5000 })
 
-/** Открыть купленный разбор. */
+/** Открыть купленный разбор.
+ *
+ *  Заказа нет (адрес открыли руками либо сервер не ответил) — уводим на
+ *  главную: какой именно разбор куплен, известно только из заказа, а увести
+ *  в несуществующий значит показать «такого разбора пока нет». */
 function goToReport() {
-  router.push({ name: 'report', params: { token: token.value, type: PAID_TYPE } })
+  if (!order.value) {
+    router.push({ name: 'home' })
+    return
+  }
+
+  router.push({
+    name: scope.value === 'pair' ? 'pair-report' : 'report',
+    params: { token: token.value, type: order.value.report_type },
+  })
 }
+
+// Подпись кнопки выхода: без заказа она ведёт на главную, и обещать разбор
+// было бы враньём
+const exitLabel = computed(() => (order.value ? 'К разбору' : 'На главную'))
 
 // Дата и время оплаты — то, что человек сверит с выпиской банка
 const paidAt = computed(() => {
@@ -99,7 +126,7 @@ watch(
         Похоже, эта страница открыта напрямую. Заказ оформляется на странице разбора.
       </p>
       <div class="mt-2 w-full">
-        <AppButton @click="goToReport">К разбору</AppButton>
+        <AppButton @click="goToReport">{{ exitLabel }}</AppButton>
       </div>
     </template>
 
@@ -147,7 +174,7 @@ watch(
       </p>
 
       <div class="mt-2 w-full">
-        <AppButton @click="goToReport">К разбору</AppButton>
+        <AppButton @click="goToReport">{{ exitLabel }}</AppButton>
       </div>
 
       <p v-if="order" class="mt-4 font-sans text-meta text-ink-muted">

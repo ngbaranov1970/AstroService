@@ -20,39 +20,64 @@ import ReportFeedback from './ReportFeedback.vue'
 import ReportSections from './ReportSections.vue'
 
 const route = useRoute()
-const { report, state: reportsState, ensureLoaded, reload, request } = useReports()
+
+// Чей это разбор — карты или пары — говорит сам маршрут (meta.scope).
+// useReports зовём внутри computed, а не один раз при создании экрана: Vue
+// Router переиспользует компонент между маршрутами, у которых он общий, и
+// замыкание осталось бы ходить в прежние ручки
+const scope = computed(() => route.meta.scope ?? 'chart')
+const api = computed(() => useReports(scope.value))
 
 // Адрес экрана. Параметры роутера бывают и массивом (это его контракт),
 // поэтому приводим к строке явно — она уходит в запросы
 const token = computed(() => String(route.params.token ?? ''))
 const type = computed(() => String(route.params.type ?? ''))
 
-// Наш разбор из общего списка карты. null — либо список ещё не пришёл, либо
-// сервер такого типа не отдаёт; эти случаи экран различает по listStatus
-const current = computed(() => report(token.value, type.value))
-const listStatus = computed(() => reportsState(token.value).status)
+// Наш разбор из общего списка владельца. null — либо список ещё не пришёл,
+// либо сервер такого типа не отдаёт; эти случаи экран различает по listStatus
+const current = computed(() => api.value.report(token.value, type.value))
+const listStatus = computed(() => api.value.state(token.value).status)
 
 const status = computed(() => current.value?.status ?? null)
 const isRunning = computed(() => status.value === REPORT_STATUS.RUNNING)
 const isLocked = computed(() => status.value === REPORT_STATUS.LOCKED)
 const isReady = computed(() => status.value === REPORT_STATUS.READY)
 
-// Полный разбор нужен экрану бесплатного: им заканчивается чтение free_natal
-const isFree = computed(() => type.value === 'free_natal')
-const fullReport = computed(() => report(token.value, 'full_natal'))
+// Какой платный разбор предлагать в конце бесплатного. Таблица, а не проверка
+// имени: у карты и у пары пары типов свои, и «всё, что не full — free» сломает
+// первый же новый тип с бэкенда
+const PAID_AFTER = Object.freeze({
+  free_natal: 'full_natal',
+  pair_free: 'pair_full',
+})
 
-// Куда ведёт «Назад»: с полного разбора — к бесплатному, откуда на него и
-// перешли, иначе на главную. router.back() тут не годится — по прямой ссылке
-// из VK история пустая, и «назад» вышвырнуло бы человека из приложения
-const backTo = computed(() =>
-  type.value === 'full_natal'
-    ? { name: 'report', params: { token: token.value, type: 'free_natal' } }
-    : { name: 'home' },
+// Этим разбором чтение не заканчивается: за ним идёт платный
+const isFree = computed(() => PAID_AFTER[type.value] !== undefined)
+const fullReport = computed(() =>
+  isFree.value ? api.value.report(token.value, PAID_AFTER[type.value]) : null,
 )
 
-/** Перечитать состояние разборов этой карты — один круг ожидания. */
+// Куда ведёт «Назад»: с платного — к бесплатному, откуда на него и перешли,
+// иначе к владельцу разбора (карта — главная, пара — её экран).
+// router.back() тут не годится — по прямой ссылке из VK история пустая, и
+// «назад» вышвырнуло бы человека из приложения
+const backTo = computed(() => {
+  // find ищет тип, после которого идёт наш: так работает и для карты, и для
+  // пары, не зная их имён
+  const freeType = Object.keys(PAID_AFTER).find((free) => PAID_AFTER[free] === type.value)
+  if (freeType) {
+    const name = scope.value === 'pair' ? 'pair-report' : 'report'
+    return { name, params: { token: token.value, type: freeType } }
+  }
+
+  return scope.value === 'pair'
+    ? { name: 'pair', params: { token: token.value } }
+    : { name: 'home' }
+})
+
+/** Перечитать состояние разборов этого владельца — один круг ожидания. */
 function refresh() {
-  return reload(token.value)
+  return api.value.reload(token.value)
 }
 
 // Генерация идёт: частый опрос. Таймаут в три минуты зашит в usePolling,
@@ -98,7 +123,7 @@ async function start() {
   startError.value = null
 
   try {
-    await request(token.value, type.value)
+    await api.value.request(token.value, type.value)
   } catch (failure) {
     startError.value = failure.message
   } finally {
@@ -111,7 +136,7 @@ async function start() {
 watch(
   token,
   (value) => {
-    if (value) ensureLoaded(value)
+    if (value) api.value.ensureLoaded(value)
   },
   { immediate: true },
 )
@@ -167,7 +192,7 @@ watch(
            текст и знает, за чем идёт дальше. Плитка сама решает, вести ли
            наружу (заперт) или внутрь (уже открыт) -->
       <div v-if="isFree && fullReport" class="mt-10">
-        <FullReportTile :token="token" :report="fullReport" />
+        <FullReportTile :token="token" :report="fullReport" :scope="scope" />
       </div>
 
       <!-- Оценка текста: по ней сравниваются поколения промпта. Спрашиваем
@@ -238,7 +263,7 @@ watch(
            показывает конец бесплатного разбора — она умеет и состав секций
            перечислить, и увести на сайт, не называя это оплатой -->
       <div v-else-if="isLocked" class="w-full">
-        <FullReportTile :token="token" :report="current" />
+        <FullReportTile :token="token" :report="current" :scope="scope" />
       </div>
 
       <!-- Отказ: текст подобран по коду, а кнопка есть только там, где повтор

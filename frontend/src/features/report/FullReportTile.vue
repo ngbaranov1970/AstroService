@@ -22,6 +22,9 @@ const props = defineProps({
   // null — список разборов ещё не пришёл: плитка рисуется по запасным текстам,
   // а переход работает и без него, token для ссылки у нас уже есть
   report: { type: Object, default: null },
+  // Чей это разбор: 'chart' (карта) или 'pair' (совместимость). От него
+  // зависят иконка, запасное название и оба перехода — в витрину и в текст
+  scope: { type: String, default: 'chart' },
 })
 
 // Домен сайта, куда уходит оплата. Боевой адрес — дефолт: на машине сборки
@@ -47,6 +50,17 @@ const ACTION = Object.freeze({
   [REPORT_STATUS.FAILED]: 'Попробовать снова',
 })
 
+const isPair = computed(() => props.scope === 'pair')
+
+// Имена маршрутов у пары свои, а экраны за ними те же самые
+const payRoute = computed(() => (isPair.value ? 'pair-pay' : 'pay'))
+const reportRoute = computed(() => (isPair.value ? 'pair-report' : 'report'))
+
+// Тип берём из ответа сервера; запасной нужен, только пока список не доехал
+const paidType = computed(
+  () => props.report?.type ?? (isPair.value ? 'pair_full' : 'full_natal'),
+)
+
 // Единственное состояние, ведущее к оплате. Всё остальное — «разбор уже наш»,
 // и открывается он внутри приложения
 const isLocked = computed(() => props.report?.status === REPORT_STATUS.LOCKED)
@@ -59,7 +73,11 @@ const isWeb = computed(() => platform.name === 'web')
 const price = computed(() => props.report?.price_rub ?? null)
 
 // Название берём с сервера: тем же именем товар назван на странице оплаты
-const title = computed(() => props.report?.title ?? 'Полный разбор натальной карты')
+const title = computed(
+  () =>
+    props.report?.title ??
+    (isPair.value ? 'Полный разбор совместимости' : 'Полный разбор натальной карты'),
+)
 
 // Состав — анонс до генерации: шесть заголовков секций из промпта
 const sections = computed(() => props.report?.section_titles ?? [])
@@ -90,8 +108,8 @@ function open() {
   // Заперт и мы в браузере — ведём на свою витрину, иначе сразу в разбор
   router.push(
     isLocked.value
-      ? { name: 'pay', params: { token: props.token } }
-      : { name: 'report', params: { token: props.token, type: 'full_natal' } },
+      ? { name: payRoute.value, params: { token: props.token } }
+      : { name: reportRoute.value, params: { token: props.token, type: paidType.value } },
   )
 }
 </script>
@@ -108,7 +126,7 @@ function open() {
   >
     <div class="flex items-center gap-4">
       <!-- shrink-0 запрещает flex сплющить иконку под длинным заголовком -->
-      <ReportIcon name="natal" class="w-11 shrink-0 text-gold" />
+      <ReportIcon :name="isPair ? 'pair' : 'natal'" class="w-11 shrink-0 text-gold" />
       <p class="min-w-0 font-display text-title text-ink">{{ title }}</p>
     </div>
 

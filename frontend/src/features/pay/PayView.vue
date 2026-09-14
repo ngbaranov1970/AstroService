@@ -12,27 +12,49 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { platform } from '@/app/platform'
-import { createOrder, REPORT_STATUS } from '@/shared/api/endpoints'
+import { createOrder, createPairOrder, REPORT_STATUS } from '@/shared/api/endpoints'
 import { useCharts } from '@/shared/composables/useCharts'
+import { usePairs } from '@/shared/composables/usePairs'
 import { useReports } from '@/shared/composables/useReports'
 import { openLegal } from '@/shared/legal'
 import AppButton from '@/shared/ui/AppButton.vue'
 
-// Единственный платный вид разбора на сегодня. Адрес экрана построен на
-// карте, а не на типе: типов у одной карты со временем станет несколько,
-// и менять придётся эту строку, а не маршрут
-const PAID_TYPE = 'full_natal'
+// Что покупается на этом адресе: разбор карты или разбор пары. Маршрут
+// построен на владельце, а не на типе — типов у одной карты со временем
+// станет несколько, и менять придётся эту таблицу, а не адрес
+const PAID_TYPE = Object.freeze({ chart: 'full_natal', pair: 'pair_full' })
 
 const route = useRoute()
 const router = useRouter()
-const { report, state: reportsState, ensureLoaded, reload } = useReports()
+// Чей это товар, говорит сам маршрут (meta.scope) — как на экране разбора
+const scope = computed(() => route.meta.scope ?? 'chart')
+const isPair = computed(() => scope.value === 'pair')
+const paidType = computed(() => PAID_TYPE[scope.value])
+
+// useReports зовём внутри computed: Vue Router переиспользует компонент между
+// маршрутами, у которых он общий, и замыкание ходило бы в прежние ручки
+const api = computed(() => useReports(scope.value))
 const { charts } = useCharts()
+const { detail: pairDetail } = usePairs()
 
 const token = computed(() => String(route.params.token ?? ''))
 
 // Чья карта покупается. Берём из общего списка, а не отдельным запросом:
-// расчёт витрине не нужен, хватит имени, даты и места
-const chart = computed(() => charts.value.find((item) => item.token === token.value) ?? null)
+// расчёт витрине не нужен, хватит имени, даты и места. У пары карты нет —
+// там подпись собирается ниже из имён обеих сторон
+const chart = computed(() =>
+  isPair.value ? null : (charts.value.find((item) => item.token === token.value) ?? null),
+)
+
+// Имена сторон пары. Берём из уже загруженной пары и отдельного запроса не
+// делаем: сюда приходят с экрана пары, где она загружена. Не доехала —
+// обойдёмся названием товара, оно и так называет покупку
+const pairLine = computed(() => {
+  const pair = isPair.value ? pairDetail(token.value).pair : null
+  if (!pair) return ''
+
+  return `${pair.person_a || 'Ты'} и ${pair.person_b || 'Партнёр'}`
+})
 
 // Подпись под названием товара: та же строка, что на экране карты. Человек
 // должен видеть, за чей разбор платит, — карт у него может быть несколько
@@ -55,10 +77,14 @@ const birthLine = computed(() => {
 })
 
 // Тот же список разборов, что на экране чтения: цена и состав приходят в нём
-const current = computed(() => report(token.value, PAID_TYPE))
-const listStatus = computed(() => reportsState(token.value).status)
+const current = computed(() => api.value.report(token.value, paidType.value))
+const listStatus = computed(() => api.value.state(token.value).status)
 
-const title = computed(() => current.value?.title ?? 'Полный разбор натальной карты')
+const title = computed(
+  () =>
+    current.value?.title ??
+    (isPair.value ? 'Полный разбор совместимости' : 'Полный разбор натальной карты'),
+)
 const sections = computed(() => current.value?.section_titles ?? [])
 // null означает «покупать нельзя»: сервер не прислал цену (мы в VK или разбор
 // не продаётся). Кнопки в этом случае не будет
@@ -67,16 +93,22 @@ const price = computed(() => current.value?.price_rub ?? null)
 // Список ещё едет — на экране ожидание, а не «разбор недоступен»
 const isLoading = computed(() => !current.value && listStatus.value !== 'error')
 
+// Имена маршрутов разбора: у пары свой, но экран за ними один и тот же
+const reportRoute = computed(() => (isPair.value ? 'pair-report' : 'report'))
+
 /** Уйти читать разбор. replace, а не push: витрина уже неактуальна, и
  *  «назад» с экрана разбора не должно возвращать на неё. */
 function goToReport() {
-  router.replace({ name: 'report', params: { token: token.value, type: PAID_TYPE } })
+  router.replace({
+    name: reportRoute.value,
+    params: { token: token.value, type: paidType.value },
+  })
 }
 
 // Куда ведёт «Назад»: к бесплатному разбору, из которого сюда и приходят
 const backTo = computed(() => ({
-  name: 'report',
-  params: { token: token.value, type: 'free_natal' },
+  name: reportRoute.value,
+  params: { token: token.value, type: isPair.value ? 'pair_free' : 'free_natal' },
 }))
 
 // Своё состояние кнопки: ошибку заказа ждёт человек, который только что нажал
@@ -89,7 +121,11 @@ async function pay() {
   error.value = null
 
   try {
-    const order = await createOrder(token.value)
+    // Ручки заказа у карты и пары разные: у пары свой замок против двух
+    // ожидающих заказов и своя цена
+    const order = isPair.value
+      ? await createPairOrder(token.value)
+      : await createOrder(token.value)
     // Переход в ЭТОЙ вкладке, а не window.open: оплата не должна выглядеть
     // всплывшим окном чужого сайта, а вернёт нас ЮKassa сама — на адрес
     // возврата, который сервер построил при создании заказа.
@@ -114,7 +150,7 @@ async function pay() {
 watch(
   token,
   (value) => {
-    if (value) ensureLoaded(value)
+    if (value) api.value.ensureLoaded(value)
   },
   { immediate: true },
 )
@@ -164,7 +200,7 @@ onMounted(() => {
     >
       <h1 class="font-display text-title text-ink">Не удалось открыть оплату</h1>
       <div class="mt-2 w-full">
-        <AppButton @click="reload(token)">Повторить</AppButton>
+        <AppButton @click="api.reload(token)">Повторить</AppButton>
       </div>
     </section>
 
@@ -175,6 +211,11 @@ onMounted(() => {
         <!-- Имя показываем, только если оно есть: карту заводят и безымянной -->
         <template v-if="chart?.person_name">{{ chart.person_name }} · </template>{{ birthLine }}
       </p>
+
+      <!-- У пары вместо данных рождения — имена сторон: пар у человека может
+           быть несколько, и он должен видеть, за какую платит. Дат и мест
+           здесь нет: за парой стоят двое, и второй согласия не давал -->
+      <p v-else-if="pairLine" class="mt-2 font-sans text-meta text-ink-muted">{{ pairLine }}</p>
 
       <!-- Состав будущего текста: шесть заголовков секций из промпта -->
       <ul v-if="sections.length" class="mt-7 space-y-2">
