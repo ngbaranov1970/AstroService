@@ -46,6 +46,19 @@ const routes = [
   // Пара: сама пара и её разборы. Разборы показывает тот же ReportView, что и
   // у карты, — форма ответа API у них одна, а чей это разбор, он узнаёт из
   // meta.scope. Второй копии экрана поэтому нет
+  //
+  // Сборка пары стоит выше /pair/:token: статический путь роутер и так
+  // предпочитает динамическому, но порядком это видно глазом
+  {
+    path: '/pairs',
+    name: 'pairs',
+    component: () => import('@/features/pair/PairsView.vue'),
+  },
+  {
+    path: '/pair/new',
+    name: 'pair-create',
+    component: () => import('@/features/pair/PairCreateView.vue'),
+  },
   {
     path: '/pair/:token',
     name: 'pair',

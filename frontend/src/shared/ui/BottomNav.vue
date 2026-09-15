@@ -19,7 +19,6 @@ const { current } = useCharts()
 // изменении (в Python ближе всего @property, но с кешем)
 const items = computed(() => {
   const name = route.name
-  const feature = route.params.feature
 
   return [
     {
@@ -41,8 +40,11 @@ const items = computed(() => {
     {
       key: 'pair',
       label: 'Пара',
-      to: { name: 'soon', params: { feature: 'pair' } },
-      active: name === 'soon' && feature === 'pair',
+      to: { name: 'pairs' },
+      // Подсвечиваем на всех экранах раздела: сборка пары, сама пара и её
+      // разборы своего пункта не имеют. Имена всех пяти начинаются с pair,
+      // String() страхует от undefined на несуществующем адресе
+      active: String(name).startsWith('pair'),
     },
     {
       key: 'profile',

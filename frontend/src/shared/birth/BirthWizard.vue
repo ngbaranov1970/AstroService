@@ -29,6 +29,11 @@ const props = defineProps({
   // у пары будут свои
   submitLabel: { type: String, default: 'Готово' },
   busyLabel: { type: String, default: 'Считаем карту…' },
+  // Тексты шага имени. Мастер их только передаёт вниз: про карту и про
+  // сторону пары обещания разные (у пары имя уходит в разбор), а знает,
+  // что именно вводят, только вызывающий экран
+  nameTitle: { type: String, default: undefined },
+  nameHint: { type: String, default: undefined },
   // Можно ли уйти с первого шага. У человека без единой карты уходить
   // некуда — guard роутера вернёт его сюда же
   canCancel: { type: Boolean, default: false },
@@ -123,7 +128,9 @@ function back() {
         v-model:unknown="form.timeUnknown"
       />
       <PlaceStep v-else-if="step === 3" v-model="form.place" />
-      <NameStep v-else v-model="form.personName" />
+      <!-- :title и :hint передаём всегда; undefined проп для Vue означает
+           «не передан», и шаг берёт свои значения по умолчанию -->
+      <NameStep v-else v-model="form.personName" :title="nameTitle" :hint="nameHint" />
     </div>
 
     <!-- Отказ сервера: показываем над кнопкой, введённое не стираем -->
