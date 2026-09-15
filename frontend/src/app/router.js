@@ -59,6 +59,16 @@ const routes = [
     name: 'pair-create',
     component: () => import('@/features/pair/PairCreateView.vue'),
   },
+  // Приглашение партнёра. Флага два, и смыслы у них разные: public — «экран
+  // открыт без карты» (читает guard ниже), guest — «экран работает без
+  // сессии» (читает гейт в App.vue). Этому экрану нужны оба: человека,
+  // который его открыл, у нас нет ни в картах, ни в пользователях
+  {
+    path: '/invite/:token',
+    name: 'invite',
+    component: () => import('@/features/pair/InviteView.vue'),
+    meta: { public: true, guest: true },
+  },
   {
     path: '/pair/:token',
     name: 'pair',

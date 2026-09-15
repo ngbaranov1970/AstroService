@@ -9,6 +9,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
+import { platform } from '@/app/platform'
 import GroupCard from '@/features/community/GroupCard.vue'
 import { ERROR_CODE, REPORT_STATUS } from '@/shared/api/endpoints'
 import { usePolling } from '@/shared/composables/usePolling'
@@ -55,6 +56,24 @@ const PAID_AFTER = Object.freeze({
 const isFree = computed(() => PAID_AFTER[type.value] !== undefined)
 const fullReport = computed(() =>
   isFree.value ? api.value.report(token.value, PAID_AFTER[type.value]) : null,
+)
+
+// Мостик к платному: фраза перед плиткой, объясняющая, чего в прочитанном
+// тексте нет. В промпте её держать нельзя — текст кешируется один на пару, а
+// площадка в ключ кеша не входит, и фраза поехала бы и в VK (на этом уже
+// обожглись с free_natal_v3; docs/compatibility-plan.md, «Промпты»).
+// Числа сверены с кодом: тизер получает 6 контактов (pair_free.TOP_ASPECTS),
+// платный — 12 (synastry.TOP_LIMIT)
+const BRIDGE = Object.freeze({
+  pair_free:
+    'Выше — шесть самых сильных контактов ваших карт. В полном разборе их вдвое больше, ' +
+    'и каждый разобран отдельно.',
+})
+
+// Показываем только в браузере: в VK и Telegram оплата запрещена, и фраза
+// про «полный разбор» там обещала бы то, чего на площадке нет
+const bridgeText = computed(() =>
+  platform.name === 'web' ? (BRIDGE[type.value] ?? null) : null,
 )
 
 // Куда ведёт «Назад»: с платного — к бесплатному, откуда на него и перешли,
@@ -192,6 +211,10 @@ watch(
            текст и знает, за чем идёт дальше. Плитка сама решает, вести ли
            наружу (заперт) или внутрь (уже открыт) -->
       <div v-if="isFree && fullReport" class="mt-10">
+        <!-- Мостик стоит над плиткой, а не внутри неё: плитка одна на карту и
+             пару и показывается ещё на главной, где читать человеку нечего -->
+        <p v-if="bridgeText" class="mb-4 font-read text-read text-ink-muted">{{ bridgeText }}</p>
+
         <FullReportTile :token="token" :report="fullReport" :scope="scope" />
       </div>
 
