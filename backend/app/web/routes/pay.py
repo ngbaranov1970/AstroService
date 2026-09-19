@@ -338,6 +338,19 @@ class _Target:
         return f"/{kind}/{self.token}"
 
     @property
+    def report_path(self) -> str:
+        """Адрес экрана купленного разбора во фронте.
+
+        У пары он вложен в её экран (`/pair/<token>/report/<type>`), у карты
+        лежит в корне. Путь карты с токеном пары фронт принимает молча и идёт
+        за разборами в ручку карт — та отвечает 404, и экран пишет «не удалось
+        открыть разбор» (frontend/src/app/router.js).
+        """
+        if self.pair is not None:
+            return f"/pair/{self.token}/report/{self.rtype.value}"
+        return f"/report/{self.token}/{self.rtype.value}"
+
+    @property
     def address(self) -> dict[str, int]:
         """Адрес покупки для orders: ровно одно из chart_id и pair_id.
 
@@ -473,7 +486,7 @@ def _vk_return_url(target: _Target) -> str | None:
     app_id = get_settings().vk_app_id
     if app_id is None:
         return None
-    return f"https://vk.com/app{app_id}#/report/{target.token}/{target.rtype.value}"
+    return f"https://vk.com/app{app_id}#{target.report_path}"
 
 
 def _page_context(
