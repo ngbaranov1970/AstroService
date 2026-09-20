@@ -11,12 +11,11 @@ import FullReportTile from '@/features/report/FullReportTile.vue'
 import { REPORT_STATUS } from '@/shared/api/endpoints'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useReports } from '@/shared/composables/useReports'
-import DashedCard from '@/shared/ui/DashedCard.vue'
 
 import AddChartCard from './AddChartCard.vue'
 import AstroBadges from './AstroBadges.vue'
 import ChartSwitcher from './ChartSwitcher.vue'
-import { buildHomeTiles, HOME_NOTE } from './homeTiles'
+import { buildHomeTiles } from './homeTiles'
 import ReportTile from './ReportTile.vue'
 
 // current — карта, выбранная в переключателе (по умолчанию самая свежая)
@@ -151,7 +150,5 @@ watch(
         <ReportTile v-for="tile in soon.narrow" :key="tile.key" :tile="tile" />
       </div>
     </section>
-
-    <DashedCard>{{ HOME_NOTE }}</DashedCard>
   </div>
 </template>
