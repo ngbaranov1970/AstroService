@@ -229,8 +229,9 @@ export const REPORT_TYPES = {
 
 ## Раздел «Совместимость» (сделано)
 
-Состояние работ, схема БД и решения по бэкенду — в
-[compatibility-plan.md](compatibility-plan.md); здесь только фронт.
+Схема БД — в [db-schema.md](db-schema.md), решения по доступу, инвайту и
+оплате — в [astro-context.md](astro-context.md), промпты — в
+[astro-prompts-v2.md](astro-prompts-v2.md), раздел 8; здесь только фронт.
 
 **Шесть экранов, четыре из них уже были.** Своих ровно два — список пар
 (`PairsView`) и сборка (`PairCreateView`); плюс экран пары (`PairView`) и

@@ -7,7 +7,7 @@ compute_synastry (умеет только «два натала → словар
 
 Стороны не симметричны и не нормализуются: A — инициатор, B — партнёр.
 Почему так и почему пара живёт с пустой стороной B — см. docstring модели
-app/models/pair.py и docs/compatibility-plan.md.
+app/models/pair.py, docs/db-schema.md и docs/astro-context.md.
 """
 
 from __future__ import annotations
