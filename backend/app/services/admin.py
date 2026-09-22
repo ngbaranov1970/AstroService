@@ -306,9 +306,9 @@ _FUNNELS: tuple[_FunnelSpec, ...] = (
             _Step("Ввёл данные рождения", events.CHART_CREATED),
             _Step("Попросил разбор", events.REPORT_REQUESTED, _of(ReportType.FREE_NATAL)),
             _Step("Получил текст", events.REPORT_READY, _of(ReportType.FREE_NATAL)),
-            # Эта ступень пока всегда ноль: group_offer_shown не пишет никто,
-            # хотя блок в приложении есть (см. docs/progress.md).
-            _Step("Увидел блок сообщества", events.GROUP_OFFER_SHOWN),
+            # Показа блока сообщества между этими ступенями нет намеренно: он
+            # безусловный на главной, и такая ступень повторяла бы вход
+            # (причина целиком — у константы GROUP_OFFER_SHOWN).
             _Step("Разрешил писать", events.GROUP_MESSAGES_ALLOWED),
         ),
     ),
