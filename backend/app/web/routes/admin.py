@@ -11,7 +11,7 @@ app/services/admin.py и app/services/content.py, здесь только раз
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from typing import Annotated
 
 from fastapi import (
@@ -35,6 +35,7 @@ from app.services import broadcast, card, content, events, reports
 from app.services import users as users_service
 from app.web.deps import require_admin
 from app.web.templating import templates
+from astro_core import transits
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,24 @@ CONTENT_TITLES: dict[content.Channel, str] = {
     content.Channel.MAIL: "Гороскопы в рассылку",
 }
 
+# Период воронки по умолчанию, дней включая сегодня. Неделя, потому что
+# рекламная кампания живёт восемь дней, а когорта последних суток всегда
+# недосчитана: пришедший вчера ещё может заплатить завтра.
+FUNNEL_DAYS = 7
+
+# Что показываем за период, а не по когорте. Приглашения попали сюда
+# вынужденно: у pair_invite_opened нет user_id (экран анонимный), и в
+# когорту это событие не встаёт ни при каком запросе.
+FUNNEL_EXTRA: dict[str, str] = {
+    events.PAIR_INVITE_CREATED: "Выдано приглашений",
+    events.PAIR_INVITE_OPENED: "Открыли ссылку",
+    events.PAIR_PARTNER_JOINED: "Партнёр ввёл данные",
+    events.REPORT_FAILED: "Аварий генерации",
+    events.REPORT_DENIED: "Отказов по правилам",
+    events.BROADCAST_SENT: "Писем рассылки доставлено",
+    events.BROADCAST_FAILED: "Писем не доставлено",
+}
+
 
 @router.get("")
 async def index(request: Request, session: SessionDep) -> Response:
@@ -89,6 +108,54 @@ async def index(request: Request, session: SessionDep) -> Response:
             "versions": await admin_service.list_versions(session),
             "charts_count": await admin_service.count_charts(session),
             "limit": LIST_LIMIT,
+        },
+    )
+
+
+@router.get("/funnel")
+async def funnel(
+    request: Request,
+    session: SessionDep,
+    since: Annotated[str | None, Query()] = None,
+    until: Annotated[str | None, Query()] = None,
+    testers: Annotated[str | None, Query()] = None,
+) -> Response:
+    """Воронки по когорте пришедших за период плюс счётчики за него же.
+
+    Даты в адресе — московские и включительные обе: человек, открывающий
+    экран, мыслит днями кампании, а не полуинтервалами. Пустое и мусорное
+    молча даёт последние FUNNEL_DAYS дней, как и на других экранах админки.
+    """
+    last = _parse_day(until)
+    first = _parse_day(since) if since else last - timedelta(days=FUNNEL_DAYS - 1)
+    if first > last:
+        # Даты перепутаны местами — показываем период, а не пустой экран:
+        # пустая воронка выглядит как «никто не пришёл», а это неправда.
+        first, last = last, first
+
+    # Сервис ждёт полуинтервал [since, until), поэтому верхняя граница — это
+    # полночь СЛЕДУЮЩИХ суток: иначе последний день периода выпал бы целиком.
+    start = datetime.combine(first, time.min, tzinfo=transits.MSK)
+    end = datetime.combine(last + timedelta(days=1), time.min, tzinfo=transits.MSK)
+
+    include_testers = testers == "on"
+    funnels = await admin_service.build_funnels(
+        session, since=start, until=end, include_testers=include_testers
+    )
+    counts = await admin_service.count_events(
+        session, since=start, until=end, names=list(FUNNEL_EXTRA)
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "admin_funnel.html",
+        {
+            "funnels": funnels,
+            "extra": [(title, counts.get(name, 0)) for name, title in FUNNEL_EXTRA.items()],
+            # Строками: они же уходят обратно в поля формы как есть.
+            "since": first.isoformat(),
+            "until": last.isoformat(),
+            "include_testers": include_testers,
         },
     )
 

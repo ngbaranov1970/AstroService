@@ -1,20 +1,25 @@
-"""Выборки для админки стенда: что сгенерировано и как это оценили.
+"""Выборки для админки: что сгенерировано, как это оценили и где отваливаются.
 
 Отдельный модуль, а не функции в charts.py/reports.py, по границе назначения:
-там продуктовые вызовы, которые позже дёрнут бот и Mini App, здесь —
-инструмент для двух человек, который вместе со стендом и умрёт. Смешивать
-их значит тащить админские джойны в бота.
+там продуктовые вызовы, которые дёргают Mini App и сайт, здесь — инструмент
+для двух человек. Смешивать их значит тащить админские джойны в продукт.
 
-Единица работы — ОТЧЁТ, а не карта: у одной карты уже два текста
-(free_natal + full_natal), а после бампа VERSION в промпте появится третий,
-и сравнивать надо именно тексты. Персональные данные (имя, дата, город)
-здесь есть — страница закрыта HTTP Basic, см. app/web/deps.require_admin.
+Единиц работы две, и они не сводятся друг к другу. Для текстов это ОТЧЁТ, а
+не карта: у одной карты уже два текста (free_natal + full_natal), а после
+бампа VERSION появится третий, и сравнивать надо именно тексты. Для воронки
+это ЧЕЛОВЕК: один завёл три карты — это по-прежнему один дошедший, и счёт
+строк завысил бы шаг.
+
+Персональные данные (имя, дата, город) здесь есть — страница закрыта
+HTTP Basic, см. app/web/deps.require_admin.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import BigInteger, Float, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -235,3 +240,262 @@ async def list_versions(session: AsyncSession) -> list[VersionRow]:
 async def count_charts(session: AsyncSession) -> int:
     """Сколько карт посчитано всего — для шапки страницы."""
     return await session.scalar(select(func.count()).select_from(Chart)) or 0
+
+
+# --- Воронка ---------------------------------------------------------------
+# Считается КОГОРТОЙ: человек попадает в отчёт по дате своего первого
+# app_opened, а шаги его засчитываются любой давности. Иначе в «заплатил» за
+# неделю рекламы попали бы августовские покупатели и конверсия задралась бы
+# вверх. Обратная сторона: когорта последних дней всегда недосчитана —
+# пришедший вчера ещё может заплатить завтра.
+
+
+def _kind(props: dict[str, Any]) -> str | None:
+    """Вид разбора из props. Ключ у разных событий разный.
+
+    report_* кладут его в `type` (api/routes/reports.py), order_* — в
+    `report_type` (services/orders.py). Свести к одному ключу нельзя:
+    строки в базе уже написаны, и переименование обнулило бы историю.
+    """
+    return props.get("type") or props.get("report_type")
+
+
+def _of(report_type: ReportType) -> Callable[[dict[str, Any]], bool]:
+    """Условие «событие про этот вид разбора»."""
+    return lambda props: _kind(props) == report_type.value
+
+
+def _pair(props: dict[str, Any]) -> bool:
+    """Событие про пару. У натальных pair_id либо нет, либо он None."""
+    return props.get("pair_id") is not None
+
+
+def _natal(props: dict[str, Any]) -> bool:
+    return props.get("pair_id") is None
+
+
+@dataclass(frozen=True, slots=True)
+class _Step:
+    """Ступень: заголовок, имя события и условие на его props."""
+
+    title: str
+    name: str
+    # Условие — функция, а не кусок SQL. Натальный пейволл отличается от
+    # парного только ключом внутри props, и в SQL каждая такая ступень стала
+    # бы отдельным подзапросом: пятнадцать подзапросов никто потом не правит.
+    match: Callable[[dict[str, Any]], bool] = field(default=lambda props: True)
+
+
+@dataclass(frozen=True, slots=True)
+class _FunnelSpec:
+    """Воронка целиком. surface=None — «обе площадки»."""
+
+    title: str
+    surface: str | None
+    steps: tuple[_Step, ...]
+
+
+_FUNNELS: tuple[_FunnelSpec, ...] = (
+    _FunnelSpec(
+        title="VK Mini App",
+        surface="vk",
+        # Кончается не деньгами: внутри Mini App продавать нельзя, и всё, что
+        # приложение может добыть, — право написать человеку ещё раз.
+        steps=(
+            _Step("Запустил приложение", events.APP_OPENED),
+            _Step("Ввёл данные рождения", events.CHART_CREATED),
+            _Step("Попросил разбор", events.REPORT_REQUESTED, _of(ReportType.FREE_NATAL)),
+            _Step("Получил текст", events.REPORT_READY, _of(ReportType.FREE_NATAL)),
+            # Эта ступень пока всегда ноль: group_offer_shown не пишет никто,
+            # хотя блок в приложении есть (см. docs/progress.md).
+            _Step("Увидел блок сообщества", events.GROUP_OFFER_SHOWN),
+            _Step("Разрешил писать", events.GROUP_MESSAGES_ALLOWED),
+        ),
+    ),
+    _FunnelSpec(
+        title="Сайт (вход через VK ID)",
+        surface="web",
+        steps=(
+            _Step("Пришёл из браузера", events.APP_OPENED),
+            _Step("Ввёл данные рождения", events.CHART_CREATED),
+            _Step("Получил бесплатный разбор", events.REPORT_READY, _of(ReportType.FREE_NATAL)),
+            _Step("Увидел цену", events.PAYWALL_SHOWN, _natal),
+            _Step("Нажал «купить»", events.ORDER_CREATED, _of(ReportType.FULL_NATAL)),
+            _Step("Ушёл на оплату", events.PAYMENT_STARTED, _of(ReportType.FULL_NATAL)),
+            _Step("Заплатил", events.ORDER_PAID, _of(ReportType.FULL_NATAL)),
+        ),
+    ),
+    _FunnelSpec(
+        title="Совместимость",
+        # Обе площадки: пару собирают и в VK, и на сайте, а платят только на
+        # сайте — разрыв между «увидел цену» и «нажал купить» здесь штатный.
+        surface=None,
+        steps=(
+            _Step("Собрал пару", events.PAIR_CREATED),
+            _Step("Увидел цену пары", events.PAYWALL_SHOWN, _pair),
+            _Step("Нажал «купить»", events.ORDER_CREATED, _of(ReportType.PAIR_FULL)),
+            _Step("Заплатил", events.ORDER_PAID, _of(ReportType.PAIR_FULL)),
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FunnelStep:
+    """Одна строка таблицы воронки: сколько людей дошло и какой ценой."""
+
+    title: str
+    users: int
+    # None — «делить не на что»: предыдущая ступень пуста. Отличать от 0.0
+    # обязательно, иначе непишущееся событие выглядит нулевой конверсией
+    # следующего за ним шага, а не собственным пробелом в данных.
+    of_first: float | None
+    of_prev: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class Funnel:
+    title: str
+    steps: list[FunnelStep]
+
+
+def _surface(platform: str | None) -> str:
+    """Площадка первого захода: "web" или "vk".
+
+    Сравнение с "web" точное. Это наша метка из web/routes/vkid.py, а VK в
+    launch params присылает mobile_android, mobile_iphone, mobile_web и
+    desktop_web — проверка «содержит web» утащила бы половину VK в веб.
+    По users.platform разделить нельзя вовсе: VK ID отдаёт тот же vk_user_id,
+    и обе площадки лежат в базе как platform='vk'.
+    """
+    return "web" if platform == "web" else "vk"
+
+
+def _pct(part: int, whole: int) -> float | None:
+    """Доля в процентах. Пустой знаменатель даёт None — «делить не на что»."""
+    return round(100 * part / whole, 1) if whole else None
+
+
+def _assemble(
+    spec: _FunnelSpec,
+    surface_of: dict[int, str],
+    hits: list[tuple[str, int, dict[str, Any]]],
+) -> Funnel:
+    """Собрать одну воронку из готовой когорты и её событий."""
+    members = {
+        user_id
+        for user_id, surface in surface_of.items()
+        if spec.surface is None or surface == spec.surface
+    }
+
+    steps: list[FunnelStep] = []
+    first = previous = 0
+    for step in spec.steps:
+        reached = len(
+            {
+                user_id
+                for name, user_id, props in hits
+                if name == step.name and user_id in members and step.match(props)
+            }
+        )
+        if not steps:
+            first = reached
+        steps.append(
+            FunnelStep(
+                title=step.title,
+                users=reached,
+                of_first=_pct(reached, first),
+                of_prev=_pct(reached, previous) if steps else 100.0,
+            )
+        )
+        previous = reached
+
+    return Funnel(title=spec.title, steps=steps)
+
+
+async def build_funnels(
+    session: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime,
+    include_testers: bool = False,
+) -> list[Funnel]:
+    """Три воронки (VK, сайт, пара) по когорте пришедших за период.
+
+    Когорта — те, чей ПЕРВЫЙ app_opened попал в [since, until); шаги
+    засчитываются без ограничения по дате, иначе открывший 21-го и
+    заплативший 25-го потерялся бы. Считаются люди, а не события.
+
+    Тестеры по умолчанию исключены: они ходят по продукту постоянно и в
+    когорте рекламы искажают верх воронки.
+    """
+    # DISTINCT ON — постгресовый способ взять первую строку группы целиком.
+    # MIN(ts) дал бы только время, а нужна площадка именно первого захода:
+    # она лежит в props того же события.
+    first_open = (
+        select(
+            Event.user_id.label("user_id"),
+            Event.ts.label("first_ts"),
+            Event.props["platform"].astext.label("platform"),
+        )
+        .where(Event.name == events.APP_OPENED, Event.user_id.is_not(None))
+        .order_by(Event.user_id, Event.ts)
+        .distinct(Event.user_id)
+        .subquery()
+    )
+
+    cohort_stmt = (
+        select(first_open.c.user_id, first_open.c.platform)
+        .select_from(first_open)
+        .join(User, User.id == first_open.c.user_id)
+        .where(first_open.c.first_ts >= since, first_open.c.first_ts < until)
+    )
+    if not include_testers:
+        cohort_stmt = cohort_stmt.where(User.is_tester.is_(False))
+
+    surface_of = {
+        row.user_id: _surface(row.platform)
+        for row in await session.execute(cohort_stmt)
+    }
+    if not surface_of:
+        # in_([]) отработал бы корректно, но это лишний поход в базу за
+        # заведомо пустым ответом.
+        return [_assemble(spec, {}, []) for spec in _FUNNELS]
+
+    # Все события когорты одним запросом, раскладка по ступеням — в Python.
+    # При когорте в сотни человек это тысячи строк и полтора десятка проходов
+    # по ним. Переписывать в агрегат стоит, когда событий станут десятки
+    # тысяч; до тех пор читаемость дороже.
+    names = {step.name for spec in _FUNNELS for step in spec.steps}
+    hits = [
+        (row.name, row.user_id, row.props)
+        for row in await session.execute(
+            select(Event.name, Event.user_id, Event.props).where(
+                Event.user_id.in_(list(surface_of)), Event.name.in_(names)
+            )
+        )
+    ]
+
+    return [_assemble(spec, surface_of, hits) for spec in _FUNNELS]
+
+
+async def count_events(
+    session: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime,
+    names: list[str],
+) -> dict[str, int]:
+    """Сколько раз случилось каждое из названных событий за период.
+
+    Счёт СОБЫТИЙ и без когорты — для того, что воронкой не меряется:
+    доходимость ссылок-приглашений (у pair_invite_opened user_id всегда NULL,
+    экран анонимный), аварии и отказы генерации, охват рассылки. Имена, по
+    которым ничего не нашлось, в ответе отсутствуют.
+    """
+    stmt = (
+        select(Event.name, func.count())
+        .where(Event.ts >= since, Event.ts < until, Event.name.in_(names))
+        .group_by(Event.name)
+    )
+    return {name: count for name, count in await session.execute(stmt)}

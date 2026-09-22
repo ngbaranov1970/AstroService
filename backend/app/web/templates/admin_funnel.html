@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Воронка{% endblock %}
+
+{# Экран воронки: три таблицы «сколько людей дошло до ступени» по когорте
+   пришедших за период, плюс счётчики за тот же период. Данные готовит
+   services/admin.build_funnels, период разбирает web/routes/admin.funnel. #}
+
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  <h1>Воронка</h1>
+  <p class="lead">
+    Когорта: те, кто впервые открыл приложение с {{ since }} по {{ until }}
+    включительно. Их шаги засчитываются любой давности.
+    {# Голый путь, без url(): в админку ходят по Basic-паролю. #}
+    · <a href="/admin">разборы</a>
+    · <a href="/admin/broadcast">отправка рассылки</a>
+  </p>
+
+  {# --- Период и тестеры ---------------------------------------------------
+     GET, а не POST: экран читающий, и ссылкой на период удобно делиться. #}
+
+  <div class="card run">
+    <form method="get" action="/admin/funnel" class="toolbar">
+      <label>с <input type="date" name="since" value="{{ since }}"></label>
+      <label>по <input type="date" name="until" value="{{ until }}"></label>
+      <label>
+        <input type="checkbox" name="testers" value="on"
+               {% if include_testers %}checked{% endif %}>
+        показывать тестеров
+      </label>
+      <button type="submit">Показать</button>
+    </form>
+    <p class="muted">
+      Тестеры по умолчанию скрыты: они ходят по продукту постоянно и верх
+      воронки от них раздувается.
+    </p>
+  </div>
+
+  {# --- Сами воронки -------------------------------------------------------
+     Три таблицы, а не одна: у площадок разные концы. В VK продавать нельзя,
+     и там воронка кончается разрешением писать. #}
+
+  {% for funnel in funnels %}
+    <h2>{{ funnel.title }}</h2>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Ступень</th>
+            <th class="num">Людей</th>
+            <th class="num">От входа</th>
+            <th class="num">От предыдущей</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for step in funnel.steps %}
+            <tr>
+              <td>
+                {{ step.title }}
+                {# Полоса шириной в долю от входа: столбик цифр без неё
+                   читается вдвое дольше. Inline-стилем, чтобы не тащить
+                   правило в style.css, общий с лендингом и админкой. #}
+                <span style="display:block; height:4px; margin-top:4px;
+                             background:#c9a227;
+                             width:{{ step.of_first or 0 }}%"></span>
+              </td>
+              <td class="num">{{ step.users }}</td>
+              <td class="num">
+                {# is none, а не проверка на ложность: 0% и «делить не на
+                   что» — разные вещи, и нулевая ступень не должна
+                   выглядеть посчитанной. #}
+                {% if step.of_first is none %}—{% else %}{{ step.of_first }}%{% endif %}
+              </td>
+              <td class="num">
+                {% if loop.first or step.of_prev is none %}
+                  —
+                {% else %}
+                  {{ step.of_prev }}%
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endfor %}
+
+  {# --- Счётчики за период -------------------------------------------------
+     Здесь считаются события, а не люди: приглашения открывают анонимно, и
+     привязать их к когорте нечем. #}
+
+  <h2>За период</h2>
+  <div class="table-wrap">
+    <table class="grid">
+      <tbody>
+        {% for title, count in extra %}
+          <tr>
+            <td>{{ title }}</td>
+            <td class="num">{{ count }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="muted">
+    Чего на этом экране нет и не будет: прироста подписчиков сообщества.
+    В базе живут только те, кто дошёл до приложения или разрешил писать, —
+    подписки видны в кабинете VK, и сравнивать их с «запустил приложение»
+    приходится руками.
+  </p>
+  <p class="muted">
+    Ступень «Увидел блок сообщества» пока всегда ноль: событие
+    group_offer_shown не пишет никто, хотя сам блок в приложении есть.
+    Пока так, у следующей за ней ступени нет знаменателя, и её доля
+    показана прочерком.
+  </p>
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Считаются люди, а не события: три карты одного
+  человека — это один дошедший.
+{% endblock %}
