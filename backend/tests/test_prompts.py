@@ -10,9 +10,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
-from app.llm.prompts import free_natal, pair_free, pair_full
+import pytest
+
+from app.llm.prompts import free_natal, full_natal, pair_free, pair_full
 from app.models import PairKind
 from app.web.templating import md
 
@@ -26,6 +29,13 @@ _GOLDEN_PAIR = (
 
 def _pair_calc() -> dict:
     return json.loads(_GOLDEN_PAIR.read_text(encoding="utf-8"))
+
+
+_GOLDEN_NATAL = Path(__file__).parent / "golden" / "1990-05-11_kasimov.json"
+
+
+def _natal() -> dict:
+    return json.loads(_GOLDEN_NATAL.read_text(encoding="utf-8"))
 
 
 # Ответ в том виде, в каком его отдаёт DeepSeek по формату из SYSTEM.
@@ -78,6 +88,41 @@ def test_parse_bez_zagolovkov_otdayot_none() -> None:
     # None — «формат не соблюдён»: вызывающий покажет текст как есть и
     # напишет WARNING. Одна секция вместо None соврала бы, что всё в порядке.
     assert free_natal.parse("Сплошной текст без единого заголовка.") is None
+
+
+# --- Натальные build_user: неизвестное время -------------------------------
+
+_ANGLE = re.compile(r"Асцендент|Середина неба")
+_HOUSE = re.compile(r"\d+ дом")
+
+
+def _data_lines(message: str) -> list[str]:
+    # Строки данных начинаются с «- »; служебная строка про время упоминает
+    # «Асцендент» словом и в проверку не входит.
+    return [line for line in message.splitlines() if line.startswith("- ")]
+
+
+@pytest.mark.parametrize("module", [free_natal, full_natal])
+def test_natal_bez_vremeni_net_uglov_i_domov(module) -> None:
+    # Дома и углы в calc лежат всегда, посчитанные от подставленного 12:00:
+    # уйди они в модель — разбор уверенно опишет выдуманный асцендент.
+    lines = _data_lines(module.build_user(_natal(), "Коля", time_known=False))
+
+    assert not [line for line in lines if _ANGLE.search(line)]
+    assert not [line for line in lines if _HOUSE.search(line)]
+
+
+@pytest.mark.parametrize("module", [free_natal, full_natal])
+def test_natal_so_vremenem_ugly_i_doma_est(module) -> None:
+    # Страховка от холостого прохода теста выше: в эталоне углы, дома и
+    # аспекты к углам есть, и со временем они до модели доходят.
+    natal = _natal()
+    assert any(_ANGLE.search(a["p1_ru"] + a["p2_ru"]) for a in natal["aspects"])
+
+    lines = _data_lines(module.build_user(natal, "Коля"))
+
+    assert any(line.startswith("- Асцендент —") for line in lines)
+    assert any(_HOUSE.search(line) for line in lines)
 
 
 # --- pair_free: тизер совместимости ---------------------------------------

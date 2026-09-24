@@ -732,14 +732,19 @@ async def _user_message(
     """Собрать сообщение промпту: натальное по карте, парное по паре.
 
     Контракт парного промпта отличается от натального (build_user(natal,
-    name)) и объявлен здесь: build_user(calc, kind=..., name_a=..., name_b=...).
+    name, time_known=...)) и объявлен здесь: build_user(calc, kind=...,
+    name_a=..., name_b=...).
     Имена сторон в промпт идут намеренно — читают текст двое, и без них
     он звучит как «первый и второй человек»; в логи имена не попадают.
     """
     if pair is None:
         # Имя берём из карты — «чья это карта» заполняется в форме; аргумент
         # name перекрывает его, когда имя приходит от платформы (профиль VK).
-        return module.build_user(chart.calc["natal"], name or chart.person_name)
+        # time_known берём из колонки: в calc дома и углы лежат всегда, даже
+        # посчитанные от подставленного 12:00.
+        return module.build_user(
+            chart.calc["natal"], name or chart.person_name, time_known=chart.time_known
+        )
 
     # Карту партнёра тянем через session.get, а не pair.chart_b: связи
     # объявлены lazy="raise_on_sql" и из async-кода бросают исключение.

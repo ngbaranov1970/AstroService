@@ -223,10 +223,10 @@ def _house_line(h: dict) -> str:
     return f"{line} ({word} {where})"
 
 
-def _planet_line(p: dict) -> str:
+def _planet_line(p: dict, with_house: bool = True) -> str:
     """«Солнце — Телец 20°41', 8 дом» (+ пометка ретроградности)."""
     parts = [f"{p['name_ru']} — {p['sign_ru']} {_dm(p['deg_in_sign'])}"]
-    if p.get("house"):
+    if with_house and p.get("house"):
         parts.append(f"{p['house']} дом")
     if p.get("retrograde"):
         parts.append("ретроградный")
@@ -238,30 +238,49 @@ def _planet_line(p: dict) -> str:
 # что вернул расчёт, но без совсем широких орбов, размывающих привязку.
 _MAX_ASPECTS = 20
 
+# Углы в списке аспектов compute_natal: без времени их аспекты посчитаны от
+# подставленного полудня и так же выдуманы, как дома.
+_ANGLES_RU = {"Асцендент", "Середина неба"}
 
-def build_user(natal: dict, name: str | None = None) -> str:
+# Строка вместо углов и домов при неизвестном времени. Форма «time_known =
+# false» — та, на которую уже ссылается SYSTEM; секция money по SYSTEM
+# начинается с управителя второго дома, поэтому ей нужна замена опоры.
+_NO_TIME_NOTE = (
+    "time_known = false: время рождения неизвестно, асцендента, MC и домов "
+    "в этой карте нет. Не упоминай их и не оговаривай отсутствие времени. "
+    "Секцию money строй на Венере, Юпитере и Сатурне: их знаках и аспектах."
+)
+
+
+def build_user(natal: dict, name: str | None = None, *, time_known: bool = True) -> str:
     """Собирает user-сообщение из результата compute_natal.
 
-    В отличие от free_natal.build_user включает дома целиком: платному
-    разбору есть где разместить конкретику по всем 12 домам, а не только
-    по трём точкам (Солнце/Луна/Асцендент).
+    В отличие от free_natal.build_user включает дома целиком. При
+    time_known=False домов, углов и аспектов к углам в сообщении нет вовсе:
+    compute_natal считает их от подставленного 12:00, и они выдуманы.
     """
     lines: list[str] = []
     if name:
         lines.append(f"Имя: {name}")
 
     lines.append("Планеты:")
-    lines += [f"- {_planet_line(p)}" for p in natal["planets"]]
+    lines += [f"- {_planet_line(p, with_house=time_known)}" for p in natal["planets"]]
 
-    angles = natal["angles"]
-    lines.append("Углы:")
-    lines.append(f"- Асцендент — {angles['asc']['sign_ru']} {_dm(angles['asc']['deg_in_sign'])}")
-    lines.append(f"- Середина неба — {angles['mc']['sign_ru']} {_dm(angles['mc']['deg_in_sign'])}")
+    if time_known:
+        angles = natal["angles"]
+        lines.append("Углы:")
+        lines.append(f"- Асцендент — {angles['asc']['sign_ru']} {_dm(angles['asc']['deg_in_sign'])}")
+        lines.append(f"- Середина неба — {angles['mc']['sign_ru']} {_dm(angles['mc']['deg_in_sign'])}")
 
-    lines.append("Дома (куспиды, Placidus) и их управители:")
-    lines += [_house_line(h) for h in natal["houses"]]
+        lines.append("Дома (куспиды, Placidus) и их управители:")
+        lines += [_house_line(h) for h in natal["houses"]]
+    else:
+        lines.append(_NO_TIME_NOTE)
 
-    aspects = sorted(natal["aspects"], key=lambda a: abs(a["orb"]))[:_MAX_ASPECTS]
+    aspects = natal["aspects"]
+    if not time_known:
+        aspects = [a for a in aspects if not {a["p1_ru"], a["p2_ru"]} & _ANGLES_RU]
+    aspects = sorted(aspects, key=lambda a: abs(a["orb"]))[:_MAX_ASPECTS]
     if aspects:
         lines.append("Аспекты (по тесноте орба):")
         lines += [

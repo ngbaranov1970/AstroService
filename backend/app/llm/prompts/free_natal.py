@@ -72,10 +72,10 @@ def _dm(deg: float) -> str:
     return f"{d}°{m:02d}'"
 
 
-def _planet_line(p: dict) -> str:
+def _planet_line(p: dict, with_house: bool = True) -> str:
     """«Солнце — Телец 20°41', 8 дом» (+ пометка ретроградности)."""
     parts = [f"{p['name_ru']} — {p['sign_ru']} {_dm(p['deg_in_sign'])}"]
-    if p.get("house"):
+    if with_house and p.get("house"):
         parts.append(f"{p['house']} дом")
     if p.get("retrograde"):
         parts.append("ретроградный")
@@ -87,26 +87,46 @@ def _planet_line(p: dict) -> str:
 # бесплатного текста.
 _MAX_ASPECTS = 10
 
+# Углы в списке аспектов compute_natal: без времени их аспекты посчитаны от
+# подставленного полудня и так же выдуманы, как дома.
+_ANGLES_RU = {"Асцендент", "Середина неба"}
 
-def build_user(natal: dict, name: str | None = None) -> str:
+# Строка вместо углов при неизвестном времени. SYSTEM требует раздел
+# «Асцендент» всегда, поэтому отмена раздела названа прямо — править SYSTEM
+# значит бампать VERSION и перегенерировать разборы карт со временем.
+_NO_TIME_NOTE = (
+    "Время рождения неизвестно: асцендента и домов в этой карте нет. "
+    "Раздел «Асцендент» не пиши, дома не упоминай и отсутствие времени "
+    "не оговаривай."
+)
+
+
+def build_user(natal: dict, name: str | None = None, *, time_known: bool = True) -> str:
     """Собирает user-сообщение из результата compute_natal.
 
     name — имя из профиля VK; с ним текст персональнее, без него разбор
-    остаётся валидным (имя может не прийти из VKWebAppGetUserInfo).
+    остаётся валидным. При time_known=False домов, углов и аспектов к углам
+    в сообщении нет: compute_natal считает их от подставленного 12:00.
     """
     lines: list[str] = []
     if name:
         lines.append(f"Имя: {name}")
 
     lines.append("Планеты:")
-    lines += [f"- {_planet_line(p)}" for p in natal["planets"]]
+    lines += [f"- {_planet_line(p, with_house=time_known)}" for p in natal["planets"]]
 
-    angles = natal["angles"]
-    lines.append("Углы:")
-    lines.append(f"- Асцендент — {angles['asc']['sign_ru']} {_dm(angles['asc']['deg_in_sign'])}")
-    lines.append(f"- Середина неба — {angles['mc']['sign_ru']} {_dm(angles['mc']['deg_in_sign'])}")
+    if time_known:
+        angles = natal["angles"]
+        lines.append("Углы:")
+        lines.append(f"- Асцендент — {angles['asc']['sign_ru']} {_dm(angles['asc']['deg_in_sign'])}")
+        lines.append(f"- Середина неба — {angles['mc']['sign_ru']} {_dm(angles['mc']['deg_in_sign'])}")
+    else:
+        lines.append(_NO_TIME_NOTE)
 
-    aspects = sorted(natal["aspects"], key=lambda a: abs(a["orb"]))[:_MAX_ASPECTS]
+    aspects = natal["aspects"]
+    if not time_known:
+        aspects = [a for a in aspects if not {a["p1_ru"], a["p2_ru"]} & _ANGLES_RU]
+    aspects = sorted(aspects, key=lambda a: abs(a["orb"]))[:_MAX_ASPECTS]
     if aspects:
         lines.append("Самые тесные аспекты:")
         lines += [
