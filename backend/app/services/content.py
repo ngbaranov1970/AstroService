@@ -300,6 +300,19 @@ async def find_post(
     return await session.scalar(stmt)
 
 
+async def card_parts(session: AsyncSession, post_id: int) -> tuple[date, str, str] | None:
+    """Что нужно карточке поста в ленту: (дата, «Стоит», «Подождёт»).
+
+    None — поста нет или это не обзор неба: картинка есть только у него.
+    Брак разбора даёт пустые строки, и карточка выходит без концовки.
+    """
+    post = await session.get(Post, post_id)
+    if post is None or post.kind != PostKind.DAILY_SKY:
+        return None
+    parsed = daily_sky.parse(post.text) or {}
+    return post.target_date, parsed.get("do", ""), parsed.get("wait", "")
+
+
 async def list_week(
     session: AsyncSession,
     start: date | None = None,

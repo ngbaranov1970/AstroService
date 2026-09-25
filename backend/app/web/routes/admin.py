@@ -276,14 +276,17 @@ async def _content_response(
     )
 
 
-@router.get("/content/card/{day}.png")
-async def content_card(day: date) -> Response:
+@router.get("/content/card/{post_id}.png")
+async def content_card(post_id: int, session: SessionDep) -> Response:
     """Картинка к посту в ленту: её прикладывают к тексту в отложке VK руками.
 
-    Ключ — дата, а не пост: карточка рисуется по небу суток и от текста не
-    зависит, поэтому в базу за постом ходить незачем.
+    Ключ — пост, а не дата: «Стоит / Подождёт» берутся из его текста, а
+    после смены VERSION у одного дня два поста с разными концовками.
     """
-    return Response(card.render(day), media_type="image/png")
+    parts = await content.card_parts(session, post_id)
+    if parts is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    return Response(card.render(*parts), media_type="image/png")
 
 
 @router.post("/content/generate")

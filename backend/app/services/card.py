@@ -2,22 +2,23 @@
 
 Место в цепочке: astro_core/transits.py считает небо, llm/prompts/daily_sky.py
 называет главное событие суток, этот модуль рисует по ним PNG. Базы здесь
-нет — на входе дата, на выходе байты; кто и зачем просит картинку, решает
-web/routes/admin.py.
+нет — на входе дата и строки «Стоит» / «Подождёт», на выходе байты; достаёт
+их из поста web/routes/admin.py.
 
-Подписи собираются из данных, а не у LLM: карточка обязана совпадать с
-текстом поста, а второй генератор разошёлся бы с ним на первой же правке
-промпта.
+Заголовок собирается из данных, а не у LLM: карточка обязана совпадать с
+зачином поста. Раскладка повторяет макет daily_card.svg.j2 — координаты по
+базовой линии текста, как в SVG.
 """
 
 from __future__ import annotations
 
 import io
-import random
+import re
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from app.llm.prompts.daily_sky import main_event
 from astro_core import transits
@@ -26,14 +27,10 @@ FONTS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
 SIZE = 1080
 
-BG = (23, 17, 14)
-GOLD = (176, 141, 90)
-GOLD_DIM = (120, 96, 61)
-GOLD_LIGHT = (214, 168, 94)
-CREAM = (245, 239, 230)
-# Освещённая часть диска — чуть светлее фона: без заливки полнолуние
-# выглядит пустым контуром.
-LIT_FILL = (29, 22, 18)
+BG = (23, 19, 16)
+FRAME = (138, 114, 72)
+GOLD = (201, 162, 94)
+CREAM = (236, 229, 216)
 
 _WEEKDAYS_RU = (
     "Понедельник", "Вторник", "Среда", "Четверг",
@@ -44,82 +41,86 @@ _MONTHS_RU = (
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
 )
 
-# Прямоугольники, занятые текстом: искорки в них не ставим.
-_BUSY = (
-    (250, 125, 830, 210),
-    (415, 240, 665, 490),
-    (120, 515, 960, 660),
-    (290, 655, 790, 730),
-    (320, 885, 760, 965),
+# Раскладка из макета: заголовок, тело, отступы блоков, нижняя граница текста.
+TITLE_Y, TITLE_MAX_W = 282, 820
+LABEL_X, TEXT_X, TEXT_MAX_W = 130, 320, 610
+BLOCK_GAP = 50
+CONTENT_LIMIT = 872
+
+# Звёзды фона — фиксированные, как в макете: (x, y, радиус, вид).
+_STARS = (
+    (96, 112, 1.6, "dot"), (178, 78, 7, "spark"), (318, 104, 1.2, "dot"),
+    (748, 86, 1.4, "dot"), (902, 118, 8, "spark"), (986, 214, 1.3, "dot"),
+    (82, 402, 1.2, "dot"), (1000, 520, 6, "spark"), (74, 690, 6, "spark"),
+    (1002, 812, 1.4, "dot"), (152, 996, 1.3, "dot"), (872, 1000, 7, "spark"),
 )
 
+# Фигуры рисуем в 4× и уменьшаем: Pillow не сглаживает многоугольники и
+# эллипсы, и ромб с полумесяцем выходят зубчатыми.
+_SS = 4
 
-def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONTS_DIR / name), size)
+
+@lru_cache
+def _font(name: str, size: int, weight: int) -> ImageFont.FreeTypeFont:
+    """Переменный шрифт с выставленной насыщенностью (font-weight из макета)."""
+    f = ImageFont.truetype(str(FONTS_DIR / name), size)
+    f.set_variation_by_axes([weight])
+    return f
 
 
 # --- текст ----------------------------------------------------------------
 
 
-def _advances(draw: ImageDraw.ImageDraw, s: str, f, tracking: int) -> list[float]:
-    """Шаг после каждого символа строки, набранной вразрядку.
+def _wrap(text: str, f: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    """Перенос по словам в пределах max_width пикселей.
 
-    Запятую подтягиваем к слову: отодвинутая на общий шаг, она читается
-    апострофом («Суббота' 5 сентября»).
+    Тире и слова в одну-две буквы (предлоги, союзы) привязаны неразрывным
+    пробелом к соседу: «в» в конце строки и тире в начале читаются как брак.
     """
-    steps = []
-    for i, ch in enumerate(s):
-        step = draw.textlength(ch, font=f)
-        nxt = s[i + 1] if i + 1 < len(s) else ""
-        if nxt in ",.!?":
-            step -= tracking / 4
-        elif nxt:
-            step += tracking
-        steps.append(step)
-    return steps
+    text = re.sub(r" ([—–])", "\u00a0\\1", text)
+    text = re.sub(r"(?<!\w)(\w{1,2}) ", "\\1\u00a0", text)
+    lines, cur = [], ""
+    for word in text.split(" "):
+        candidate = f"{cur} {word}".strip()
+        if not cur or f.getlength(candidate) <= max_width:
+            cur = candidate
+        else:
+            lines.append(cur)
+            cur = word
+    lines.append(cur)
+    return lines
 
 
-def _tracked_width(draw: ImageDraw.ImageDraw, s: str, f, tracking: int) -> int:
-    return int(sum(_advances(draw, s, f, tracking)))
+def _balanced(text: str, f: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    """Тот же перенос, но строки одной длины: без короткого хвоста в одно слово.
 
-
-def _draw_tracked(
-    draw: ImageDraw.ImageDraw, xy, s: str, f, fill, tracking: int, centered: bool = True
-) -> None:
-    """Строка вразрядку. Печатаем посимвольно: letter-spacing у Pillow нет."""
-    x, y = xy
-    if centered:
-        x -= _tracked_width(draw, s, f, tracking) / 2
-    for ch, step in zip(s, _advances(draw, s, f, tracking)):
-        draw.text((x, y), ch, font=f, fill=fill, anchor="lt")
-        x += step
-
-
-def _fit_title(draw: ImageDraw.ImageDraw, s: str, max_width: int):
-    """Заголовок и подобранный к нему кегль: (строки, шрифт).
-
-    Сначала пробуем уместить в одну строку, уменьшая кегль с 84 до 44, и
-    только потом переносим по словам: «Луна уходит в Рак» должно остаться
-    одной крупной строкой.
+    Сужаем ширину, пока число строк не вырастет, — последняя удачная ширина
+    делит текст ровнее всего.
     """
-    sizes = range(84, 43, -2)
-    for size in sizes:
-        f = _font("PTSerif-Regular.ttf", size)
-        if draw.textlength(s, font=f) <= max_width:
-            return [s], f
+    count = len(_wrap(text, f, max_width))
+    width = max_width
+    while width > 200 and len(_wrap(text, f, width - 10)) == count:
+        width -= 10
+    return _wrap(text, f, width)
 
-    # Ломаем там, где половины выходят ближе всего по длине.
-    words = s.split()
-    split = min(
-        range(1, len(words)),
-        key=lambda i: abs(len(" ".join(words[:i])) - len(" ".join(words[i:]))),
-    )
-    lines = [" ".join(words[:split]), " ".join(words[split:])]
-    for size in sizes:
-        f = _font("PTSerif-Regular.ttf", size)
-        if max(draw.textlength(ln, font=f) for ln in lines) <= max_width:
-            return lines, f
-    return lines, _font("PTSerif-Regular.ttf", 44)
+
+def _fit_title(s: str) -> tuple[list[str], ImageFont.FreeTypeFont, int]:
+    """Заголовок в 1–2 строки: (строки, шрифт, межстрочное расстояние).
+
+    Кегль 84 по макету; не влезает в две строки — уменьшаем, третья строка
+    сдвинула бы блок «Стоит / Подождёт» за подвал.
+    """
+    for size in range(84, 55, -4):
+        f = _font("Cormorant.ttf", size, 500)
+        lines = _balanced(s, f, TITLE_MAX_W)
+        if len(lines) <= 2:
+            break
+    return lines, f, round(size * 88 / 84)
+
+
+def _capitalize(s: str) -> str:
+    # Модель пишет do/wait со строчной — в тексте они идут после «Стоит:».
+    return s[:1].upper() + s[1:]
 
 
 def headline(event: dict | None, moon: dict) -> str:
@@ -144,167 +145,142 @@ def headline(event: dict | None, moon: dict) -> str:
 
 
 def subtitle(moon: dict, event: dict | None) -> str:
-    """Подпись под заголовком: фаза с процентом, а под лунацией — её время.
-
-    В новолуние и полнолуние фазу уже назвал заголовок, и повтор («Новолуние
-    в Деве» / «новолуние») выглядел бы ошибкой.
-    """
-    phase = moon["phase_ru"]
-    if phase not in ("новолуние", "полнолуние"):
-        return f"{phase}, {moon['illumination']}%"
+    """Золотая строка под заголовком: время события, а без события — фаза Луны."""
     if event is None:
-        return phase
-    return f"точное в {event['moment']:%H:%M}"
+        return f"{moon['phase_ru']}, {moon['illumination']}%"
+    return f"в {event['moment']:%H:%M} по Москве"
 
 
-# --- Луна -----------------------------------------------------------------
+# --- рисование ------------------------------------------------------------
 
 
-def _semiaxis(radius: int, illumination: int) -> int:
-    """Полуось терминатора: R*|1-2k| по освещённой доле k."""
-    return round(radius * abs(1 - 2 * illumination / 100))
-
-
-def _moon_masks(radius: int, illumination: int, growing: bool) -> tuple[Image.Image, Image.Image]:
-    """Маски освещённой и тёмной части диска.
-
-    Терминатор — полуэллипс с полуосью R*|1-2k| по освещённой доле k: до
-    половины он выгнут в сторону света (серп), после — от него (горб).
-    Растущая Луна освещена справа, убывающая слева (северное полушарие).
-    """
-    d = radius * 2
-    k = illumination / 100
-
-    circle = Image.new("L", (d, d), 0)
-    ImageDraw.Draw(circle).ellipse((0, 0, d - 1, d - 1), fill=255)
-
-    half = Image.new("L", (d, d), 0)
-    lit_side = (radius, 0, d - 1, d - 1) if growing else (0, 0, radius - 1, d - 1)
-    ImageDraw.Draw(half).rectangle(lit_side, fill=255)
-    lit_half = ImageChops.multiply(circle, half)
-
-    a = _semiaxis(radius, illumination)
-    ell = Image.new("L", (d, d), 0)
-    if a > 0:
-        ImageDraw.Draw(ell).ellipse((radius - a, 0, radius + a - 1, d - 1), fill=255)
-    ell = ImageChops.multiply(ell, circle)
-
-    if k <= 0.5:
-        lit = ImageChops.subtract(lit_half, ell)
-    else:
-        dark_half = ImageChops.subtract(circle, lit_half)
-        lit = ImageChops.add(lit_half, ImageChops.multiply(ell, dark_half))
-    return lit, ImageChops.subtract(circle, lit)
-
-
-def _draw_moon(img: Image.Image, center: tuple[int, int], radius: int, moon: dict) -> None:
-    """Диск Луны: контур, штриховка тени, дуга терминатора."""
-    d = radius * 2
-    left, top = center[0] - radius, center[1] - radius
-    lit, dark = _moon_masks(radius, moon["illumination"], moon["growing"])
-
-    img.paste(Image.new("RGB", (d, d), LIT_FILL), (left, top), lit)
-
-    # Штрихуем весь квадрат и обрезаем маской тени — рисовать линии по форме
-    # серпа пришлось бы считая пересечения с эллипсом.
-    hatch = Image.new("RGB", (d, d), GOLD_DIM)
-    hatch_mask = Image.new("L", (d, d), 0)
-    hm = ImageDraw.Draw(hatch_mask)
-    for x in range(0, d, 7):
-        hm.line((x, 0, x, d), fill=255, width=1)
-    img.paste(hatch, (left, top), ImageChops.multiply(hatch_mask, dark))
-
-    draw = ImageDraw.Draw(img)
-    draw.ellipse((left, top, left + d - 1, top + d - 1), outline=GOLD, width=2)
-
-    # У эллипса-терминатора рисуем одну половину: граница света и тени одна,
-    # вторая дуга превратила бы её в «линзу» посреди диска.
-    a = _semiaxis(radius, moon["illumination"])
-    if a > 1:
-        term = Image.new("RGBA", (d, d), (0, 0, 0, 0))
-        ImageDraw.Draw(term).ellipse(
-            (radius - a, 1, radius + a - 1, d - 2), outline=GOLD + (255,), width=2
-        )
-        side = Image.new("L", (d, d), 0)
-        keep_right = moon["growing"] == (moon["illumination"] <= 50)
-        box = (radius, 0, d - 1, d - 1) if keep_right else (0, 0, radius - 1, d - 1)
-        ImageDraw.Draw(side).rectangle(box, fill=255)
-        img.paste(term, (left, top), ImageChops.multiply(term.getchannel("A"), side))
-
-
-def _draw_sparks(img: Image.Image, day: date) -> None:
-    """Крестики по фону.
-
-    Раскладываем по сетке со случайным сдвигом в ячейке: чистый random
-    сбивает искорки в кучу и оставляет половину карточки пустой. Зерно —
-    номер дня, чтобы перерисовка давала ту же картинку, а не новую россыпь.
-    """
-    rnd = random.Random(day.toordinal())
-    draw = ImageDraw.Draw(img, "RGBA")
-    cells = 7
-    step = (SIZE - 160) // cells
-    for row in range(cells):
-        for col in range(cells):
-            if rnd.random() > 0.8:
-                continue
-            x = 80 + col * step + rnd.randint(8, step - 8)
-            y = 80 + row * step + rnd.randint(8, step - 8)
-            if any(x0 < x < x1 and y0 < y < y1 for x0, y0, x1, y1 in _BUSY):
-                continue
-            size = rnd.choice((3, 4, 6, 8))
-            color = GOLD + (rnd.randint(70, 160),)
-            if size <= 4:
-                draw.ellipse((x, y, x + 2, y + 2), fill=color)
-            else:
-                draw.line((x - size, y, x + size, y), fill=color, width=1)
-                draw.line((x, y - size, x, y + size), fill=color, width=1)
-
-
-# --- сборка ---------------------------------------------------------------
-
-
-def build(day: date, moon: dict, event: dict | None) -> Image.Image:
-    """Карточка целиком. moon и event — из day_sky() и main_event()."""
-    img = Image.new("RGB", (SIZE, SIZE), BG)
-    _draw_sparks(img, day)
-    draw = ImageDraw.Draw(img)
-
-    draw.rectangle((44, 44, SIZE - 45, SIZE - 45), outline=GOLD_DIM, width=2)
-
-    date_line = f"{_WEEKDAYS_RU[day.weekday()]}, {day.day} {_MONTHS_RU[day.month - 1]}"
-    _draw_tracked(draw, (SIZE // 2, 152), date_line, _font("PTSerif-Bold.ttf", 30), GOLD, 9)
-
-    _draw_moon(img, (SIZE // 2, 362), 100, moon)
-
-    lines, title_font = _fit_title(draw, headline(event, moon), SIZE - 260)
-    y = 552 if len(lines) == 1 else 512
-    for line in lines:
-        draw.text((SIZE // 2, y), line, font=title_font, fill=CREAM, anchor="mt")
-        y += int(title_font.size * 1.18)
-
-    draw.text(
-        (SIZE // 2, y + 14), subtitle(moon, event),
-        font=_font("PTSerif-Italic.ttf", 42), fill=GOLD_LIGHT, anchor="mt",
+def _star(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, fill) -> None:
+    """Четырёхлучевая искра: ромб с вдавленными к центру сторонами."""
+    k = r * 0.18
+    draw.polygon(
+        [(x, y - r), (x + k, y - k), (x + r, y), (x + k, y + k),
+         (x, y + r), (x - k, y + k), (x - r, y), (x - k, y - k)],
+        fill=fill,
     )
 
-    # Подвал: полумесяц вырезаем двумя кругами — цветные эмодзи Pillow не рисует.
-    logo = _font("PTSerif-Bold.ttf", 26)
-    label = "ЗВЕЗДОЧЁТ"
-    x0 = (SIZE - (62 + _tracked_width(draw, label, logo, 11))) // 2
-    crescent = Image.new("RGBA", (34, 34), (0, 0, 0, 0))
-    cd = ImageDraw.Draw(crescent)
-    cd.ellipse((2, 2, 31, 31), fill=GOLD + (255,))
-    cd.ellipse((-6, 2, 23, 31), fill=(0, 0, 0, 0))
-    img.paste(crescent, (x0, 906), crescent)
-    _draw_tracked(draw, (x0 + 62, 912), label, logo, GOLD, 11, centered=False)
+
+def _ornament(divider_y: int | None) -> Image.Image:
+    """Слой фигур без текста: рамка, звёзды, разделитель, полумесяц подвала."""
+    s = _SS
+    layer = Image.new("RGBA", (SIZE * s, SIZE * s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    draw.rectangle((44 * s, 44 * s, 1035 * s, 1035 * s), outline=FRAME, width=round(1.5 * s))
+
+    for x, y, r, kind in _STARS:
+        if kind == "spark":
+            _star(draw, x * s, y * s, r * s, GOLD + (140,))
+        else:
+            draw.ellipse(((x - r) * s, (y - r) * s, (x + r) * s, (y + r) * s), fill=GOLD + (128,))
+
+    # Разделитель: две линии и ромб между ними. None — под ним нечего отделять.
+    if divider_y is not None:
+        y = divider_y * s
+        for x0, x1 in ((430, 522), (558, 650)):
+            draw.line((x0 * s, y, x1 * s, y), fill=FRAME, width=round(1.5 * s))
+        draw.polygon(
+            [(540 * s, y - 8 * s), (546 * s, y), (540 * s, y + 8 * s), (534 * s, y)], fill=GOLD
+        )
+
+    # Полумесяц — два круга, второй цветом фона: цветные эмодзи Pillow не рисует.
+    draw.ellipse(((434 - 14) * s, (942 - 14) * s, (434 + 14) * s, (942 + 14) * s), fill=GOLD)
+    draw.ellipse(((441 - 12) * s, (937 - 12) * s, (441 + 12) * s, (937 + 12) * s), fill=BG)
+
+    return layer.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+
+
+def _draw_tracked(draw: ImageDraw.ImageDraw, x: float, y: int, s: str, f, fill, tracking: int) -> None:
+    """Строка вразрядку от x по базовой линии: letter-spacing у Pillow нет."""
+    for ch in s:
+        draw.text((x, y), ch, font=f, fill=fill, anchor="ls")
+        x += draw.textlength(ch, font=f) + tracking
+
+
+def _tracked_width(draw: ImageDraw.ImageDraw, s: str, f, tracking: int) -> float:
+    return sum(draw.textlength(ch, font=f) for ch in s) + tracking * (len(s) - 1)
+
+
+def _layout_body(
+    blocks: list[tuple[str, str]], top: int
+) -> tuple[list, ImageFont.FreeTypeFont, int, int]:
+    """Раскладка «Стоит / Подождёт»: ([(подпись, y, строки)], шрифт, шаг строк, низ текста).
+
+    Кегль 34 по макету; не влезает над подвалом (y 872) — уменьшаем до 26,
+    иначе текст наедет на подпись сообщества.
+    """
+    for size in range(34, 25, -2):
+        f = _font("Jost.ttf", size, 400)
+        line_h = round(size * 46 / 34)
+        y, placed = top, []
+        for label, text in blocks:
+            lines = _balanced(_capitalize(text), f, TEXT_MAX_W)
+            placed.append((label, y, lines))
+            y += line_h * len(lines) + BLOCK_GAP
+        bottom = y - BLOCK_GAP - line_h if placed else top
+        if bottom <= CONTENT_LIMIT:
+            break
+    return placed, f, line_h, bottom
+
+
+def build(day: date, moon: dict, event: dict | None, do: str = "", wait: str = "") -> Image.Image:
+    """Карточка целиком. moon и event — из day_sky() и main_event().
+
+    Пустые do и wait не печатаются: у брака разбора их нет, а подписи без
+    текста выглядели бы ошибкой вёрстки.
+    """
+    title_lines, title_font, title_lh = _fit_title(headline(event, moon))
+    title_last = TITLE_Y + title_lh * (len(title_lines) - 1)
+    time_y = title_last + 56
+    divider_y = time_y + 50
+
+    blocks = [(label, text) for label, text in (("Стоит", do), ("Подождёт", wait)) if text]
+    placed, body_font, line_h, bottom = _layout_body(blocks, divider_y + 72)
+
+    # Короткий текст оставляет низ пустым — сдвигаем всю композицию к центру.
+    shift = max(0, (CONTENT_LIMIT - bottom) // 2)
+
+    img = Image.new("RGB", (SIZE, SIZE), BG)
+    ornament = _ornament(divider_y + shift if placed else None)
+    img.paste(ornament, (0, 0), ornament)
+    draw = ImageDraw.Draw(img)
+
+    date_line = f"{_WEEKDAYS_RU[day.weekday()]}, {day.day} {_MONTHS_RU[day.month - 1]}"
+    draw.text((540, 172 + shift), date_line, font=_font("Cormorant-Italic.ttf", 38, 500),
+              fill=GOLD, anchor="ms")
+
+    for i, line in enumerate(title_lines):
+        draw.text((540, TITLE_Y + title_lh * i + shift), line, font=title_font,
+                  fill=CREAM, anchor="ms")
+
+    draw.text((540, time_y + shift), subtitle(moon, event), font=_font("Jost.ttf", 30, 400),
+              fill=GOLD, anchor="ms")
+
+    label_font = _font("Cormorant-Italic.ttf", 42, 500)
+    for label, y, lines in placed:
+        draw.text((LABEL_X, y + shift), label, font=label_font, fill=GOLD, anchor="ls")
+        for i, line in enumerate(lines):
+            draw.text((TEXT_X, y + line_h * i + shift), line, font=body_font,
+                      fill=CREAM, anchor="ls")
+
+    # Подвал стоит на месте при любом сдвиге: он привязан к рамке, а не к тексту.
+    _draw_tracked(draw, 460, 952, "ЗВЕЗДОЧЁТ", _font("Jost.ttf", 26, 400), GOLD, 7)
+    url_font = _font("Jost.ttf", 20, 400)
+    url = "vk.ru/astrozvezdochet"
+    _draw_tracked(draw, 540 - _tracked_width(draw, url, url_font, 1) / 2, 990, url,
+                  url_font, FRAME, 1)
 
     return img
 
 
-def render(day: date) -> bytes:
+def render(day: date, do: str = "", wait: str = "") -> bytes:
     """PNG карточки этого дня. Небо считает сама — 20 мс, кеш не нужен."""
     sky = transits.day_sky(day)
-    img = build(day, sky["moon"], main_event(sky))
+    img = build(day, sky["moon"], main_event(sky), do, wait)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
