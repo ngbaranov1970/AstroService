@@ -1,7 +1,7 @@
 """Вызовы VK API от имени сообщества: messages.send и groups.isMember.
 
 Место в слоях: services/рассылка и страница разбора → ЭТОТ ФАЙЛ →
-api.vk.com. Ни базы, ни наших пользователей здесь нет: на вход идут
+api.vk.ru. Ни базы, ни наших пользователей здесь нет: на вход идут
 числовые идентификаторы VK, на выход — что ответил VK по каждому из них.
 
 ОТКАЗ КОНКРЕТНОМУ ЧЕЛОВЕКУ — ЭТО ДАННЫЕ, А НЕ ИСКЛЮЧЕНИЕ
@@ -32,7 +32,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.vk.com/method/"
+BASE_URL = "https://api.vk.ru/method/"
 
 # Версия API фиксирована намеренно: VK меняет форму ответов между версиями
 # (в 5.103 поля message_new переехали в object.message), и «последняя» —
