@@ -20,18 +20,15 @@
      страницу, а глазом активную видно по начертанию. Пути голые, как в
      admin.html: в админку ходят по Basic-паролю, токен сессии ей не нужен. #}
   <p class="muted">
-    <a href="/admin">← Разборы</a> ·
-    {% if channel == "feed" %}
-      <strong>Посты в ленту</strong>
-    {% else %}
-      <a href="/admin/content">Посты в ленту</a>
-    {% endif %}
-    ·
-    {% if channel == "mail" %}
-      <strong>Гороскопы в рассылку</strong>
-    {% else %}
-      <a href="/admin/content/mail">Гороскопы в рассылку</a>
-    {% endif %}
+    <a href="/admin">← Разборы</a>
+    {% for value, path, label in tabs %}
+      ·
+      {% if channel == value %}
+        <strong>{{ label }}</strong>
+      {% else %}
+        <a href="{{ path }}">{{ label }}</a>
+      {% endif %}
+    {% endfor %}
   </p>
 
   <h1>{{ title }}</h1>
@@ -49,7 +46,7 @@
       {# POST, а не ссылка: запуск тратит деньги, а ссылку браузер может
          дёрнуть сам — предзагрузкой или из истории. #}
       <form method="post" action="/admin/content/generate">
-        {# Прогон один на оба канала; поле говорит только, куда вернуть
+        {# Прогон один на все каналы; поле говорит только, куда вернуть
            человека после 303 — иначе с рассылки он попадал бы в ленту. #}
         <input type="hidden" name="channel" value="{{ channel }}">
         <button type="submit" {% if run and run.running %}disabled{% endif %}>
@@ -66,10 +63,10 @@
         <span class="error" role="alert">{{ run.error }}</span>
       {% elif run %}
         <span class="muted">
-          {# Счёт прогона общий на оба канала, а в списке ниже — только эта
+          {# Счёт прогона общий на все каналы, а в списке ниже — только эта
              половина: без оговорки числа выглядят как расхождение. #}
           Закончен в {{ run.finished_at | msk("%H:%M") }},
-          постов на неделе по обоим каналам: {{ run.posts }}.
+          постов на неделе по всем каналам: {{ run.posts }}.
         </span>
       {% else %}
         <span class="muted">

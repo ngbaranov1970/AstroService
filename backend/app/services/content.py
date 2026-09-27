@@ -55,14 +55,18 @@ class ContentNotSupportedError(RuntimeError):
 
 
 class Channel(str, enum.Enum):
-    """Куда уходит готовый текст: в ленту сообщества или в личную рассылку.
+    """Куда уходит готовый текст — и какая страница вычитки его показывает.
 
     Значение, а не подпись для глаз: по каналу разделены страницы вычитки
-    (/admin/content и /admin/content/mail), а фильтровать по строке «В ленту»
-    нельзя. Подписи живут в шаблоне.
+    (/admin/content, /admin/content/evening, /admin/content/mail), а
+    фильтровать по строке «В ленту» нельзя. Подписи живут в routes/admin.py.
+
+    EVENING — тоже лента, но публикуется вечером и своей очередью: в общей
+    пачке с утренними постами его пропускали.
     """
 
     FEED = "feed"
+    EVENING = "evening"
     MAIL = "mail"
 
 
@@ -71,7 +75,7 @@ class Channel(str, enum.Enum):
 # ленту не публикуется — его разбирает по знакам рассылка.
 _CHANNEL: dict[PostKind, Channel] = {
     PostKind.DAILY_SKY: Channel.FEED,
-    PostKind.SIGN_LINES: Channel.FEED,
+    PostKind.SIGN_LINES: Channel.EVENING,
     PostKind.DAILY_HOROSCOPE: Channel.MAIL,
     PostKind.ASTRO_EVENT: Channel.FEED,
 }

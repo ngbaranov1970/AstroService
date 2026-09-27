@@ -68,13 +68,16 @@ CONTENT_DAYS = 8
 # Страница вычитки на каждый канал: в ленту и в рассылку идут разные тексты,
 # и вперемешку их читать нельзя — в ленту публикуется руками, и лишний пост
 # уедет в сообщество. Адреса нужны и шаблону (вкладки), и редиректу с кнопки.
+# Порядок словаря — порядок вкладок в шаблоне.
 CONTENT_PATHS: dict[content.Channel, str] = {
     content.Channel.FEED: "/admin/content",
+    content.Channel.EVENING: "/admin/content/evening",
     content.Channel.MAIL: "/admin/content/mail",
 }
 
 CONTENT_TITLES: dict[content.Channel, str] = {
     content.Channel.FEED: "Посты в ленту",
+    content.Channel.EVENING: "Гороскоп на завтра",
     content.Channel.MAIL: "Гороскопы в рассылку",
 }
 
@@ -224,6 +227,12 @@ async def content_feed_page(request: Request, session: SessionDep) -> Response:
     return await _content_response(request, session, content.Channel.FEED)
 
 
+@router.get("/content/evening")
+async def content_evening_page(request: Request, session: SessionDep) -> Response:
+    """Неделя вечерних постов «Гороскоп на завтра» — своя очередь публикации."""
+    return await _content_response(request, session, content.Channel.EVENING)
+
+
 @router.get("/content/mail")
 async def content_mail_page(request: Request, session: SessionDep) -> Response:
     """Неделя гороскопов для личной рассылки — вычитка вперёд.
@@ -237,7 +246,7 @@ async def content_mail_page(request: Request, session: SessionDep) -> Response:
 async def _content_response(
     request: Request, session: SessionDep, channel: content.Channel
 ) -> Response:
-    """Одна страница вычитки на оба канала: список постов и кнопка прогона.
+    """Одна страница вычитки на все каналы: список постов и кнопка прогона.
 
     Только читает: прогон длится минут десять и держал бы ответ всё это
     время — тем же порядком, что на странице разбора.
@@ -270,6 +279,9 @@ async def _content_response(
             # вернул кнопку прогона на эту же страницу.
             "channel": channel.value,
             "title": CONTENT_TITLES[channel],
+            "tabs": [
+                (c.value, CONTENT_PATHS[c], CONTENT_TITLES[c]) for c in CONTENT_PATHS
+            ],
             # Пока прогон идёт, страница перечитывает себя сама; как только
             # он кончился — перестаёт, иначе экран сам себе создаёт поток
             # запросов на всю ночь.
@@ -298,7 +310,7 @@ async def content_generate(
 ) -> Response:
     """Кнопка «сгенерировать неделю»: ставит прогон в очередь и уводит обратно.
 
-    Прогон общий на оба канала, поэтому кнопка одна на две страницы, а
+    Прогон общий на все каналы, поэтому кнопка одна на все страницы, а
     `channel` из формы говорит только, куда вернуть человека.
 
     Отказ замка (прогон уже идёт) отдельно не показываем: страница и так
