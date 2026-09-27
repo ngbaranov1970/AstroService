@@ -29,7 +29,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm import client
-from app.llm.prompts import astro_event, daily_horoscope, daily_sky
+from app.llm.prompts import astro_event, daily_horoscope, daily_sky, sign_lines
 from app.models import Post, PostKind
 from astro_core import transits
 
@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # добавить «портрет знака» = написать модуль промпта и дописать строку сюда.
 _PROMPTS: dict[PostKind, ModuleType] = {
     PostKind.DAILY_SKY: daily_sky,
+    PostKind.SIGN_LINES: sign_lines,
     PostKind.DAILY_HOROSCOPE: daily_horoscope,
     PostKind.ASTRO_EVENT: astro_event,
 }
@@ -70,6 +71,7 @@ class Channel(str, enum.Enum):
 # ленту не публикуется — его разбирает по знакам рассылка.
 _CHANNEL: dict[PostKind, Channel] = {
     PostKind.DAILY_SKY: Channel.FEED,
+    PostKind.SIGN_LINES: Channel.FEED,
     PostKind.DAILY_HOROSCOPE: Channel.MAIL,
     PostKind.ASTRO_EVENT: Channel.FEED,
 }
@@ -464,7 +466,8 @@ async def generate_week(
     days: int = 7,
     events: int = EVENTS_PER_RUN,
 ) -> list[Post]:
-    """Готовит пачку постов на неделю: два поста на каждый день плюс события.
+    """Готовит пачку на неделю: обзор неба и гороскоп рассылки на каждый день,
+    вечерний гороскоп на каждый следующий день, плюс посты о событиях.
 
     Возвращает всё, что стоит на этих датах, включая написанное прошлым
     запуском. Дневной потолок DAILY_GENERATION_LIMIT сюда не применяется: он
@@ -526,6 +529,25 @@ async def generate_week(
 
         previous_sky = sky
 
+    # Вечерний гороскоп пишется на завтра: ряд сдвинут на день, иначе первый
+    # пост пачки был бы на сегодня (публиковать его надо было вчера), а между
+    # недельными прогонами оставался бы вечер без поста.
+    for offset in range(1, days + 1):
+        day = start + timedelta(days=offset)
+        if await find_post(session, PostKind.SIGN_LINES, day) is not None:
+            logger.debug("Пост sign_lines на %s уже есть — в LLM не идём", day)
+            continue
+        try:
+            await _generate(
+                session,
+                kind=PostKind.SIGN_LINES,
+                target_date=day,
+                user_message=sign_lines.build_user(transits.day_sky(day)),
+            )
+        except Exception:
+            await session.rollback()
+            logger.exception("Пост sign_lines на %s не сгенерировался — иду дальше", day)
+
     for event in pick_events(start, end, events):
         day = event["moment"].date()
         key = event_key(event)
@@ -547,4 +569,5 @@ async def generate_week(
                 event["title_ru"], day,
             )
 
-    return await list_week(session, start, days=days)
+    # На день больше: вечерний пост последнего вечера адресован start+days.
+    return await list_week(session, start, days=days + 1)

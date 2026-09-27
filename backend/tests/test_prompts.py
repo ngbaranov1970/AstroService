@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.prompts import free_natal, full_natal, pair_free, pair_full
+from app.llm.prompts import free_natal, full_natal, pair_free, pair_full, promo, sign_lines
 from app.models import PairKind
 from app.web.templating import md
 
@@ -258,3 +258,60 @@ def test_md_ekraniruet_chuzhie_tegi() -> None:
     # Главное свойство фильтра: он добавляет одну конструкцию, но не
     # отменяет автоэкранирование Jinja, которое без него делало бы это само.
     assert md("<b>чужой</b>") == "&lt;b&gt;чужой&lt;/b&gt;"
+
+
+# --- sign_lines -----------------------------------------------------------
+
+
+def _sign_lines_answer(signs) -> str:
+    return json.dumps({s: f"фраза про {s}." for s in signs}, ensure_ascii=False)
+
+
+def test_sign_lines_parse_raskladyvaet_po_zodiaku() -> None:
+    # Порядок ключей в JSON модель не соблюдает, а забор ставит вопреки запрету.
+    text = "```json\n" + _sign_lines_answer(reversed(sign_lines.SIGN_ORDER)) + "\n```"
+
+    parsed = sign_lines.parse(text)
+
+    assert parsed is not None
+    assert list(parsed) == list(sign_lines.SIGN_ORDER)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _sign_lines_answer(sign_lines.SIGN_ORDER[:11]),
+        _sign_lines_answer([*sign_lines.SIGN_ORDER, "Змееносец"]),
+        '["Овен"]',
+        "не JSON",
+    ],
+)
+def test_sign_lines_parse_brak_otdayot_none(text: str) -> None:
+    assert sign_lines.parse(text) is None
+
+
+def test_sign_lines_render_po_obrazcu() -> None:
+    lines = sign_lines.render(_sign_lines_answer(sign_lines.SIGN_ORDER)).split("\n")
+
+    assert lines[0] == sign_lines.TITLE
+    assert lines[1] == "♈ Овен — фраза про Овен."
+    assert lines[12] == "♓ Рыбы — фраза про Рыбы."
+    assert lines[13].startswith(promo.MAIL_INVITE)
+    assert lines[14] == promo.COMMENT_QUESTION
+    assert len(lines) == 15
+
+
+def test_sign_lines_render_brak_otdayot_kak_est() -> None:
+    assert sign_lines.render("не JSON") == "не JSON"
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("Рутина успокаивает", "рутина успокаивает."),
+        ("Луна в твоём знаке.", "Луна в твоём знаке."),
+        ("Марсу тесно?", "Марсу тесно?"),
+    ],
+)
+def test_sign_lines_tidy_strochnaya_i_tochka(line: str, expected: str) -> None:
+    assert sign_lines._tidy(line) == expected

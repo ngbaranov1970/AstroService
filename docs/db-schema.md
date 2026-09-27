@@ -113,7 +113,7 @@ erDiagram
 
     posts {
         bigint   id PK
-        enum     kind          "daily_horoscope / astro_event / заготовки"
+        enum     kind          "daily_sky / sign_lines / daily_horoscope / astro_event / заготовки"
         date     target_date   "СУТКИ по Москве, не момент"
         varchar  event_key     "UQ: kind + target_date + event_key + prompt_version"
         varchar  prompt_version

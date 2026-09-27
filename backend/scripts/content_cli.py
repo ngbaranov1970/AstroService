@@ -15,6 +15,7 @@
     uv run python scripts/content_cli.py 2026-09-06 --days 3
     uv run python scripts/content_cli.py 2026-09-06 --show-prompt
     uv run python scripts/content_cli.py 2026-09-06 --kind daily_horoscope
+    uv run python scripts/content_cli.py 2026-09-28 --kind sign_lines   # на 28-е
 
 Текст поста идёт в stdout (можно перенаправить в файл), служебная информация —
 версия промпта, модель, токены — в stderr.
@@ -34,13 +35,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.llm import client
-from app.llm.prompts import daily_horoscope, daily_sky
+from app.llm.prompts import daily_horoscope, daily_sky, sign_lines
 from astro_core import transits
 
 # Форматы, у которых вход — сутки целиком. Реестр повторяет _PROMPTS из
 # services/content.py, но своим списком: тот тянет за собой модели и базу,
-# а скрипт обязан работать там, где Postgres не поднят.
-PROMPTS = {"daily_sky": daily_sky, "daily_horoscope": daily_horoscope}
+# а скрипт обязан работать там, где Postgres не поднят. У sign_lines дата —
+# день гороскопа, а не вечер публикации.
+PROMPTS = {
+    "daily_sky": daily_sky,
+    "sign_lines": sign_lines,
+    "daily_horoscope": daily_horoscope,
+}
 
 
 def _user_message(module, day: date) -> str:

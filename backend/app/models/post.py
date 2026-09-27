@@ -38,7 +38,9 @@ class PostKind(str, enum.Enum):
     Значения совпадают с именами модулей в app/llm/prompts/: реестр в
     services/content.py связывает их напрямую, как _PROMPTS в reports.py.
 
-    DAILY_SKY — обзор неба дня одним текстом, единственный пост в ленту.
+    DAILY_SKY — обзор неба дня одним текстом, утренний пост в ленту.
+    SIGN_LINES — гороскоп на завтра строкой на знак, вечерний пост в ленту;
+    target_date — день гороскопа, публикуется накануне вечером.
     DAILY_HOROSCOPE — гороскоп дня на 12 знаков; с 05.09.2026 идёт только
     в рассылку по личным сообщениям, в ленту не публикуется.
     ASTRO_EVENT — пост про одно событие календаря (лунация, затмение, станция).
@@ -47,6 +49,7 @@ class PostKind(str, enum.Enum):
     """
 
     DAILY_SKY = "daily_sky"
+    SIGN_LINES = "sign_lines"
     DAILY_HOROSCOPE = "daily_horoscope"
     ASTRO_EVENT = "astro_event"
     SIGN_PORTRAIT = "sign_portrait"

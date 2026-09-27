@@ -85,9 +85,16 @@
   {% if items %}
     {% for item in items %}
       <section class="post">
+        {# Вечерний гороскоп адресован завтрашнему дню, а публикуется накануне —
+           дата публикации на виду, чтобы в отложку он встал на верный вечер. #}
         <h2>
-          {{ item.post.target_date.strftime("%d.%m") }} ·
-          {{ item.post.title or "Гороскоп дня" }}
+          {% if item.post.kind.value == "sign_lines" %}
+            Гороскоп на {{ item.post.target_date.strftime("%d.%m") }} ·
+            публиковать вечером {{ item.evening_before.strftime("%d.%m") }}
+          {% else %}
+            {{ item.post.target_date.strftime("%d.%m") }} ·
+            {{ item.post.title or "Гороскоп дня" }}
+          {% endif %}
         </h2>
 
         <p class="meta-line muted">
