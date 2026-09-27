@@ -541,12 +541,20 @@ async def generate_week(
         if await find_post(session, PostKind.SIGN_LINES, day) is not None:
             logger.debug("Пост sign_lines на %s уже есть — в LLM не идём", day)
             continue
+        # Фразы двух прошлых дней — чтобы соседние дни не повторяли друг
+        # друга. Дни идут по порядку, поэтому прошлые к этому моменту в базе.
+        recent = []
+        for back in (1, 2):
+            past = await find_post(session, PostKind.SIGN_LINES, day - timedelta(days=back))
+            parsed = sign_lines.parse(past.text) if past else None
+            if parsed:
+                recent.append(parsed)
         try:
             await _generate(
                 session,
                 kind=PostKind.SIGN_LINES,
                 target_date=day,
-                user_message=sign_lines.build_user(transits.day_sky(day)),
+                user_message=sign_lines.build_user(transits.day_sky(day), recent),
             )
         except Exception:
             await session.rollback()

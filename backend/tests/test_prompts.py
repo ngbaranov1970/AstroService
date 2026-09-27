@@ -315,3 +315,29 @@ def test_sign_lines_render_brak_otdayot_kak_est() -> None:
 )
 def test_sign_lines_tidy_strochnaya_i_tochka(line: str, expected: str) -> None:
     assert sign_lines._tidy(line) == expected
+
+
+def test_sign_lines_build_user_menyaet_gran_i_formu_po_dnyam() -> None:
+    # 29 и 30.09.2026 Луна оба дня в Тельце: тема у знаков та же, и без
+    # смены грани и формы модель пересказывала вчерашние фразы.
+    from datetime import date
+
+    from astro_core import transits
+
+    def aries(day: date) -> str:
+        text = sign_lines.build_user(transits.day_sky(day))
+        return next(line for line in text.split("\n") if line.startswith("- Овен"))
+
+    assert aries(date(2026, 9, 29)) != aries(date(2026, 9, 30))
+
+
+def test_sign_lines_build_user_bez_planet_i_s_proshlymi_frazami() -> None:
+    from datetime import date
+
+    from astro_core import transits
+
+    text = sign_lines.build_user(transits.day_sky(date(2026, 9, 28)), [{"Овен": "вчерашняя мысль."}])
+
+    assert "- вчерашняя мысль." in text
+    for name in ("Марс", "Юпитер", "Сатурн", "Меркурий", "Венера"):
+        assert name not in text

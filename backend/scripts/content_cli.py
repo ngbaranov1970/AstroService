@@ -49,16 +49,20 @@ PROMPTS = {
 }
 
 
-def _user_message(module, day: date) -> str:
-    """Данные дня для промпта: небо суток, а для daily_sky ещё и вчерашнее.
+def _user_message(module, day: date, recent_texts: list[str] | None = None) -> str:
+    """Данные дня для промпта: небо суток, для daily_sky ещё и вчерашнее небо,
+    для sign_lines — фразы прошлых дней (ответы модели за этот же прогон).
 
-    Вчера нужно ради блока отличий (см. build_user в daily_sky). Промпту
-    рассылки второй аргумент не нужен, поэтому смотрим на сигнатуру, а не
-    перечисляем форматы: список разъехался бы с промптами.
+    Смотрим на сигнатуру, а не перечисляем форматы: список разъехался бы с
+    промптами. Первый день прогона прошлых фраз не получает — базы здесь нет.
     """
     sky = transits.day_sky(day)
-    if "previous" in signature(module.build_user).parameters:
+    params = signature(module.build_user).parameters
+    if "previous" in params:
         return module.build_user(sky, transits.day_sky(day - timedelta(days=1)))
+    if "recent" in params:
+        parsed = [module.parse(text) for text in recent_texts or []]
+        return module.build_user(sky, [p for p in parsed if p])
     return module.build_user(sky)
 
 
@@ -140,11 +144,12 @@ def main() -> None:
         """Прогоняет дни по очереди, печатая каждый сразу. Возвращает сумму токенов."""
         prompt_tokens = completion_tokens = 0
         try:
+            recent_texts: list[str] = []
             for day in days:
                 print(f"[{day}] иду в DeepSeek…", file=sys.stderr)
                 result = await client.chat(
                     module.SYSTEM,
-                    _user_message(module, day),
+                    _user_message(module, day, recent_texts),
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
@@ -154,6 +159,8 @@ def main() -> None:
                 # иначе унесло бы два уже оплаченных текста.
                 print(f"===== {day} =====")
                 print(render(result.text) if render else result.text)
+                # Два последних ответа, свежий первым — как берёт прод из базы.
+                recent_texts = [result.text, *recent_texts][:2]
                 print()
 
                 u = result.usage
