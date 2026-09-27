@@ -52,4 +52,4 @@ def line(seed: int | None = None) -> str:
     text = random.Random(seed).choice(LINES)
     app_id = get_settings().vk_app_id
     # Адрес без https://: VK сам делает его ссылкой, а в тексте он короче.
-    return f"{text}: vk.com/app{app_id}" if app_id else f"{text}."
+    return f"{text}: vk.ru/app{app_id}" if app_id else f"{text}."

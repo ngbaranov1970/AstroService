@@ -103,7 +103,7 @@ def is_for_sale(report_type: ReportType) -> bool:
 # что их пишет один слой (api/routes/orders.py, фронт), а читает другой
 # (web/routes/pay.py), и разъехавшись, они молча перестанут совпадать.
 BACK_APP = "app"  # веб-фронт на Vue: возвращаем редиректом в /app/
-BACK_VK = "vk"    # Mini App: ссылкой vk.com/app<id>, редирект туда не годится
+BACK_VK = "vk"    # Mini App: ссылкой vk.ru/app<id>, редирект туда не годится
 
 
 def payment_url(token: str, report_type: ReportType) -> str | None:

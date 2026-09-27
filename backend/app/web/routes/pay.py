@@ -486,7 +486,7 @@ def _vk_return_url(target: _Target) -> str | None:
     app_id = get_settings().vk_app_id
     if app_id is None:
         return None
-    return f"https://vk.com/app{app_id}#{target.report_path}"
+    return f"https://vk.ru/app{app_id}#{target.report_path}"
 
 
 def _page_context(
