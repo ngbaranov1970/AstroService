@@ -44,6 +44,11 @@ logger = logging.getLogger(__name__)
 # Задним числом эти две метки не восстановить ничем, VK их больше не пришлёт.
 APP_OPENED = "app_opened"
 
+# Цели плиток меню сообщества — значения props.entry у APP_OPENED. Тот же
+# список, что GOALS во frontend/src/app/entry.js. Прочее пишется как None:
+# метку присылает фронт, и без списка в props поехало бы что угодно.
+ENTRY_GOALS = frozenset({"natal", "pair", "horoscope"})
+
 # Открыл форму ввода данных рождения (стартовая страница стенда).
 FORM_OPENED = "form_opened"
 

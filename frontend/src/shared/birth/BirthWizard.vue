@@ -34,6 +34,10 @@ const props = defineProps({
   // что именно вводят, только вызывающий экран
   nameTitle: { type: String, default: undefined },
   nameHint: { type: String, default: undefined },
+  // Тексты шага даты — так же транзитом. Онбординг подменяет их под цель
+  // входа с плитки меню сообщества (карта, пара, гороскоп)
+  dateTitle: { type: String, default: undefined },
+  dateHint: { type: String, default: undefined },
   // Можно ли уйти с первого шага. У человека без единой карты уходить
   // некуда — guard роутера вернёт его сюда же
   canCancel: { type: Boolean, default: false },
@@ -121,7 +125,7 @@ function back() {
            каждого своя пара v-model, и явные строки читаются лучше.
            v-model="form.birthDate" — двусторонняя связь: шаг пишет значение
            прямо в нашу форму -->
-      <DateStep v-if="step === 1" v-model="form.birthDate" />
+      <DateStep v-if="step === 1" v-model="form.birthDate" :title="dateTitle" :hint="dateHint" />
       <TimeStep
         v-else-if="step === 2"
         v-model="form.birthTime"

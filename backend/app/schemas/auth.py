@@ -20,6 +20,11 @@ class VkLaunchIn(BaseModel):
     """
 
     params: dict[str, str]
+    # Плитка меню сообщества, с которой открыли приложение (natal, pair,
+    # horoscope). Значение не ограничено схемой намеренно: кривая метка
+    # аналитики не должна давать 422 на вход. Белый список — в events.ENTRY_GOALS.
+    # Подписью VK не защищена: это хеш адреса, его может подменить кто угодно
+    entry: str | None = None
 
 
 class UserOut(BaseModel):

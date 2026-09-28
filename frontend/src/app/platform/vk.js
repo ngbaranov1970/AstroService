@@ -4,6 +4,8 @@
 
 import bridge from '@vkontakte/vk-bridge'
 
+import { launchGoal } from '@/app/entry'
+
 // Параметры запуска, снятые при старте: sign и все vk_*. Читаются один раз —
 // внутри приложения адрес меняет роутер, и вернуться к исходному нельзя
 let launchParams = null
@@ -80,8 +82,14 @@ export const vkPlatform = {
       throw new Error('Приложение открыто не из VK — параметров запуска нет')
     }
     // anonymous: true — этому запросу не нужен заголовок с токеном, и его 401
-    // не должен запускать перевыпуск: перевыпуск и есть этот запрос
-    return await http.post('/auth/vk', { params: launchParams }, { anonymous: true })
+    // не должен запускать перевыпуск: перевыпуск и есть этот запрос.
+    // entry — плитка меню сообщества, с которой открыли приложение (или null):
+    // бэкенд пишет её в событие app_opened, чтобы видеть, какая плитка работает
+    return await http.post(
+      '/auth/vk',
+      { params: launchParams, entry: launchGoal },
+      { anonymous: true },
+    )
   },
 
   /** Открыть внешнюю ссылку (оплата) в браузере поверх приложения.

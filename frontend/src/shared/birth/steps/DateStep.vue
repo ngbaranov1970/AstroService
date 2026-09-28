@@ -7,6 +7,13 @@ import { computed, ref, useTemplateRef, watch } from 'vue'
 
 const model = defineModel({ type: String, default: '' })
 
+defineProps({
+  // Тексты над полями. По умолчанию — обычный онбординг; вход с плитки меню
+  // сообщества подменяет их, чтобы человек видел, ради чего вводит дату
+  title: { type: String, default: 'Начнём с даты рождения' },
+  hint: { type: String, default: 'По ней рассчитаем положение планет — до градуса' },
+})
+
 // Два падежа: в списке месяц стоит сам по себе («ноябрь»), в подписи под
 // полями — при числе («14 ноября»)
 const MONTHS_NOM = [
@@ -125,10 +132,8 @@ function onMonthChange() {
 
 <template>
   <div class="w-full text-center">
-    <h1 class="font-display text-display text-ink">Начнём с даты рождения</h1>
-    <p class="mt-3 font-display text-lead text-ink-muted italic">
-      По ней рассчитаем положение планет — до градуса
-    </p>
+    <h1 class="font-display text-display text-ink">{{ title }}</h1>
+    <p class="mt-3 font-display text-lead text-ink-muted italic">{{ hint }}</p>
 
     <!-- Три поля в ряд: день узкий, месяц забирает остаток, год под четыре
          цифры. Каждое завёрнуто в <label>, поэтому нажатие на подпись под

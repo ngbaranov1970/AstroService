@@ -72,6 +72,7 @@ async def login_vk(payload: VkLaunchIn, session: SessionDep) -> SessionOut:
         user_id=user.id,
         ref=payload.params.get(auth.VK_REF_PARAM),
         platform=payload.params.get(auth.VK_PLATFORM_PARAM),
+        entry=payload.entry if payload.entry in events.ENTRY_GOALS else None,
     )
     await session.commit()
 

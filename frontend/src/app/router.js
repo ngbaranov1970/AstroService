@@ -7,6 +7,10 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useSession } from '@/shared/composables/useSession'
 
+// entry.js читает хеш при своей загрузке — то есть здесь, до кода ниже,
+// который этот хеш перепишет
+import { goalRoute, launchGoal, parseGoal } from './entry'
+
 // component: () => import(...) — ленивая загрузка: код экрана уезжает в
 // отдельный файл сборки и качается при первом заходе на адрес, а не сразу.
 // В Python аналога нет — там импорт всегда синхронный
@@ -102,6 +106,20 @@ const routes = [
     name: 'paid',
     component: () => import('@/features/pay/PaidView.vue'),
   },
+  // Экран подписки на гороскоп в личку — цель плитки #horoscope
+  {
+    path: '/horoscope',
+    name: 'horoscope',
+    component: () => import('@/features/community/HoroscopeView.vue'),
+  },
+  // Вход с плитки меню сообщества. Экрана у адреса нет: guard ниже всегда
+  // уводит отсюда — к цели или в онбординг. Компонент указан только потому,
+  // что роутер требует его у роута; ленивый импорт не скачается никогда
+  {
+    path: '/start/:goal',
+    name: 'start',
+    component: () => import('@/features/home/HomeView.vue'),
+  },
   {
     path: '/soon/:feature',
     name: 'soon',
@@ -111,6 +129,22 @@ const routes = [
   // оставлять пустой экран
   { path: '/:rest(.*)', redirect: '/home' },
 ]
+
+// Короткий хеш с плитки ('#natal') переписываем в адрес роута ('#/start/natal').
+// replaceState меняет адрес без перезагрузки и без новой записи в истории.
+// Собираем его из pathname и search текущего адреса: в search лежат vk_* и
+// sign, потеряй их — и вход в VK не пройдёт
+if (launchGoal) {
+  const { pathname, search } = window.location
+  window.history.replaceState(window.history.state, '', `${pathname}${search}#/start/${launchGoal}`)
+}
+
+// Какой цели соответствует обычный адрес. Нужно тому, кто без карты пришёл
+// сразу на /pair/new или /horoscope: после онбординга его вернёт туда же
+const ROUTE_GOAL = Object.freeze({
+  'pair-create': 'pair',
+  horoscope: 'horoscope',
+})
 
 export const router = createRouter({
   // Hash-режим: адрес выглядит как /app/?vk_user_id=…#/home. Параметры
@@ -141,12 +175,26 @@ router.beforeEach(async (to) => {
   // рисует поверх роутера гейт с текстом ошибки и кнопкой «повторить»
   if (status.value !== 'ready') return true
 
-  const { hasCharts, isLoaded, ensureLoaded } = useCharts()
+  const { current, hasCharts, isLoaded, ensureLoaded } = useCharts()
   await ensureLoaded()
+
+  // Цель входа: из адреса плитки (/start/natal) либо по имени обычного роута.
+  // parseGoal пропускает только цели из белого списка — /start/что-угодно
+  // даст null. ?? — взять правое, если левое null или undefined
+  const goal =
+    to.name === 'start' ? parseGoal(to.params.goal) : (ROUTE_GOAL[to.name] ?? null)
+
   // Список не загрузился (обрыв сети) — в онбординг не гоним: предлагать
   // завести карту заново тому, у кого она есть, хуже пустого экрана.
-  // isLoaded отличает «карт нет» от «мы их не видели»
-  if (isLoaded.value && !hasCharts.value) return { name: 'onboarding' }
+  // isLoaded отличает «карт нет» от «мы их не видели».
+  // Цель уезжает в ?next: онбординг после первой карты уведёт к ней, а не на главную
+  if (isLoaded.value && !hasCharts.value) {
+    return goal ? { name: 'onboarding', query: { next: goal } } : { name: 'onboarding' }
+  }
+
+  // С адреса плитки уводим к цели. Неизвестная цель или карты не видно
+  // (обрыв сети) — goalRoute отправит на главную
+  if (to.name === 'start') return goalRoute(goal, current.value?.token ?? null)
 
   return true
 })
