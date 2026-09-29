@@ -4,6 +4,7 @@
 
 import { createRouter, createWebHashHistory } from 'vue-router'
 
+import { platform } from '@/app/platform'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useSession } from '@/shared/composables/useSession'
 
@@ -203,4 +204,23 @@ router.beforeEach(async (to) => {
   if (to.name === 'start') return goalRoute(goal, current.value?.token ?? null)
 
   return true
+})
+
+// Вход с другой плитки, когда приложение уже открыто: страница не
+// перезагружается, и launchGoal остаётся от первой плитки. Новую цель ведём
+// тем же путём через /start. replace — чтобы «назад» не вернул на прошлую плитку
+function goToGoal(raw) {
+  const goal = parseGoal(raw)
+  if (goal) router.replace({ name: 'start', params: { goal } })
+}
+
+// Мобильный клиент VK сообщает новый хеш событием моста
+platform.onLocationChange(goToGoal)
+
+// Десктоп и браузер меняют сам хеш страницы — ловим событие hashchange.
+// Наши собственные адреса начинаются с '#/', их не трогаем: иначе «назад» на
+// #/horoscope каждый раз уводил бы через /start
+window.addEventListener('hashchange', () => {
+  const { hash } = window.location
+  if (!hash.startsWith('#/')) goToGoal(hash)
 })

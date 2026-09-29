@@ -122,6 +122,23 @@ export const vkPlatform = {
     return () => {}
   },
 
+  /** Подписка на смену хеша у уже открытого приложения. Возвращает функцию отписки.
+   *  Переход по ссылке на плитку (#natal), когда приложение уже открыто или
+   *  свёрнуто, клиент VK не перезагружает: он шлёт событие VKWebAppLocationChanged
+   *  с новым хешем. callback получает этот хеш строкой — как есть, без разбора. */
+  onLocationChange(callback) {
+    // Слушатель получает ВСЕ события моста подряд; нужное узнаём по type.
+    // event.detail — полезная нагрузка события: { type, data }
+    const listener = (event) => {
+      const { type, data } = event.detail
+      if (type === 'VKWebAppLocationChanged') callback(data.location)
+    }
+    bridge.subscribe(listener)
+    // Отписаться можно только той же самой функцией, поэтому держим её в
+    // переменной, а наружу отдаём замыкание, которое её снимет
+    return () => bridge.unsubscribe(listener)
+  },
+
   /** Покрасить шапку и статус-бар под наш фон.
    *  Без этого над приложением висит белая полоса — на тёмном макете заметно. */
   async setHeaderColor() {
