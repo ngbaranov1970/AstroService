@@ -38,6 +38,9 @@ const props = defineProps({
   // входа с плитки меню сообщества (карта, пара, гороскоп)
   dateTitle: { type: String, default: undefined },
   dateHint: { type: String, default: undefined },
+  // Дата, которую человек уже вводил ('YYYY-MM-DD'): первый шаг откроется
+  // заполненным. Онбординг передаёт её после экрана гороскопа
+  initialDate: { type: String, default: '' },
   // Можно ли уйти с первого шага. У человека без единой карты уходить
   // некуда — guard роутера вернёт его сюда же
   canCancel: { type: Boolean, default: false },
@@ -53,7 +56,10 @@ const step = ref(1)
 // и пишем form.birthDate без .value. Для одиночных значений берут ref, для
 // формы из нескольких полей — reactive
 const form = reactive({
-  birthDate: '', // 'YYYY-MM-DD' — ровно в таком виде его собирает DateStep
+  // 'YYYY-MM-DD' — ровно в таком виде его собирает DateStep. Проп читаем один
+  // раз, при создании мастера: дальше дата принадлежит форме, и поменяйся
+  // проп посреди ввода, он не должен затирать то, что человек исправил
+  birthDate: props.initialDate,
   birthTime: '', // 'HH:MM'
   timeUnknown: false, // «не помню время» → в API уедет birth_time: null
   place: null, // {label, lat, lon} — выбранная подсказка из GET /places

@@ -15,6 +15,7 @@ import { goalRoute, parseGoal } from '@/app/entry'
 import { createChart } from '@/shared/api/endpoints'
 import BirthWizard from '@/shared/birth/BirthWizard.vue'
 import { useCharts } from '@/shared/composables/useCharts'
+import { useGroup } from '@/shared/composables/useGroup'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,6 +47,12 @@ const intro = computed(() => INTRO[goal.value] ?? {})
 // уйти с онбординга: первого пользователя отпускать некуда, guard роутера
 // вернёт его сюда же
 const { hasCharts, remember } = useCharts()
+const { enteredBirthDate } = useGroup()
+
+// Дата с экрана гороскопа — только для первой карты: она точно своя. С картами
+// сюда приходят из переключателя за картой мужа или подруги, и подставить туда
+// свою дату значило бы молча испортить чужую карту. '' — мастер начнёт с пустой
+const initialDate = computed(() => (hasCharts.value ? '' : (enteredBirthDate.value ?? '')))
 
 const submitting = ref(false)
 const error = ref(null)
@@ -92,6 +99,7 @@ function cancel() {
     :can-cancel="hasCharts"
     :date-title="intro.title"
     :date-hint="intro.hint"
+    :initial-date="initialDate"
     @submit="submit"
     @cancel="cancel"
   />

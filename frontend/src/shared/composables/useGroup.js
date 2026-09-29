@@ -35,6 +35,10 @@ const groupId = ref(null)
 // По нему экран гороскопа решает, спрашивать ли дату. Знак из карты сюда
 // не попадает: у кого карта есть, тому дату не показывают вовсе
 const sunSign = ref(null)
+// Дата, введённая на экране гороскопа ('YYYY-MM-DD'). Живёт только в памяти,
+// до закрытия приложения: на сервере хранится знак, а не дата. Нужна
+// онбордингу — чтобы не спрашивать ту же дату второй раз
+const enteredBirthDate = ref(null)
 
 // Промис идущего запроса: два экрана, открытые подряд, ждут один ответ,
 // а не заводят два (тот же приём single-flight, что в useSession)
@@ -155,6 +159,9 @@ async function enterBirthDate(birthDate) {
     throw new Error('Не получилось узнать знак. Попробуй ещё раз.')
   }
 
+  // Дату запоминаем в обоих исходах: и досчитывать карту, и уходить в
+  // онбординг в день смены знака человек будет с этой же датой
+  enteredBirthDate.value = birthDate
   // В день смены знака сервер ничего не записал — и мы старый знак не трогаем
   if (answer.sign) sunSign.value = answer.sign
   return answer.sign
@@ -182,6 +189,7 @@ export function useGroup() {
     // истории браузера и пускает внутрь, а Bridge там мёртв
     canPrompt: computed(() => platform.supportsGroup()),
     sunSign,
+    enteredBirthDate,
     enterBirthDate,
     ensureLoaded,
     join,
