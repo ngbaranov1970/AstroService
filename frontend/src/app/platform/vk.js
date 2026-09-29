@@ -153,6 +153,16 @@ export const vkPlatform = {
     return bridge.isEmbedded()
   },
 
+  /** Лежат ли поверх верхнего края страницы кнопки клиента (капсула «••• ×»).
+   *  Их рисуют только нативные клиенты: mobile_android, mobile_iphone,
+   *  mobile_ipad и их «_messenger». В mobile_web и desktop_web капсулы нет. */
+  hasHeaderOverlay() {
+    // ?. — если launchParams null (открыто не из VK), дальше не идём и
+    // получаем undefined вместо ошибки; ?? '' превращает его в пустую строку
+    const kind = launchParams?.vk_platform ?? ''
+    return kind.startsWith('mobile_') && kind !== 'mobile_web'
+  },
+
   /** Открыть окно VK «Подписаться на сообщество».
    *  Бросает и при отказе человека, и при молчании клиента: для нас это
    *  одно и то же — подписки не случилось. */

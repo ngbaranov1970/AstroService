@@ -49,6 +49,11 @@ const showNav = computed(() => !route.meta.public)
 // Обычная константа, не computed: платформа за время работы не меняется
 const canLogin = typeof platform.login === 'function'
 
+// Кнопки клиента VK («••• ×») лежат поверх верхнего края страницы и
+// накрывают «← Назад» в шапках экранов. Обычная константа, а не ref:
+// платформа за время работы приложения не меняется
+const headerOverlay = platform.hasHeaderOverlay()
+
 // Гейт закрыт по двум разным причинам, и слова у них разные: anon — войти
 // нечем (это штатно), error — вход сорвался
 const gateTitle = computed(() =>
@@ -95,10 +100,16 @@ async function retry() {
   <!-- Колонка на всю высоту окна, шириной max-w-app и по центру: на широком
        экране контент и нижняя панель совпадают по ширине.
        Нижний отступ увеличен, когда панель видна: она fixed, то есть лежит
-       поверх страницы, и без запаса накрыла бы конец экрана -->
+       поверх страницы, и без запаса накрыла бы конец экрана.
+       Верхний отступ под капсулой VK — 3.5rem (56px, высота шапки VK) плюс
+       env(safe-area-inset-top): системная «чёлка», на Android обычно ноль.
+       :class с массивом — каждый элемент добавляет свой класс -->
   <div
-    class="mx-auto flex min-h-dvh w-full max-w-app flex-col px-5 pt-6"
-    :class="showNav ? 'pb-24' : 'pb-6'"
+    class="mx-auto flex min-h-dvh w-full max-w-app flex-col px-5"
+    :class="[
+      showNav ? 'pb-24' : 'pb-6',
+      headerOverlay ? 'pt-[calc(env(safe-area-inset-top)+3.5rem)]' : 'pt-6',
+    ]"
   >
     <!-- Три состояния гейта. v-if / v-else-if / v-else — обычное ветвление,
          только выбирает не значение, а кусок разметки: невыбранных в странице

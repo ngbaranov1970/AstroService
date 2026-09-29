@@ -121,6 +121,11 @@ export const webPlatform = {
     return false
   },
 
+  /** Поверх страницы в браузере ничего не лежит — обычный отступ сверху. */
+  hasHeaderOverlay() {
+    return false
+  },
+
   async setHeaderColor() {},
 
   async close() {},

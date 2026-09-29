@@ -56,6 +56,11 @@ export const telegramPlatform = {
     return false
   },
 
+  /** Шапку Web App Telegram рисует над страницей, а не поверх неё. */
+  hasHeaderOverlay() {
+    return false
+  },
+
   async setHeaderColor() {
     tg()?.setHeaderColor('#171310')
     tg()?.setBackgroundColor('#171310')
