@@ -6,6 +6,9 @@ import bridge from '@vkontakte/vk-bridge'
 
 import { launchGoal } from '@/app/entry'
 
+// ВРЕМЕННО: диагностика входа с плиток на Android, см. vkDebug.js
+import { startVkDebug } from './vkDebug'
+
 // Параметры запуска, снятые при старте: sign и все vk_*. Читаются один раз —
 // внутри приложения адрес меняет роутер, и вернуться к исходному нельзя
 let launchParams = null
@@ -60,6 +63,7 @@ export const vkPlatform = {
   /** Инициализация клиента VK. Зовётся из main.js ДО монтирования Vue. */
   async init() {
     launchParams = readLaunchParams()
+    startVkDebug(launchParams)
     // VKWebAppInit — сигнал «приложение загрузилось, убирай прелоадер». Без
     // него страница видна, но накрыта крутилкой VK, и тапы уходят сквозь неё.
     // Ответа ждём не дольше STARTUP_TIMEOUT_MS: в мобильном клиенте его может
