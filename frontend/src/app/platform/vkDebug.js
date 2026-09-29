@@ -12,8 +12,11 @@ const MAX_LINES = 14
  *  localStorage — хранилище браузера «ключ → строка», переживает перезапуск. */
 function isEnabled() {
   try {
-    if (window.location.hash === '#debug') localStorage.setItem(FLAG, '1')
-    if (window.location.hash === '#nodebug') localStorage.removeItem(FLAG)
+    // Клиенты VK отдают хеш по-разному ('#debug', '#/debug', '#%2Fdebug') —
+    // снимаем кодировку и все # и / в начале, как parseGoal в entry.js
+    const word = decodeURIComponent(window.location.hash).replace(/^[#/]+/, '')
+    if (word === 'debug') localStorage.setItem(FLAG, '1')
+    if (word === 'nodebug') localStorage.removeItem(FLAG)
     return localStorage.getItem(FLAG) === '1'
   } catch {
     // Хранилище бывает недоступно — тогда просто без диагностики
