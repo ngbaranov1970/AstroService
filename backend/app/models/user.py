@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     String,
@@ -28,6 +29,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from astro_core.natal import SIGNS_RU
+
+# Двенадцать допустимых значений users.sun_sign — те же строки, что в calc карты.
+_SUN_SIGNS_SQL = ", ".join(f"'{s}'" for s in SIGNS_RU.values())
 
 # Только для проверки типов: в рантайме эти импорты создали бы цикл
 # (charts.py и orders.py сами импортируют User). Имена в аннотациях
@@ -86,6 +91,9 @@ class User(Base):
         # по себе. Идентификатор 12345 в Telegram и 12345 во ВКонтакте —
         # разные люди, и без платформы в ключе они схлопнулись бы в одного.
         UniqueConstraint("platform", "external_id"),
+        # Знак с опечаткой рассылка не найдёт среди писем и молча пропустит
+        # человека — поэтому база такую строку не примет.
+        CheckConstraint(f"sun_sign IN ({_SUN_SIGNS_SQL})", name="sun_sign"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -147,6 +155,13 @@ class User(Base):
     primary_chart_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("charts.id", ondelete="SET NULL")
     )
+
+    # Знак Солнца без карты — с короткого пути «дата → знак» на экране
+    # гороскопа. Рассылка читает его, только если primary_chart_id пуст:
+    # карта точнее, в ней время и место. Хранится знак, а не дата рождения —
+    # письму больше ничего не нужно (docs/astro-context.md, «Знак для
+    # рассылки — без карты»).
+    sun_sign: Mapped[str | None] = mapped_column(String(16))
 
     # Тестировщику полный разбор открыт без оплаты — нужно для обкатки
     # в закрытой группе до запуска платежей.

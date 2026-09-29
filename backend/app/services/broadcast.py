@@ -10,8 +10,9 @@
 рассылки не зависит от числа подписчиков.
 
 Внутри VK платного нет вовсе (docs/astro-context.md, «Рассылка ведёт в Mini
-App»), поэтому письмо ничего не продаёт: кнопка ведёт в приложение, к уже
-посчитанному разбору.
+App»), поэтому письмо ничего не продаёт: кнопка ведёт в приложение — к своей
+карте или, если карты нет и знак введён одной датой, к её расчёту
+(там же, «Знак для рассылки — без карты»).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import zlib
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.prompts import daily_horoscope
@@ -34,15 +35,19 @@ logger = logging.getLogger(__name__)
 # Надпись на кнопке под письмом. Обещает ровно то, что человек увидит,
 # нажав: свою карту, а не «подробности».
 BUTTON_LABEL = "Открыть свою карту"
+# Для того, у кого только знак: нажав, он попадёт в онбординг, а не к карте.
+NEW_CHART_BUTTON_LABEL = "Посчитать свою карту"
 
 
 @dataclass(slots=True)
 class Recipient:
-    """Один получатель: кому слать и какой абзац ему достанется."""
+    """Один получатель: кому слать, какой абзац и какая кнопка ему достанутся."""
 
     user_id: int
     vk_id: int
     sign: str
+    # False — знак введён одной датой, карты нет: кнопка зовёт её посчитать.
+    has_chart: bool = True
 
 
 @dataclass(slots=True)
@@ -101,36 +106,42 @@ async def recipients(session: AsyncSession, target_date: date) -> list[Recipient
     """Кому уходит рассылка за этот день, уже без тех, кому её отправили.
 
     Четыре условия отбора разной природы: канал (VK), согласие (subscribed),
-    разрешение писать от самого VK (vk_messages_allowed_at) и наличие своей
-    карты — без неё неизвестен знак, а значит нечего слать.
+    разрешение писать от самого VK (vk_messages_allowed_at) и известный знак.
+    Знак берётся из своей карты, а без карты — из users.sun_sign.
     """
     # TODO: доставать знак выражением jsonb_path_query_first, когда получателей
     # станут тысячи — сейчас на каждого едет весь calc, это ~11 КБ.
     stmt = (
-        select(User.id, User.external_id, Chart.calc)
-        .join(Chart, Chart.id == User.primary_chart_id)
+        select(User.id, User.external_id, User.sun_sign, Chart.calc)
+        .outerjoin(Chart, Chart.id == User.primary_chart_id)
         .where(
             User.platform == Platform.VK,
             User.subscribed.is_(True),
             User.deleted_at.is_(None),
             User.bot_blocked_at.is_(None),
             User.vk_messages_allowed_at.is_not(None),
+            or_(User.primary_chart_id.is_not(None), User.sun_sign.is_not(None)),
         )
     )
     rows = (await session.execute(stmt)).all()
     already = await _already_sent(session, target_date)
 
     out: list[Recipient] = []
-    for user_id, external_id, calc in rows:
+    for user_id, external_id, stored_sign, calc in rows:
         if user_id in already:
             continue
-        sign = sun_sign(calc or {})
+        has_chart = calc is not None
+        sign = sun_sign(calc) if has_chart else None
+        if has_chart and sign is None:
+            # Карта есть, а Солнца в ней нет — расчёт битый. Оставляем след в
+            # логе и берём знак, введённый датой, если он есть.
+            logger.warning("В карте пользователя %s нет Солнца", user_id)
+        sign = sign or stored_sign
         if sign is None:
-            # Карта есть, а Солнца в ней нет — расчёт битый. Это не про
-            # рассылку, поэтому просто пропускаем и оставляем след в логе.
-            logger.warning("В карте пользователя %s нет Солнца, пропущен", user_id)
             continue
-        out.append(Recipient(user_id=user_id, vk_id=int(external_id), sign=sign))
+        out.append(
+            Recipient(user_id=user_id, vk_id=int(external_id), sign=sign, has_chart=has_chart)
+        )
     return out
 
 
@@ -235,15 +246,19 @@ async def run(
         report.delivered = len(people)
         return report
 
-    keyboard = vk_api.open_app_keyboard(BUTTON_LABEL, launch_hash=_launch_hash(target_date))
+    launch_hash = _launch_hash(target_date)
+    keyboards = {
+        True: vk_api.open_app_keyboard(BUTTON_LABEL, launch_hash=launch_hash),
+        False: vk_api.open_app_keyboard(NEW_CHART_BUTTON_LABEL, launch_hash=launch_hash),
+    }
 
-    # Отправляем группами по знаку: текст у группы один, а транспорт шлёт
-    # один текст на вызов. Двенадцать вызовов вместо письма на человека.
-    by_sign: dict[str, list[Recipient]] = {}
+    # Отправляем группами по знаку и кнопке: транспорт шлёт один текст с одной
+    # клавиатурой на вызов. До 24 вызовов вместо письма на человека.
+    groups: dict[tuple[str, bool], list[Recipient]] = {}
     for person in people:
-        by_sign.setdefault(person.sign, []).append(person)
+        groups.setdefault((person.sign, person.has_chart), []).append(person)
 
-    for sign, group in by_sign.items():
+    for (sign, has_chart), group in groups.items():
         letter = letters.get(sign)
         if letter is None:
             # parse() уже проверил, что знаки все двенадцать, — сюда можно
@@ -256,8 +271,10 @@ async def run(
             results = await vk_api.send_messages(
                 list(by_vk_id),
                 letter,
+                # random_id общий у двух групп одного знака: VK сверяет его в
+                # паре с адресатом, а адресаты у групп не пересекаются.
                 random_id=_random_id(target_date, sign),
-                keyboard=keyboard,
+                keyboard=keyboards[has_chart],
             )
         except vk_api.VkError as e:
             # Сорвался весь вызов — ключ, сеть или спам-ограничение на нас.

@@ -12,7 +12,12 @@
 import { computed, ref } from 'vue'
 
 import { platform } from '@/app/platform'
-import { allowGroupMessages, denyGroupMessages, getGroupState } from '@/shared/api/endpoints'
+import {
+  allowGroupMessages,
+  denyGroupMessages,
+  getGroupState,
+  setSunSign,
+} from '@/shared/api/endpoints'
 
 const status = ref('idle') // idle | loading | ready | error
 // null — выяснить не удалось: VK не ответил или сообщество не настроено.
@@ -26,6 +31,10 @@ const messagesAllowed = ref(false)
 // осталось, и включить обратно можно без окна VK
 const subscribed = ref(false)
 const groupId = ref(null)
+// Знак, введённый одной датой без карты ('Дева'), или null — не вводил.
+// По нему экран гороскопа решает, спрашивать ли дату. Знак из карты сюда
+// не попадает: у кого карта есть, тому дату не показывают вовсе
+const sunSign = ref(null)
 
 // Промис идущего запроса: два экрана, открытые подряд, ждут один ответ,
 // а не заводят два (тот же приём single-flight, что в useSession)
@@ -43,6 +52,8 @@ function load() {
       messagesAllowed.value = state.messages_allowed
       subscribed.value = state.subscribed
       groupId.value = state.group_id
+      // ?? null — старый сервер без этого поля даст undefined, держим null
+      sunSign.value = state.sun_sign ?? null
       status.value = 'ready'
     })
     .catch(() => {
@@ -132,6 +143,23 @@ async function deny() {
   subscribed.value = false
 }
 
+/** Узнать знак по одной дате рождения и запомнить его для рассылки.
+ *  birthDate — 'YYYY-MM-DD' из DateStep. Возвращает знак ('Дева') или null:
+ *  null — день смены знака, одной даты мало, нужен полный онбординг.
+ *  Бросает Error с фразой для человека, если запрос не прошёл. */
+async function enterBirthDate(birthDate) {
+  let answer
+  try {
+    answer = await setSunSign(birthDate)
+  } catch {
+    throw new Error('Не получилось узнать знак. Попробуй ещё раз.')
+  }
+
+  // В день смены знака сервер ничего не записал — и мы старый знак не трогаем
+  if (answer.sign) sunSign.value = answer.sign
+  return answer.sign
+}
+
 /** Доступ к состоянию сообщества из компонентов. Всем отдаёт одно и то же. */
 export function useGroup() {
   return {
@@ -153,6 +181,8 @@ export function useGroup() {
     // Приложение легко оказывается вне Mini App: адрес с sign= остаётся в
     // истории браузера и пускает внутрь, а Bridge там мёртв
     canPrompt: computed(() => platform.supportsGroup()),
+    sunSign,
+    enterBirthDate,
     ensureLoaded,
     join,
     allow,

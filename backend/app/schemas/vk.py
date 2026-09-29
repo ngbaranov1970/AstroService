@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import UTC, date, datetime
+
+from pydantic import BaseModel, field_validator
+
+from app.schemas.charts import MIN_BIRTH_YEAR
 
 
 class GroupStateOut(BaseModel):
@@ -31,3 +35,30 @@ class GroupStateOut(BaseModel):
     # по которому считается joined. None — сообщество не настроено, блока в
     # приложении нет вовсе.
     group_id: int | None = None
+    # Знак, введённый одной датой (users.sun_sign). Экран гороскопа по нему
+    # решает, спрашивать ли дату. Знак из карты сюда не кладём: у кого карта
+    # есть, тому дату и так не показывают.
+    sun_sign: str | None = None
+
+
+class SunSignIn(BaseModel):
+    """Дата рождения с короткого пути к рассылке — без времени и места."""
+
+    birth_date: date
+
+    @field_validator("birth_date")
+    @classmethod
+    def _sane_birth_date(cls, value: date) -> date:
+        # Те же границы, что у даты карты (schemas/charts.py): расходиться
+        # им незачем, человек потом введёт ту же дату в онбординге.
+        if value.year < MIN_BIRTH_YEAR:
+            raise ValueError(f"Даты раньше {MIN_BIRTH_YEAR} года не поддерживаются")
+        if value > datetime.now(UTC).date():
+            raise ValueError("Дата рождения в будущем")
+        return value
+
+
+class SunSignOut(BaseModel):
+    """Знак по дате. None — день смены знака: нужен полный онбординг."""
+
+    sign: str | None

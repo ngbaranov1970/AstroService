@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+import json
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -367,3 +369,56 @@ def test_moon_data_stays_out_of_events() -> None:
 
 def _september_2026() -> list[date]:
     return [date(2026, 9, 1) + timedelta(days=i) for i in range(30)]
+
+
+# --- Знак Солнца по одной дате ----------------------------------------------
+
+GOLDEN_DIR = Path(__file__).parent / "golden"
+
+
+@pytest.mark.parametrize("path", sorted(GOLDEN_DIR.glob("*.json")), ids=lambda p: p.stem)
+def test_sun_sign_on_agrees_with_golden_chart(path: Path) -> None:
+    """Знак по дате — тот же, что в сверенной карте, или отказ, но не чужой."""
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    day = date.fromisoformat(golden["meta"]["birth_local"][:10])
+    sun = next(p for p in golden["planets"] if p["name"] == "Sun")
+    assert t.sun_sign_on(day) in (sun["sign_ru"], None)
+
+
+def _sun_sign_by_natal(day: date, clock: time, tz: str) -> str:
+    """Знак Солнца из ядра карты: момент на этой дате в этом поясе."""
+    chart = compute_natal(datetime.combine(day, clock), 0.0, 0.0, tz)
+    return next(p["sign_ru"] for p in chart["planets"] if p["name"] == "Sun")
+
+
+def _solar_ingress_days_2026() -> list[date]:
+    """Дни смены знака Солнцем в 2026 году и по дню с каждой стороны."""
+    days = set()
+    for e in t.ingresses(date(2026, 1, 1), date(2026, 12, 31)):
+        if e["body"] == "Sun":
+            days.update(e["moment"].date() + timedelta(days=d) for d in (-2, -1, 0, 1, 2))
+    return sorted(days)
+
+
+def test_sun_sign_on_matches_natal_core_at_window_edges() -> None:
+    """Окно даты — от полуночи в UTC+14 до конца суток в UTC−12.
+
+    Назвала функция знак — ядро карты даёт его на обоих краях окна. Отказала —
+    края расходятся, то есть отказ не ложный.
+    """
+    for day in _solar_ingress_days_2026():
+        # Etc/GMT-14 — это UTC+14: знак в именах Etc/ перевёрнут по POSIX
+        first = _sun_sign_by_natal(day, time(0, 0), "Etc/GMT-14")
+        last = _sun_sign_by_natal(day, time(23, 59), "Etc/GMT+12")
+        sign = t.sun_sign_on(day)
+        if sign is None:
+            assert first != last, day
+        else:
+            assert first == last == sign, day
+
+
+def test_sun_sign_on_refuses_about_two_days_a_month() -> None:
+    """Отказов за год — около двух в месяц: больше — окно шире нужного."""
+    year = [date(2026, 1, 1) + timedelta(days=i) for i in range(365)]
+    refused = [d for d in year if t.sun_sign_on(d) is None]
+    assert 12 <= len(refused) <= 36, len(refused)

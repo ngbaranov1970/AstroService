@@ -119,6 +119,10 @@ GROUP_MESSAGES_DENIED = "group_messages_denied"
 # Написал в сообщество сам. Это и согласие на ответ, и сигнал живости.
 GROUP_MESSAGE_RECEIVED = "group_message_received"
 
+# Ввёл дату на коротком пути к рассылке. В props знак или cusp=True — день
+# смены знака, отправлен в онбординг. Даты в props нет: это персональные данные.
+SUN_SIGN_ENTERED = "sun_sign_entered"
+
 # Письмо рассылки доставлено. В props — дата гороскопа и знак; по ним же
 # рассылка узнаёт, кому за этот день уже писала, и не шлёт второй раз.
 BROADCAST_SENT = "broadcast_sent"

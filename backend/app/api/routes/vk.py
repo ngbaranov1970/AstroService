@@ -17,10 +17,11 @@ from fastapi import APIRouter, HTTPException, Response, status
 from app.api.deps import CurrentUser, SessionDep
 from app.config import get_settings
 from app.models import Platform, User
-from app.schemas.vk import GroupStateOut
+from app.schemas.vk import GroupStateOut, SunSignIn, SunSignOut
 from app.services import events
 from app.services import users as users_service
 from app.vk import api as vk_api
+from astro_core.transits import sun_sign_on
 
 router = APIRouter(prefix="/vk", tags=["vk"])
 
@@ -46,6 +47,7 @@ async def group_state(user: CurrentUser) -> GroupStateOut:
         messages_allowed=user.vk_messages_allowed_at is not None,
         subscribed=user.subscribed,
         group_id=get_settings().vk_group_id,
+        sun_sign=user.sun_sign,
     )
 
 
@@ -90,6 +92,26 @@ async def messages_denied(user: CurrentUser, session: SessionDep) -> Response:
         await events.log(session, events.GROUP_MESSAGES_DENIED, user_id=user.id)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/sun-sign", response_model=SunSignOut)
+async def sun_sign(body: SunSignIn, user: CurrentUser, session: SessionDep) -> SunSignOut:
+    """Знак Солнца по одной дате — короткий путь к рассылке без карты.
+
+    День смены знака — не ошибка, а `sign=null`: фронт ведёт человека в
+    онбординг. Записанный раньше знак при этом не стирается
+    (docs/astro-context.md, «Знак для рассылки — без карты»).
+    """
+    _require_vk(user)
+
+    sign = sun_sign_on(body.birth_date)
+    if sign is None:
+        await events.log(session, events.SUN_SIGN_ENTERED, user_id=user.id, cusp=True)
+    else:
+        users_service.set_sun_sign(user, sign)
+        await events.log(session, events.SUN_SIGN_ENTERED, user_id=user.id, sign=sign)
+    await session.commit()
+    return SunSignOut(sign=sign)
 
 
 def _require_vk(user: User) -> None:

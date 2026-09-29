@@ -177,6 +177,21 @@ def set_primary_chart(user: User, chart: Chart) -> bool:
     return True
 
 
+def set_sun_sign(user: User, sign: str) -> bool:
+    """Запомнить знак Солнца без карты; True — если значение изменилось.
+
+    Рассылка читает его, только пока нет своей карты, поэтому ставится и
+    при наличии карты — вреда нет. Строка обязана быть из SIGNS_RU, иначе
+    commit упадёт на CHECK ck_users_sun_sign.
+
+    Синхронная, в базу не ходит: правка уедет с ближайшим flush сессии.
+    """
+    if user.sun_sign == sign:
+        return False
+    user.sun_sign = sign
+    return True
+
+
 def mark_vk_messages_denied(user: User) -> bool:
     """Забыть разрешение писать; True — если разрешение было и снято.
 

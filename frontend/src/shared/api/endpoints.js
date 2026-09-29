@@ -87,7 +87,8 @@ export function leaveFeedback(token, type, rating, comment = '') {
 }
 
 /** Состояние человека в нашем сообществе VK:
- *  {joined, messages_allowed, group_id}.
+ *  {joined, messages_allowed, subscribed, group_id, sun_sign}.
+ *  sun_sign — знак, введённый одной датой без карты ('Дева'), или null.
  *  joined === null означает «выяснить не удалось» (VK не ответил или
  *  сообщество не настроено) — в этом случае кнопку подписки всё равно
  *  показываем: предложить лишний раз дешевле, чем спрятать её у того, кто
@@ -110,6 +111,14 @@ export function allowGroupMessages() {
  *  получателей по нашему флагу, и писать мы перестаём сразу. */
 export function denyGroupMessages() {
   return http.post('/vk/messages-denied')
+}
+
+/** Знак Солнца по одной дате рождения — короткий путь к рассылке без карты.
+ *  birthDate — строка 'YYYY-MM-DD', как её собирает DateStep.
+ *  Отвечает {sign: 'Дева'} или {sign: null}: в день смены знака одной даты
+ *  мало, и человека ведём в полный онбординг. 409 — вход был не из VK. */
+export function setSunSign(birthDate) {
+  return http.post('/vk/sun-sign', { birth_date: birthDate })
 }
 
 /** Состояние заказа по его токену: {token, number, status, paid, title,

@@ -357,6 +357,25 @@ def ingresses(start: date, end: date) -> list[dict]:
     return out
 
 
+def sun_sign_on(day: date) -> str | None:
+    """Знак Солнца по одной дате рождения («Лев») или None в день смены знака.
+
+    None значит: где-то на Земле эта дата захватывает переход Солнца в
+    следующий знак, и без времени и места знак не определить. Так бывает
+    около двух дней в месяц (docs/astro-context.md, «Знак для рассылки —
+    без карты»).
+    """
+    # Одна календарная дата длится 50 часов: начинается в UTC+14 и кончается
+    # в UTC−12. Солнце назад не ходит, поэтому хватает двух концов окна.
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC) - timedelta(hours=14)
+    end = start + timedelta(hours=50)
+    first = _sign_index(_lon_speed(_to_jd(start), "Sun")[0])
+    last = _sign_index(_lon_speed(_to_jd(end), "Sun")[0])
+    if first != last:
+        return None
+    return SIGNS_RU[_SIGN_CODES[first]]
+
+
 def _scan_sign_change(body: str, jd_start: float, jd_end: float, step: float):
     """Отдаёт моменты, когда тело переходит границу знака.
 

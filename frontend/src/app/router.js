@@ -189,6 +189,12 @@ router.beforeEach(async (to) => {
   // isLoaded отличает «карт нет» от «мы их не видели».
   // Цель уезжает в ?next: онбординг после первой карты уведёт к ней, а не на главную
   if (isLoaded.value && !hasCharts.value) {
+    // Гороскопу карта не нужна: знак спросит сам экран по одной дате
+    // (docs/astro-context.md, «Знак для рассылки — без карты»). Уже стоим на
+    // /horoscope — пропускаем, пришли с плитки /start/horoscope — ведём туда
+    if (goal === 'horoscope') {
+      return to.name === 'horoscope' ? true : { name: 'horoscope' }
+    }
     return goal ? { name: 'onboarding', query: { next: goal } } : { name: 'onboarding' }
   }
 

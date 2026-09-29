@@ -152,6 +152,38 @@ async def test_run_dostavka(stub) -> None:
     assert _event_names(session) == ["broadcast_sent", "broadcast_sent"]
 
 
+async def test_run_knopka_zavisit_ot_karty(stub, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Один знак, у одного карта есть, у другого только знак — две отправки."""
+    people = [
+        broadcast.Recipient(user_id=1, vk_id=101, sign="Лев"),
+        broadcast.Recipient(user_id=2, vk_id=102, sign="Лев", has_chart=False),
+    ]
+    stub(
+        people,
+        [
+            vk_api.SendResult(user_id=101, message_id=11),
+            vk_api.SendResult(user_id=102, message_id=12),
+        ],
+    )
+    sent: list[tuple[list[int], str]] = []
+
+    async def fake_send(user_ids, text, *, random_id, keyboard=None):
+        sent.append((list(user_ids), keyboard))
+        return [vk_api.SendResult(user_id=u, message_id=u) for u in user_ids]
+
+    # Кнопка — её надпись, чтобы было видно, кому какая досталась
+    monkeypatch.setattr(vk_api, "open_app_keyboard", lambda label, **kw: label)
+    monkeypatch.setattr(vk_api, "send_messages", fake_send)
+
+    report = await broadcast.run(FakeSession(), TODAY)
+
+    assert report.delivered == 2
+    assert sorted(sent) == [
+        ([101], broadcast.BUTTON_LABEL),
+        ([102], broadcast.NEW_CHART_BUTTON_LABEL),
+    ]
+
+
 async def test_run_otkaz_901_gasit_razreshenie(stub) -> None:
     people = [broadcast.Recipient(user_id=1, vk_id=101, sign="Лев")]
     stub(
