@@ -128,14 +128,19 @@ export const vkPlatform = {
 
   /** Подписка на смену хеша у уже открытого приложения. Возвращает функцию отписки.
    *  Переход по ссылке на плитку (#natal), когда приложение уже открыто или
-   *  свёрнуто, клиент VK не перезагружает: он шлёт событие VKWebAppLocationChanged
-   *  с новым хешем. callback получает этот хеш строкой — как есть, без разбора. */
+   *  свёрнуто, клиент VK не перезагружает, а шлёт событие с новым хешем.
+   *  callback получает этот хеш строкой — как есть, без разбора. */
   onLocationChange(callback) {
     // Слушатель получает ВСЕ события моста подряд; нужное узнаём по type.
-    // event.detail — полезная нагрузка события: { type, data }
+    // event.detail — полезная нагрузка события: { type, data }.
+    // Android шлёт VKWebAppChangeFragment { location: 'pair' } (проверено на
+    // проде 29.09.2026), в типах vk-bridge описано VKWebAppLocationChanged —
+    // ловим оба
     const listener = (event) => {
       const { type, data } = event.detail
-      if (type === 'VKWebAppLocationChanged') callback(data.location)
+      if (type === 'VKWebAppChangeFragment' || type === 'VKWebAppLocationChanged') {
+        callback(data?.location)
+      }
     }
     bridge.subscribe(listener)
     // Отписаться можно только той же самой функцией, поэтому держим её в
