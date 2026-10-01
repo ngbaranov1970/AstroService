@@ -56,7 +56,11 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict:
         recorded["exchange"] = {"code": code, "device_id": device_id}
         return VK_USER_ID
 
+    async def fake_fill_vk_name(user):
+        pass
+
     monkeypatch.setattr(vkid.users_service, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(vkid.users_service, "fill_vk_name", fake_fill_vk_name)
     monkeypatch.setattr(vkid.events, "log", fake_log)
     monkeypatch.setattr(vkid.vk_id, "exchange_code", fake_exchange)
     def fake_issue(user_id, surface):

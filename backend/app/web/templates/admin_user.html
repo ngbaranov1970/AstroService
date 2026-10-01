@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}{% if card %}Человек #{{ card.user.id }}{% else %}Поиск человека{% endif %}{% endblock %}
+
+{# Карточка человека: поиск, список совпадений или профиль с картами,
+   заказами и лентой событий. Данные — services/admin.find_users и
+   get_user_card, маршруты — web/routes/admin.user_search и user_card. #}
+
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  <h1>{% if card %}{{ card.user.platform_username or card.user.name or "Без имени" }}{% else %}Человек{% endif %}</h1>
+  <p class="lead">
+    {# Голый путь, без url(): в админку ходят по Basic-паролю. #}
+    <a href="/admin">разборы</a>
+    · <a href="/admin/funnel">воронка</a>
+  </p>
+
+  {# --- Поиск ------------------------------------------------------------- #}
+
+  <div class="card run">
+    <form method="get" action="/admin/user" class="toolbar">
+      <input type="search" name="q" value="{{ q }}" size="40" autofocus
+             placeholder="vk.com/…, VK id, #внутренний id или имя">
+      <button type="submit">Найти</button>
+    </form>
+  </div>
+
+  {% if searched and not found %}
+    <p class="muted">Никого не нашли. Ссылка на сообщество или удалённую страницу VK тоже даёт пусто.</p>
+  {% endif %}
+
+  {% if found %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr><th>Кто</th><th>Платформа</th><th>Последний визит</th></tr>
+        </thead>
+        <tbody>
+          {% for u in found %}
+            <tr>
+              <td>
+                <a href="/admin/user/{{ u.id }}">{{ u.platform_username or u.name or "Без имени" }}</a>
+                <span class="muted">#{{ u.id }}</span>
+              </td>
+              <td>{{ u.platform.value }}</td>
+              <td class="nowrap">
+                {% if u.last_seen_at %}{{ u.last_seen_at.strftime("%d.%m.%Y") }}{% else %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  {% if card %}
+    {% set u = card.user %}
+
+    {# --- Профиль ---------------------------------------------------------- #}
+
+    <h2>Профиль</h2>
+    <div class="table-wrap">
+      <table class="grid">
+        <tbody>
+          <tr><td>Внутренний id</td><td>#{{ u.id }}</td></tr>
+          <tr><td>Платформа</td><td>{{ u.platform.value }} · {{ u.external_id }}</td></tr>
+          {% if u.platform.value == "vk" %}
+            <tr>
+              <td>VK</td>
+              <td>
+                <a href="https://vk.com/id{{ u.external_id }}" target="_blank" rel="noopener">профиль</a>
+                {# Диалог открывается от имени сообщества: нужен вход админом группы. #}
+                {% if vk_group_id() %}
+                  · <a href="https://vk.com/gim{{ vk_group_id() }}?sel={{ u.external_id }}" target="_blank" rel="noopener">диалог сообщества</a>
+                {% endif %}
+              </td>
+            </tr>
+            <tr>
+              <td>В сообществе</td>
+              <td>
+                {% if is_member is none %}<span class="muted">VK не ответил</span>
+                {% elif is_member %}состоит{% else %}не состоит{% endif %}
+              </td>
+            </tr>
+          {% endif %}
+          <tr><td>Имя в анкете</td><td>{{ u.name or "—" }}</td></tr>
+          <tr><td>Источник</td><td>{{ u.source or "—" }}</td></tr>
+          <tr><td>Первое касание</td><td>{{ u.created_at | msk("%d.%m.%Y %H:%M") }}</td></tr>
+          <tr>
+            <td>Последний визит</td>
+            <td>
+              {% if u.last_seen_at %}{{ u.last_seen_at | msk("%d.%m.%Y %H:%M") }}{% else %}—{% endif %}
+              <span class="muted">(точность — 6 часов)</span>
+            </td>
+          </tr>
+          <tr>
+            <td>Сообщения от сообщества</td>
+            <td>
+              {% if u.vk_messages_allowed_at %}разрешил {{ u.vk_messages_allowed_at | msk("%d.%m.%Y") }}{% else %}не разрешал{% endif %}
+              {% if u.bot_blocked_at %}<span class="badge">недоставляем</span>{% endif %}
+            </td>
+          </tr>
+          <tr><td>Рассылка</td><td>{{ "подписан" if u.subscribed else "отписался" }}</td></tr>
+          <tr>
+            <td>Знак для рассылки</td>
+            <td>{{ u.sun_sign or ("по карте" if u.primary_chart_id else "—") }}</td>
+          </tr>
+          <tr>
+            <td>Тестер</td>
+            <td>
+              {{ "да" if u.is_tester else "нет" }}
+              {% if u.deleted_at %}<span class="badge">данные удалены</span>{% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    {# --- Карты ------------------------------------------------------------ #}
+
+    <h2>Карты · {{ card.charts | length }}</h2>
+    {% if card.charts %}
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>Чья</th><th>Рождение</th><th>Заведена</th></tr></thead>
+          <tbody>
+            {% for c in card.charts %}
+              <tr>
+                <td>
+                  <a href="/r/{{ c.token }}">{{ c.person_name or "Без имени" }}</a>
+                  {% if c.id == u.primary_chart_id %}<span class="badge">своя</span>{% endif %}
+                </td>
+                <td>
+                  {{ c.birth_local.strftime("%d.%m.%Y") }}
+                  {% if c.time_known %}{{ c.birth_local.strftime("%H:%M") }}{% else %}<span class="muted">время неизвестно</span>{% endif %}
+                  · {{ c.place_name }}
+                </td>
+                <td class="nowrap">{{ c.created_at | msk("%d.%m %H:%M") }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Карт нет.</p>
+    {% endif %}
+
+    {# --- Заказы ----------------------------------------------------------- #}
+
+    <h2>Заказы · {{ card.orders | length }}</h2>
+    {% if card.orders %}
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>Когда</th><th>Что</th><th class="num">Сумма</th><th>Статус</th></tr></thead>
+          <tbody>
+            {% for o in card.orders %}
+              <tr>
+                <td class="nowrap">{{ o.created_at | msk("%d.%m %H:%M") }}</td>
+                <td>{{ o.report_type.value }}</td>
+                {# Сумма в базе в копейках. #}
+                <td class="num">{{ o.amount // 100 }} ₽</td>
+                <td>
+                  {{ o.status.value }}
+                  {% if o.paid_at %}<span class="muted">{{ o.paid_at | msk("%d.%m %H:%M") }}</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Заказов нет.</p>
+    {% endif %}
+
+    {# --- События ---------------------------------------------------------- #}
+
+    <h2>События · {{ card.events | length }}</h2>
+    {% if card.events %}
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>Когда, МСК</th><th>Событие</th><th>Подробности</th></tr></thead>
+          <tbody>
+            {% for e in card.events %}
+              <tr>
+                <td class="nowrap">{{ e.ts | msk("%d.%m.%Y %H:%M") }}</td>
+                <td>{{ e.name }}</td>
+                <td class="muted">
+                  {% for k, v in e.props.items() if v is not none %}{{ k }}={{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Событий нет.</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Вступления в сообщество, лайки и комментарии в базу пока
+  не пишутся — из жизни сообщества видны только сообщения и разрешение писать.
+{% endblock %}

@@ -1,4 +1,4 @@
-"""Вызовы VK API от имени сообщества: messages.send и groups.isMember.
+"""Вызовы VK API от имени сообщества: messages.send, groups.isMember, users.get.
 
 Место в слоях: services/рассылка и страница разбора → ЭТОТ ФАЙЛ →
 api.vk.ru. Ни базы, ни наших пользователей здесь нет: на вход идут
@@ -52,6 +52,9 @@ TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 # Сколько раз повторяем вызов, сорвавшийся целиком.
 MAX_ATTEMPTS = 3
+
+# Больше тысячи идентификаторов users.get за вызов не принимает.
+MAX_USERS_GET = 1000
 
 # --- Коды ошибок VK, которые разбирает вызывающий -------------------------
 # Полный список — dev.vk.ru/ru/method/messages.send. Здесь только те, что
@@ -257,6 +260,50 @@ async def is_group_member(user_id: int) -> bool | None:
         return None
     # Ответ метода — 1 или 0; с extended=1 был бы объект, но он нам не нужен.
     return bool(payload)
+
+
+async def get_full_names(user_ids: list[int]) -> dict[int, str]:
+    """«Имя Фамилия» из профиля VK по каждому id. Без ответа VK — пустой словарь.
+
+    Удалённые и заблокированные страницы в словарь не попадают: VK отдаёт их
+    с именем «DELETED». Ошибку наружу не выпускаем — имя нужно только
+    админке, и вход в приложение из-за него падать не должен.
+    """
+    names: dict[int, str] = {}
+    for start in range(0, len(user_ids), MAX_USERS_GET):
+        chunk = user_ids[start : start + MAX_USERS_GET]
+        try:
+            payload = await _request(
+                "users.get", {"user_ids": ",".join(str(uid) for uid in chunk)}
+            )
+        except VkError as e:
+            logger.warning("VK users.get не ответил: %s", e)
+            return names
+        for item in payload if isinstance(payload, list) else []:
+            if item.get("deactivated"):
+                continue
+            full = f"{item.get('first_name', '')} {item.get('last_name', '')}".strip()
+            if full:
+                names[int(item["id"])] = full
+    return names
+
+
+async def resolve_screen_name(screen_name: str) -> int | None:
+    """VK id человека по короткому имени из ссылки (vk.com/durov).
+
+    None — имя принадлежит сообществу или приложению, не существует, или VK
+    не ответил: для поиска в админке всё это значит «не нашли».
+    """
+    try:
+        payload = await _request("utils.resolveScreenName", {"screen_name": screen_name})
+    except VkError as e:
+        logger.warning("VK utils.resolveScreenName не ответил: %s", e)
+        return None
+    # На несуществующее имя VK отвечает пустым списком, а не ошибкой.
+    if not isinstance(payload, dict) or payload.get("type") != "user":
+        return None
+    object_id = payload.get("object_id")
+    return int(object_id) if isinstance(object_id, int) else None
 
 
 async def _request(method: str, data: dict[str, Any]) -> Any:

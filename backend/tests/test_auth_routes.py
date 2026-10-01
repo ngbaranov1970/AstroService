@@ -47,11 +47,15 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> dict:
     async def fake_log(session, name, **props):
         calls["event"] = {"name": name, **props}
 
+    async def fake_fill_vk_name(user):
+        pass
+
     # Подпись не проверяем: её ветки — забота auth.verify_vk_launch
     monkeypatch.setattr(auth_routes, "get_settings", lambda: SimpleNamespace(vk_enabled=True))
     monkeypatch.setattr(auth_routes.auth, "verify_vk_launch", lambda params: PARAMS["vk_user_id"])
     monkeypatch.setattr(auth_routes.auth, "issue_session", lambda user_id, surface: "jwt")
     monkeypatch.setattr(auth_routes.users_service, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(auth_routes.users_service, "fill_vk_name", fake_fill_vk_name)
     monkeypatch.setattr(auth_routes.events, "log", fake_log)
 
     async def fake_session():

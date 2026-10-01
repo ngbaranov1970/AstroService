@@ -23,6 +23,8 @@ cookie читает веб-слой, сообщение разбирает бо�
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -30,6 +32,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chart, Platform, User
+from app.vk import api as vk_api
+
+logger = logging.getLogger(__name__)
+
+# Длина колонки users.platform_username (models/user.py).
+_PLATFORM_USERNAME_MAX = 64
+
+# Сколько вход ждёт имя из профиля VK, секунд.
+_VK_NAME_TIMEOUT = 2.0
 
 
 async def _find(
@@ -190,6 +201,43 @@ def set_sun_sign(user: User, sign: str) -> bool:
         return False
     user.sun_sign = sign
     return True
+
+
+def set_platform_username(user: User, value: str) -> bool:
+    """Запомнить имя из профиля платформы; True — если значение изменилось.
+
+    Только для поддержки и админки, в разбор идёт `name`, введённое самим
+    человеком. Обрезается по длине колонки: длиннее 64 символов commit упадёт.
+
+    Синхронная, в базу не ходит: правка уедет с ближайшим flush сессии.
+    """
+    value = value[:_PLATFORM_USERNAME_MAX]
+    if user.platform_username == value:
+        return False
+    user.platform_username = value
+    return True
+
+
+async def fill_vk_name(user: User) -> None:
+    """Подтянуть «Имя Фамилия» из профиля VK, пока platform_username пуст.
+
+    Зовётся при каждом входе и событии сообщества; при заполненном имени в VK
+    не ходит. Не ответил VK — ничего не меняем, попробуем при следующем входе.
+    """
+    if user.platform != Platform.VK or user.platform_username is not None:
+        return
+    vk_user_id = int(user.external_id)
+    try:
+        # Потолок по времени: у _request три попытки по 30 с, вход столько не ждёт.
+        names = await asyncio.wait_for(
+            vk_api.get_full_names([vk_user_id]), timeout=_VK_NAME_TIMEOUT
+        )
+    except TimeoutError:
+        logger.warning("VK users.get не уложился в %s с, user_id=%s", _VK_NAME_TIMEOUT, user.id)
+        return
+    name = names.get(vk_user_id)
+    if name:
+        set_platform_username(user, name)
 
 
 def mark_vk_messages_denied(user: User) -> bool:

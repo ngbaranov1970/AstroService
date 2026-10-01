@@ -16,16 +16,18 @@ HTTP Basic, см. app/web/deps.require_admin.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Float, cast, func, select
+from sqlalchemy import BigInteger, Float, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chart, Event, Report, ReportType, User
+from app.models import Chart, Event, Order, Platform, Report, ReportType, User
 from app.services import events
+from app.vk import api as vk_api
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,3 +501,98 @@ async def count_events(
         .group_by(Event.name)
     )
     return {name: count for name, count in await session.execute(stmt)}
+
+
+# --- Карточка человека -----------------------------------------------------
+# Связка «сообщество ↔ приложение»: VK id один и тот же в Mini App и в
+# Callback сообщества (docs/astro-context.md, «Карточка человека»).
+
+# Сколько последних событий показывает карточка: у активного их сотни.
+USER_EVENTS_LIMIT = 300
+
+# Сколько совпадений по имени выводим списком.
+USER_SEARCH_LIMIT = 50
+
+# Ссылка на профиль: vk.com/id123, m.vk.com/durov, vk.ru/durov?w=wall…
+_VK_LINK = re.compile(r"^(?:https?://)?(?:m\.)?vk\.(?:com|ru)/([A-Za-z0-9_.]+)")
+_VK_ID = re.compile(r"^id(\d+)$")
+
+
+@dataclass(frozen=True, slots=True)
+class UserCard:
+    """Всё о человеке на одном экране, события — свежие первыми."""
+
+    user: User
+    charts: list[Chart]
+    orders: list[Order]
+    events: list[Event]
+
+
+async def find_users(session: AsyncSession, query: str) -> list[User]:
+    """Найти людей по строке из поля поиска админки. Пустой список — никого.
+
+    `#42` — внутренний id; цифры, `id123` и ссылка на профиль — VK id;
+    остальное — подстрока имени из VK или введённого самим человеком.
+    """
+    query = query.strip()
+    if not query:
+        return []
+
+    if query.startswith("#") and query[1:].isdigit():
+        user = await session.get(User, int(query[1:]))
+        return [user] if user else []
+
+    link = _VK_LINK.match(query)
+    screen = link.group(1) if link else query
+    vk_user_id = _plain_vk_id(screen)
+    if vk_user_id is None and link:
+        # Короткое имя (vk.com/durov) знает только VK; сообщество или
+        # несуществующее имя — никого, по имени такую ссылку не ищем.
+        resolved = await vk_api.resolve_screen_name(screen)
+        if resolved is None:
+            return []
+        vk_user_id = str(resolved)
+
+    if vk_user_id is not None:
+        user = await session.scalar(
+            select(User).where(User.platform == Platform.VK, User.external_id == vk_user_id)
+        )
+        return [user] if user else []
+
+    pattern = f"%{query}%"
+    stmt = (
+        select(User)
+        .where(or_(User.platform_username.ilike(pattern), User.name.ilike(pattern)))
+        .order_by(User.last_seen_at.desc().nulls_last())
+        .limit(USER_SEARCH_LIMIT)
+    )
+    return list(await session.scalars(stmt))
+
+
+def _plain_vk_id(screen: str) -> str | None:
+    """VK id из `123456` или `id123456`; None — это не числовой id."""
+    if screen.isdigit():
+        return screen
+    match = _VK_ID.match(screen)
+    return match.group(1) if match else None
+
+
+async def get_user_card(session: AsyncSession, user_id: int) -> UserCard | None:
+    """Карточка человека по внутреннему id. None — такого нет."""
+    user = await session.get(User, user_id)
+    if user is None:
+        return None
+
+    charts = await session.scalars(
+        select(Chart).where(Chart.user_id == user_id).order_by(Chart.created_at.desc())
+    )
+    orders = await session.scalars(
+        select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc())
+    )
+    events_ = await session.scalars(
+        select(Event)
+        .where(Event.user_id == user_id)
+        .order_by(Event.ts.desc())
+        .limit(USER_EVENTS_LIMIT)
+    )
+    return UserCard(user=user, charts=list(charts), orders=list(orders), events=list(events_))

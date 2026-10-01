@@ -118,6 +118,7 @@ async def vk_callback(request: Request, session: SessionDep) -> PlainTextRespons
     user = await users.get_or_create(
         session, platform=Platform.VK, external_id=str(vk_user_id), source=_SOURCE
     )
+    await users.fill_vk_name(user)
 
     if event_type == "message_deny":
         if users.mark_vk_messages_denied(user):

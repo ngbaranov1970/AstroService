@@ -139,6 +139,7 @@ async def callback(
         external_id=vk_user_id,
         source=vk_id.SOURCE_VK_ID,
     )
+    await users_service.fill_vk_name(user)
     # platform="web" отличает браузерный заход от запуска Mini App: в users
     # они одна строка, и различить их можно только здесь.
     await events.log(

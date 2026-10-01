@@ -15,6 +15,7 @@
     {# Голый путь, без url(): в админку ходят по Basic-паролю, токен сессии
        ей не нужен. #}
     · <a href="/admin/funnel">воронка</a>
+    · <a href="/admin/user">люди</a>
     · <a href="/admin/content">посты в ленту</a>
     · <a href="/admin/content/mail">гороскопы в рассылку</a>
     · <a href="/admin/broadcast">отправка рассылки</a>
@@ -100,6 +101,7 @@
                     {{ row.person_name or "Без имени" }}
                   </a>
                   {% if row.is_tester %}<span class="badge">тестер</span>{% endif %}
+                  <a class="muted" href="/admin/user/{{ row.user_id }}">кто</a>
                   {# Признак правится у ЧЕЛОВЕКА, а не у этой строки: у него
                      может быть много разборов, и кнопка в каждом ряду одна и
                      та же. formaction/formmethod, а не своя форма: таблица уже

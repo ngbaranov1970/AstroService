@@ -30,9 +30,11 @@ from starlette.responses import Response
 
 from app import generation
 from app.db import get_session
+from app.models import Platform
 from app.services import admin as admin_service
 from app.services import broadcast, card, content, events, reports
 from app.services import users as users_service
+from app.vk import api as vk_api
 from app.web.deps import require_admin
 from app.web.templating import templates
 from astro_core import transits
@@ -159,6 +161,48 @@ async def funnel(
             "since": first.isoformat(),
             "until": last.isoformat(),
             "include_testers": include_testers,
+        },
+    )
+
+
+@router.get("/user")
+async def user_search(
+    request: Request,
+    session: SessionDep,
+    q: Annotated[str, Query()] = "",
+) -> Response:
+    """Поиск человека; ровно одно совпадение сразу открывает его карточку."""
+    found = await admin_service.find_users(session, q) if q.strip() else []
+    if len(found) == 1:
+        return RedirectResponse(f"/admin/user/{found[0].id}", status.HTTP_303_SEE_OTHER)
+    return templates.TemplateResponse(
+        request,
+        "admin_user.html",
+        {"q": q, "found": found, "searched": bool(q.strip()), "card": None},
+    )
+
+
+@router.get("/user/{user_id}")
+async def user_card(request: Request, session: SessionDep, user_id: int) -> Response:
+    """Карточка человека: профиль, карты, заказы и лента событий."""
+    card_ = await admin_service.get_user_card(session, user_id)
+    if card_ is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого пользователя нет")
+
+    is_member: bool | None = None
+    if card_.user.platform == Platform.VK:
+        # Живой запрос: вступления и выходы из сообщества в базу не пишутся.
+        is_member = await vk_api.is_group_member(int(card_.user.external_id))
+
+    return templates.TemplateResponse(
+        request,
+        "admin_user.html",
+        {
+            "q": "",
+            "found": [],
+            "searched": False,
+            "card": card_,
+            "is_member": is_member,
         },
     )
 

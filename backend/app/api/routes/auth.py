@@ -64,6 +64,7 @@ async def login_vk(payload: VkLaunchIn, session: SessionDep) -> SessionOut:
         external_id=vk_id,
         source=auth.SOURCE_VK,
     )
+    await users_service.fill_vk_name(user)
     # Метки запуска есть только здесь: внутри приложения фронт ходит уже с
     # токеном, и откуда человек пришёл, дальше взять негде.
     await events.log(
