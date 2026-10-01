@@ -44,6 +44,7 @@ class ReportRow:
     chart_token: str
     user_id: int
     is_tester: bool
+    vk_name: str | None
     person_name: str | None
     birth_local: datetime
     time_known: bool
@@ -102,6 +103,7 @@ async def list_report_rows(session: AsyncSession, limit: int = 200) -> list[Repo
             Chart.token.label("chart_token"),
             Report.user_id,
             User.is_tester,
+            User.platform_username,
             Chart.person_name,
             Chart.birth_local,
             Chart.time_known,
@@ -130,6 +132,7 @@ async def list_report_rows(session: AsyncSession, limit: int = 200) -> list[Repo
             chart_token=row.chart_token,
             user_id=row.user_id,
             is_tester=row.is_tester,
+            vk_name=row.platform_username,
             person_name=row.person_name,
             birth_local=row.birth_local,
             time_known=row.time_known,
@@ -560,9 +563,15 @@ async def find_users(session: AsyncSession, query: str) -> list[User]:
         return [user] if user else []
 
     pattern = f"%{query}%"
+    # Имя из анкеты живёт в картах, а не в users.name: на проде то пустое у всех.
+    by_chart = (
+        select(Chart.id)
+        .where(Chart.user_id == User.id, Chart.person_name.ilike(pattern))
+        .exists()
+    )
     stmt = (
         select(User)
-        .where(or_(User.platform_username.ilike(pattern), User.name.ilike(pattern)))
+        .where(or_(User.platform_username.ilike(pattern), User.name.ilike(pattern), by_chart))
         .order_by(User.last_seen_at.desc().nulls_last())
         .limit(USER_SEARCH_LIMIT)
     )
