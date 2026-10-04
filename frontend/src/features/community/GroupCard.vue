@@ -73,15 +73,12 @@ const onDeny = () => run('deny', deny, 'Больше не пишем. Включ
   >
     <h2 class="font-display text-title text-ink">Гороскоп дня</h2>
 
-    <!-- Текст зависит от того, что человеку осталось сделать. v-if/v-else-if/
-         v-else — ветвление прямо в разметке, как if/elif/else -->
-    <p class="mt-2 font-read text-lead text-ink-muted">
-      <template v-if="enabled">
-        Присылаем каждое утро в личные сообщения ВКонтакте.
-      </template>
-      <template v-else>
-        Разбор дня по твоей карте — каждое утро в личных сообщениях ВКонтакте.
-      </template>
+    <!-- Пояснение только для уже включивших рассылку: подтверждает, что она
+         идёт, и объясняет кнопку «Не присылать». Не включившим хватает
+         заголовка и кнопки — абзац уговоров читался как спам.
+         v-if/v-else-if/v-else — ветвление прямо в разметке, как if/elif/else -->
+    <p v-if="enabled" class="mt-2 font-read text-lead text-ink-muted">
+      Присылаем каждое утро в личные сообщения ВКонтакте.
     </p>
 
     <div class="mt-5 space-y-2">
