@@ -51,11 +51,20 @@ router = APIRouter(include_in_schema=False)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
-# Что продаётся по умолчанию, если тип не указан в адресе. Умолчаний два,
-# потому что входов два: по токену карты покупают натальный разбор, по
-# токену пары — совместимость. Список цен живёт в services/orders.py.
-DEFAULT_TYPE = ReportType.FULL_NATAL
+# Что продаётся по токену пары, если тип не указан в адресе. У карты
+# умолчания нет: открыто ей продавать нечего (см. _ORDER_ONLY_TYPES).
+# Список цен живёт в services/orders.py.
 DEFAULT_PAIR_TYPE = ReportType.PAIR_FULL
+
+# Тип по токену карты на странице возврата, где тип из адреса не приходит.
+# Это прежний товар карты: за него ещё возвращаются из ЮKassa те, кто
+# платил до 08.10.2026.
+RETURN_CHART_TYPE = ReportType.FULL_NATAL
+
+# Платные типы, которые открытая страница не продаёт: VIP оплачивается
+# только по ссылке заказа из админки (docs/sales-policy.md). Иначе его
+# купили бы без переписки, и владелец узнал бы о заказе из выписки.
+_ORDER_ONLY_TYPES = frozenset({ReportType.VIP_NATAL})
 
 # Платные типы, адресуемые парой. Реестр в services/reports.py закрытый
 # (_PAIR_TYPES), а здесь нужна только платная его часть.
@@ -188,8 +197,8 @@ async def pay_done(
     """
     back = _back(back)
     # Тип не передаём: здесь он неизвестен, а нужен только для витрины.
-    # _context подставит умолчание того входа, который нашёлся по токену.
-    target = await _context(session, token, "")
+    # Продаётся ли он сейчас, не проверяем — деньги за него уже могли прийти.
+    target = await _context(session, token, "", for_sale=False)
 
     order = await orders.get_by_token(session, order_token) if order_token else None
     if order is not None and not _order_matches(order, target):
@@ -209,7 +218,7 @@ async def pay_done(
             # Перечитываем оба объекта по той же причине, что и карту выше:
             # после отката шаблон читает и номер заказа, и имя владельца
             # карты — уже вне async-контекста, где догрузка падает.
-            target = await _context(session, token, "")
+            target = await _context(session, token, "", for_sale=False)
             order = await orders.get_by_token(session, order_token)
 
     paid = order is not None and order.is_paid
@@ -362,7 +371,9 @@ class _Target:
         return {"chart_id": self.chart.id}
 
 
-async def _context(session: AsyncSession, token: str, report_type: str) -> _Target:
+async def _context(
+    session: AsyncSession, token: str, report_type: str, *, for_sale: bool = True
+) -> _Target:
     """Что покупают, кому это принадлежит и какой это тип разбора. Иначе 404.
 
     Токен в адресе бывает и картой, и парой — форма маршрута от этого не
@@ -370,7 +381,8 @@ async def _context(session: AsyncSession, token: str, report_type: str) -> _Targ
     на порядки меньше, и лишний запрос достаётся редкому случаю.
 
     Владелец нужен потому, что заказ и доступ принадлежат ему, а не тому,
-    кто открыл ссылку на оплату (см. шапку модуля).
+    кто открыл ссылку на оплату (см. шапку модуля). `for_sale=False` — для
+    страницы возврата: тип там не продаётся, а только показывается.
     """
     pair = None
     chart = await charts.get_chart_by_token(session, token)
@@ -389,7 +401,11 @@ async def _context(session: AsyncSession, token: str, report_type: str) -> _Targ
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Такой карты нет")
         chart = anchor
 
-    rtype = _report_type(report_type, is_pair=pair is not None)
+    is_pair = pair is not None
+    if for_sale:
+        rtype = _report_type(report_type, is_pair=is_pair)
+    else:
+        rtype = DEFAULT_PAIR_TYPE if is_pair else RETURN_CHART_TYPE
 
     owner = await users.get_by_id(session, chart.user_id)
     if owner is None:
@@ -399,25 +415,26 @@ async def _context(session: AsyncSession, token: str, report_type: str) -> _Targ
 
 
 def _report_type(value: str, *, is_pair: bool) -> ReportType:
-    """Тип разбора из адреса; пустая строка означает «обычный для этого входа».
+    """Тип разбора из адреса; пустая строка у пары — разбор совместимости.
 
-    Умолчание зависит от входа: у карты продаётся полный натальный разбор, у
-    пары — разбор совместимости. Зашитая константа на всех отправила бы
-    /pay/<токен пары> без параметра искать карту и отвечать 404.
+    У карты пустая строка — 404 «не продаётся»: открыто ей продавать нечего,
+    полный натальный снят с продажи, а VIP идёт через заказ из админки.
 
-    404 на неизвестный, неплатный и не подходящий входу тип: парный разбор
-    не купить по токену карты, а натальный — по токену пары, иначе заказ
-    ушёл бы по адресу, где отчёта никогда не появится.
+    404 на неизвестный, неплатный, только-по-заказу и не подходящий входу
+    тип: парный разбор не купить по токену карты, а натальный — по токену
+    пары, иначе заказ ушёл бы по адресу, где отчёта никогда не появится.
     """
     if not value:
-        return DEFAULT_PAIR_TYPE if is_pair else DEFAULT_TYPE
+        if is_pair:
+            return DEFAULT_PAIR_TYPE
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Этот разбор не продаётся")
 
     try:
         rtype = ReportType(value)
     except ValueError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Неизвестный вид разбора")
 
-    if not orders.is_for_sale(rtype):
+    if not orders.is_for_sale(rtype) or rtype in _ORDER_ONLY_TYPES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Этот разбор не продаётся")
 
     if (rtype in _PAIR_TYPES) != is_pair:
