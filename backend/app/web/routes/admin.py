@@ -1,5 +1,5 @@
-"""Маршруты админки стенда: что сгенерировано, чем один текст лучше другого
-и очередь постов сообщества.
+"""Маршруты админки стенда: что сгенерировано, чем один текст лучше другого,
+очередь постов сообщества и VIP-заказы из лички.
 
 Отдельный роутер, а не секция в router.py: `require_admin` висит на всём
 APIRouter сразу, поэтому забыть охрану на новом маршруте невозможно — а за
@@ -11,7 +11,8 @@ app/services/admin.py и app/services/content.py, здесь только раз
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 
 from fastapi import (
@@ -25,14 +26,17 @@ from fastapi import (
     status,
 )
 from fastapi.responses import RedirectResponse
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
 from app import generation
 from app.db import get_session
-from app.models import Platform
+from app.models import Platform, ReportType
+from app.schemas.charts import ChartIn
 from app.services import admin as admin_service
-from app.services import broadcast, card, content, events, reports
+from app.services import broadcast, card, content, events, orders, reports, vip
+from app.services import charts as charts_service
 from app.services import users as users_service
 from app.vk import api as vk_api
 from app.web.deps import require_admin
@@ -233,6 +237,141 @@ async def toggle_tester(
     # в логе нужен, а персональных данных в нём быть не должно.
     logger.info("Админка: тестер у пользователя %s → %s", user_id, wanted)
     return RedirectResponse("/admin", status.HTTP_303_SEE_OTHER)
+
+
+@dataclass(frozen=True, slots=True)
+class _VipForm:
+    """Поля формы VIP-заказа строками — как пришли, чтобы вернуть их в форму."""
+
+    vk: str = ""
+    person_name: str = ""
+    birth_date: str = ""
+    birth_time: str = ""
+    city: str = ""
+
+
+@router.get("/vip")
+async def vip_orders(request: Request, session: SessionDep) -> Response:
+    """VIP-заказы и форма нового: данные из лички → карта → ссылка на оплату."""
+    return await _vip_response(request, session, _VipForm())
+
+
+@router.post("/vip")
+async def vip_create(
+    request: Request,
+    session: SessionDep,
+    vk: Annotated[str, Form()] = "",
+    person_name: Annotated[str, Form()] = "",
+    birth_date: Annotated[str, Form()] = "",
+    birth_time: Annotated[str, Form()] = "",
+    city: Annotated[str, Form()] = "",
+    place_query: Annotated[str, Form()] = "",
+    place: Annotated[str, Form()] = "",
+) -> Response:
+    """Завести VIP-заказ. Город подтверждается вторым заходом формы.
+
+    Первый заход показывает найденные города: неоднозначное место уточняется
+    до оплаты, а не после (docs/sales-policy.md, шаг 4). Номер выбранного
+    варианта действует, только пока город в поле тот же, по которому искали.
+    """
+    form = _VipForm(
+        vk=vk.strip(),
+        person_name=person_name.strip(),
+        birth_date=birth_date,
+        birth_time=birth_time,
+        city=city.strip(),
+    )
+
+    vk_user_id = await admin_service.resolve_vk_user_id(form.vk)
+    if vk_user_id is None:
+        return await _vip_response(
+            request, session, form, error="Не узнали человека VK: нужна ссылка на профиль, id123 или число"
+        )
+
+    places = charts_service.search_places(form.city)
+    if not places:
+        return await _vip_response(request, session, form, error="Город не нашёлся — проверьте написание")
+
+    chosen = None
+    if place.isdigit() and place_query == form.city and int(place) < len(places):
+        chosen = places[int(place)]
+
+    # Даты проверяет та же схема, что у приложения; координаты ей нужны любые
+    # из найденных — до выбора города проверяются только дата и имя.
+    probe = chosen or places[0]
+    try:
+        payload = ChartIn(
+            person_name=form.person_name or None,
+            birth_date=form.birth_date,
+            birth_time=form.birth_time or None,
+            lat=probe.lat,
+            lon=probe.lon,
+            place_name=probe.label,
+        )
+    except ValidationError as e:
+        problems = "; ".join(str(err["msg"]).removeprefix("Value error, ") for err in e.errors())
+        return await _vip_response(request, session, form, error=problems, places=places)
+
+    if chosen is None:
+        return await _vip_response(request, session, form, places=places)
+
+    try:
+        order = await vip.create_order(
+            session,
+            vk_user_id=vk_user_id,
+            # Полночь — заглушка: при неизвестном времени create_chart ставит полдень.
+            birth_local=datetime.combine(payload.birth_date, payload.birth_time or time.min),
+            time_known=payload.birth_time is not None,
+            # Зона по координатам, как в приложении: иначе его карта того же
+            # человека получила бы другой input_hash и задвоилась.
+            place=charts_service.place_from_coords(chosen.lat, chosen.lon, chosen.label),
+            person_name=payload.person_name,
+        )
+    except orders.NotForSaleError:
+        return await _vip_response(request, session, form, error="VIP-разбора нет в прайсе (orders.PRICES)")
+    await session.commit()
+    return RedirectResponse(f"/admin/vip/{order.id}", status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/vip/{order_id}")
+async def vip_order(request: Request, session: SessionDep, order_id: int) -> Response:
+    """Карточка VIP-заказа: кто, по какой карте, статус и ссылка на оплату."""
+    item = await vip.get_order(session, order_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого VIP-заказа нет")
+    return templates.TemplateResponse(
+        request,
+        "admin_vip_order.html",
+        {
+            "item": item,
+            "pay_url": vip.payment_url(item.order),
+            "price": orders.price_rub(ReportType.VIP_NATAL),
+            "delivery_hours": int(vip.DELIVERY_TIME.total_seconds() // 3600),
+        },
+    )
+
+
+async def _vip_response(
+    request: Request,
+    session: AsyncSession,
+    form: _VipForm,
+    *,
+    error: str | None = None,
+    places: list[charts_service.Place] | None = None,
+) -> Response:
+    """Экран VIP-заказов: список, форма с введённым и, если есть, выбор города."""
+    return templates.TemplateResponse(
+        request,
+        "admin_vip.html",
+        {
+            "items": await vip.list_orders(session),
+            "form": form,
+            "error": error,
+            "places": places or [],
+            # Для пометки «просрочен» у заказов в работе.
+            "now": datetime.now(UTC),
+        },
+    )
 
 
 @router.get("/compare")

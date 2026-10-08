@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}VIP-заказ №{{ item.order.id }}{% endblock %}
+
+{# Карточка VIP-заказа: кто, по какой карте, статус и ссылка на оплату для
+   лички. Данные — services/vip.get_order, маршрут — web/routes/admin.vip_order. #}
+
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  {% set o = item.order %}
+  {% set u = item.user %}
+  {% set c = item.chart %}
+
+  <h1>VIP-заказ №{{ o.id }}</h1>
+  <p class="lead">
+    <a href="/admin/vip">все VIP-заказы</a>
+    · <a href="/admin/user/{{ u.id }}">карточка человека</a>
+    {% if vk_group_id() %}
+      · <a href="https://vk.com/gim{{ vk_group_id() }}?sel={{ u.external_id }}" target="_blank" rel="noopener">диалог сообщества</a>
+    {% endif %}
+  </p>
+
+  <div class="table-wrap">
+    <table class="grid">
+      <tbody>
+        <tr>
+          <td>Покупатель</td>
+          <td>
+            {{ u.platform_username or "Без имени" }}
+            · <a href="https://vk.com/id{{ u.external_id }}" target="_blank" rel="noopener">vk.com/id{{ u.external_id }}</a>
+          </td>
+        </tr>
+        <tr>
+          <td>Карта</td>
+          <td>
+            {% if c %}
+              {# Сверить с перепиской до отправки ссылки: после оплаты ошибка в
+                 данных — это возврат денег. #}
+              {{ c.person_name or "Без имени" }} ·
+              {{ c.birth_local.strftime("%d.%m.%Y") }}
+              {% if c.time_known %}{{ c.birth_local.strftime("%H:%M") }}{% else %}<span class="badge">время неизвестно</span>{% endif %}
+              · {{ c.place_name }} <span class="muted">({{ c.tz }})</span>
+              · <a href="/r/{{ c.token }}">открыть</a>
+            {% else %}<span class="muted">карта удалена</span>{% endif %}
+          </td>
+        </tr>
+        <tr><td>Сумма</td><td>{{ o.amount // 100 }} ₽</td></tr>
+        <tr><td>Заведён</td><td>{{ o.created_at | msk }}</td></tr>
+        <tr>
+          <td>Статус</td>
+          <td>
+            {% if o.delivered_at %}отправлен {{ o.delivered_at | msk }}
+            {% elif item.in_work %}оплачен {{ o.paid_at | msk }} · сдать до <b>{{ item.due_at | msk }}</b>
+            {% elif o.status.value == "pending" %}ждёт оплаты
+            {% else %}{{ o.status.value }}{% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  {% if o.status.value == "pending" %}
+    <h2>Ссылка на оплату</h2>
+    {% if pay_url %}
+      <p><a href="{{ pay_url }}" target="_blank" rel="noopener">{{ pay_url }}</a></p>
+      {# Цена и ссылка — только в переписке, не в постах и не в приложении
+         (docs/sales-policy.md, «Правила текстов»). Текст — заготовка, править
+         под разговор. #}
+      <label>
+        Текст для лички
+        <textarea rows="4" style="width: 100%" readonly onclick="this.select()">VIP-разбор натальной карты — {{ price }} ₽.
+Оплатить можно здесь: {{ pay_url }}
+После оплаты пришлю разбор сюда в течение {{ delivery_hours }} часов.</textarea>
+      </label>
+    {% else %}
+      <p class="error">Платежи не настроены: в .env нет ключей ЮKassa или PUBLIC_BASE_URL.</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Ссылку на оплату отправляйте только в личку сообщества.
+{% endblock %}

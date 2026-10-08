@@ -15,19 +15,22 @@ payments/yookassa.py. Своей логики денег здесь нет — �
 такой: заплатить за чужой разбор можно, получить чужой разбор — нет.
 
 Отсюда же форма маршрутов: адрес построен на токене КАРТЫ, а не заказа —
-только его страница разбора знает заранее, когда рисует кнопку.
+только его страница разбора знает заранее, когда рисует кнопку. Исключение —
+VIP-разбор: его заказ заводит владелец в админке, и ссылка в личку ведёт на
+токен заказа (`/pay/order/<token>`).
 
 ГЕНЕРАЦИЮ ЗАПУСКАЕТ ОПЛАТА, А НЕ ЕЩЁ ОДНА КНОПКА
 
 Как только деньги пришли, текст ставится в очередь — и в вебхуке, и на
 странице возврата, что бы из них ни случилось первым. Двойной траты это не
 даёт: замок и кеш в services/reports.py считают один и тот же адрес отчёта
-одной работой.
+одной работой. VIP в очередь не ставится: его готовит владелец руками.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -41,7 +44,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.models import Chart, Order, OrderStatus, Pair, ReportType, User
 from app.payments import yookassa
-from app.services import charts, events, orders, pairs, reports, users
+from app.services import charts, events, orders, pairs, reports, users, vip
 from app.web import deps
 from app.web.templating import templates
 
@@ -130,30 +133,14 @@ async def pay_start(
         return RedirectResponse(_app_url(target.app_path), status.HTTP_303_SEE_OTHER)
 
     try:
-        order = await _new_order(session, target)
-        # Заказ мог достаться от прошлого захода вместе со ссылкой на форму
-        # оплаты. ЮKassa закрывает неоплаченные платежи сама, а уведомление
-        # об этом могло не дойти — тогда без проверки человек при каждом
-        # нажатии возвращался бы на мёртвую форму и купить не смог бы вовсе.
-        if order.confirmation_url:
-            await orders.sync_status(session, order)
-            if order.is_paid:
-                await session.commit()
-                return RedirectResponse(
-                    _app_url(target.app_path), status.HTTP_303_SEE_OTHER
-                )
-            if order.status is not OrderStatus.PENDING:
-                # Платёж закрыт, платить по нему нечем: заводим новый заказ.
-                # Тем же он быть не может — ключом идемпотентности служит его
-                # токен, и ЮKassa вернула бы по нему тот же мёртвый платёж.
-                order = await _new_order(session, target)
-        confirmation_url = await orders.start_payment(
+        confirmation_url = await _begin_payment(
             session,
-            order,
-            # Абсолютный адрес обязателен: ЮKassa возвращает человека из
-            # своего домена, относительный путь ей не годится.
-            return_url=_absolute(f"/pay/{token}/done?order={order.token}&back={back}"),
+            target,
+            lambda order: f"/pay/{token}/done?order={order.token}&back={back}",
         )
+        if confirmation_url is None:
+            await session.commit()
+            return RedirectResponse(_app_url(target.app_path), status.HTTP_303_SEE_OTHER)
     except (orders.OrderError, yookassa.PaymentError) as e:
         # Заказ мог успеть записаться, а платёж — нет; откатываем, чтобы не
         # копить строки, за которые никто не платил.
@@ -255,6 +242,7 @@ async def pay_done(
             "is_pair": target.pair is not None,
             "chart_token": token,
             "chart_url": _app_url(target.app_path),
+            "pay_path": f"/pay/{token}",
             "order": order,
             "paid": paid,
             "title": orders.title(order.report_type if order else target.rtype),
@@ -266,6 +254,107 @@ async def pay_done(
             "vk_return_url": _vk_return_url(target) if back == orders.BACK_VK else None,
         },
     )
+
+
+# --- VIP: оплата по заказу из админки --------------------------------------
+
+
+@router.get("/pay/order/{order_token}", dependencies=[Depends(deps.forbid_in_vk)])
+async def vip_pay_page(request: Request, order_token: str, session: SessionDep) -> Response:
+    """Витрина VIP-заказа по ссылке из лички. Только читает, как и pay_page."""
+    target, _ = await _vip_context(session, order_token)
+    paid = await orders.has_paid(
+        session, user_id=target.owner.id, report_type=target.rtype, **target.address
+    )
+    return templates.TemplateResponse(
+        request,
+        "pay.html",
+        _page_context(target, paid=paid, form_action=f"/pay/order/{order_token}"),
+    )
+
+
+@router.post("/pay/order/{order_token}", dependencies=[Depends(deps.forbid_in_vk)])
+async def vip_pay_start(request: Request, order_token: str, session: SessionDep) -> Response:
+    """Кнопка оплаты VIP: платёж по заказу, а если тот мёртв — по новому.
+
+    Новый заказ заводится на те же карту и покупателя, и возврат из ЮKassa
+    придёт уже по его токену. Ссылка в личке поэтому не протухает.
+    """
+    target, _ = await _vip_context(session, order_token)
+    form_action = f"/pay/order/{order_token}"
+    try:
+        confirmation_url = await _begin_payment(
+            session, target, lambda order: f"/pay/order/{order.token}/done"
+        )
+    except (orders.OrderError, yookassa.PaymentError) as e:
+        await session.rollback()
+        logger.warning("Оплата VIP по карте %s не началась: %s", target.chart.id, e)
+        # Перечитываем по той же причине, что в pay_start: после отката
+        # шаблон не может догрузить поля устаревших объектов.
+        target, _ = await _vip_context(session, order_token)
+        return templates.TemplateResponse(
+            request,
+            "pay.html",
+            _page_context(target, paid=False, error=_HUMAN_ERROR, form_action=form_action),
+        )
+
+    await session.commit()
+    if confirmation_url is None:
+        return templates.TemplateResponse(
+            request, "pay.html", _page_context(target, paid=True, form_action=form_action)
+        )
+    return RedirectResponse(confirmation_url, status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/pay/order/{order_token}/done", dependencies=[Depends(deps.forbid_in_vk)])
+async def vip_pay_done(request: Request, order_token: str, session: SessionDep) -> Response:
+    """Возврат с формы ЮKassa по VIP-заказу. Генерацию не ставит — разбор пишут руками."""
+    target, order = await _vip_context(session, order_token)
+    order_id = order.id
+    try:
+        await orders.sync_status(session, order)
+        await session.commit()
+    except yookassa.PaymentError:
+        await session.rollback()
+        logger.warning("Заказ %s: статус спросить не удалось", order_id)
+        target, order = await _vip_context(session, order_token)
+
+    paid_at = order.paid_at if order.is_paid else None
+    return templates.TemplateResponse(
+        request,
+        "pay_done.html",
+        {
+            "chart": target.chart,
+            "is_pair": False,
+            "is_vip": True,
+            "chart_token": target.token,
+            "chart_url": _app_url(target.app_path),
+            "pay_path": f"/pay/order/{order_token}",
+            "order": order,
+            "paid": order.is_paid,
+            "title": orders.title(order.report_type),
+            "due_at": paid_at + vip.DELIVERY_TIME if paid_at is not None else None,
+            "owner_name": target.chart.person_name,
+            "vk_return_url": None,
+        },
+    )
+
+
+async def _vip_context(session: AsyncSession, order_token: str) -> tuple[_Target, Order]:
+    """VIP-заказ по токену из ссылки и то, что по нему покупают. Иначе 404.
+
+    Покупатель и карта берутся из заказа: их выбрал владелец в админке, а не
+    тот, кто открыл ссылку.
+    """
+    order = await orders.get_by_token(session, order_token)
+    if order is None or order.report_type not in _ORDER_ONLY_TYPES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого заказа нет")
+    # Карту человек мог удалить — платить тогда не за что.
+    chart = await session.get(Chart, order.chart_id) if order.chart_id is not None else None
+    owner = await users.get_by_id(session, order.user_id)
+    if chart is None or owner is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого заказа нет")
+    return _Target(chart=chart, pair=None, owner=owner, rtype=order.report_type), order
 
 
 # --- Вебхук ----------------------------------------------------------------
@@ -484,13 +573,48 @@ async def _new_order(session: AsyncSession, target: _Target) -> Order:
     )
 
 
+async def _begin_payment(
+    session: AsyncSession, target: _Target, return_path: Callable[[Order], str]
+) -> str | None:
+    """Взять или завести заказ и платёж: адрес формы ЮKassa, None — уже оплачено.
+
+    `return_path` строит адрес возврата по заказу: какой заказ окажется в
+    работе, известно только здесь. Не коммитит; бросает OrderError и
+    PaymentError — откат на вызывающем.
+    """
+    order = await _new_order(session, target)
+    # Заказ мог достаться от прошлого захода вместе со ссылкой на форму
+    # оплаты. ЮKassa закрывает неоплаченные платежи сама, а уведомление
+    # об этом могло не дойти — тогда без проверки человек при каждом
+    # нажатии возвращался бы на мёртвую форму и купить не смог бы вовсе.
+    if order.confirmation_url:
+        await orders.sync_status(session, order)
+        if order.is_paid:
+            return None
+        if order.status is not OrderStatus.PENDING:
+            # Платёж закрыт, платить по нему нечем: заводим новый заказ.
+            # Тем же он быть не может — ключом идемпотентности служит его
+            # токен, и ЮKassa вернула бы по нему тот же мёртвый платёж.
+            order = await _new_order(session, target)
+    # Абсолютный адрес обязателен: ЮKassa возвращает человека из своего
+    # домена, относительный путь ей не годится.
+    return await orders.start_payment(
+        session, order, return_url=_absolute(return_path(order))
+    )
+
+
 def _order_matches(order: Order, target: _Target) -> bool:
     """Тот ли это заказ, за который платили на этой странице.
 
     Обе колонки сравниваются обязательно: у парного заказа chart_id тоже
     заполнен — это якорная карта инициатора, общая у всех его пар. Проверка
     по одной карте приняла бы заказ на «я и Маша» за оплату «я и Лены».
+
+    VIP-заказ по токену карты не принимается: у него своя страница возврата,
+    а здешняя поставила бы его в генерацию.
     """
+    if order.report_type in _ORDER_ONLY_TYPES:
+        return False
     pair_id = target.pair.id if target.pair is not None else None
     return order.chart_id == target.chart.id and order.pair_id == pair_id
 
@@ -512,10 +636,18 @@ def _page_context(
     paid: bool,
     back: str = "",
     error: str | None = None,
+    form_action: str | None = None,
 ) -> dict:
-    """Данные витрины оплаты — одним словарём для шаблона."""
+    """Данные витрины оплаты — одним словарём для шаблона.
+
+    `form_action` задаёт VIP-витрина: её кнопка шлёт форму на адрес заказа.
+    """
     is_pair = target.pair is not None
     return {
+        "form_action": form_action or f"/pay/{target.token}",
+        # VIP не открывается сразу после оплаты, а приходит в личку —
+        # шаблону это меняет и обещание, и состояние «уже оплачено».
+        "is_vip": target.rtype in _ORDER_ONLY_TYPES,
         "chart": target.chart,
         # Шаблон по нему решает, показывать ли данные рождения: у пары их на
         # странице нет — ссылку открывает кто угодно, а за парой двое людей.
@@ -556,6 +688,9 @@ async def _start_generation(
     удалены (колонки обнуляются, чтобы заказ пережил удаление персональных
     данных), и тогда генерировать нечего.
     """
+    if order.report_type in _ORDER_ONLY_TYPES:
+        # VIP готовит владелец руками; промпта под этот тип нет.
+        return
     if order.pair_id is not None:
         pair = await session.get(Pair, order.pair_id)
         # Пару сносит каскадом удаление любой из двух карт, поэтому проверка

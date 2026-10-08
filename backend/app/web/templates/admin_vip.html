@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}VIP-заказы{% endblock %}
+
+{# VIP-заказы из лички: форма нового заказа и список. Данные —
+   services/vip.py, маршруты — web/routes/admin.vip_orders и vip_create.
+   «В работе» = оплачен и не отправлен (docs/db-schema.md). #}
+
+{% block body_class %}admin{% endblock %}
+
+{% block content %}
+  <h1>VIP-заказы</h1>
+  <p class="lead">
+    {# Голый путь, без url(): в админку ходят по Basic-паролю. #}
+    <a href="/admin">разборы</a>
+    · <a href="/admin/funnel">воронка</a>
+    · <a href="/admin/user">люди</a>
+  </p>
+
+  {# --- Новый заказ ------------------------------------------------------ #}
+
+  <h2>Новый заказ</h2>
+  <div class="card">
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+    <form method="post" action="/admin/vip">
+      <label>
+        Человек в VK
+        <input type="text" name="vk" value="{{ form.vk }}" required
+               placeholder="vk.com/…, id123 или число">
+        <small>Из диалога сообщества: заказ и ссылка на оплату — на этого человека.</small>
+      </label>
+      <label>
+        Имя для разбора
+        <input type="text" name="person_name" value="{{ form.person_name }}" maxlength="64">
+      </label>
+      <label>
+        Дата рождения
+        <input type="date" name="birth_date" value="{{ form.birth_date }}" required>
+      </label>
+      <label>
+        Время рождения
+        <input type="time" name="birth_time" value="{{ form.birth_time }}">
+        <small>Пусто — время неизвестно, дома и Асцендент будут условными. Лучше уточнить до оплаты.</small>
+      </label>
+      <label>
+        Город рождения
+        <input type="text" name="city" value="{{ form.city }}" required>
+      </label>
+
+      {# Варианты города: второй заход формы. Строка поиска едет скрытым
+         полем — по ней сервер проверяет, что номер варианта из этого списка. #}
+      {% if places %}
+        <input type="hidden" name="place_query" value="{{ form.city }}">
+        <p class="muted">Какой именно город?</p>
+        {% for p in places %}
+          <label class="checkbox">
+            <input type="radio" name="place" value="{{ loop.index0 }}" required
+                   {% if places | length == 1 %}checked{% endif %}>
+            {{ p.label }} <span class="muted">· {{ "%.2f"|format(p.lat) }}, {{ "%.2f"|format(p.lon) }} · {{ p.tz }}</span>
+          </label>
+        {% endfor %}
+        <button type="submit">Посчитать карту и завести заказ</button>
+      {% else %}
+        <button type="submit">Найти город</button>
+      {% endif %}
+    </form>
+  </div>
+
+  {# --- Список ---------------------------------------------------------- #}
+
+  <h2>Заказы · {{ items | length }}</h2>
+  {% if items %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr><th>Заведён</th><th>Кто</th><th>Карта</th><th>Статус</th><th class="num">Сумма</th></tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+            {% set o = it.order %}
+            <tr>
+              <td class="nowrap"><a href="/admin/vip/{{ o.id }}">№{{ o.id }}</a> {{ o.created_at | msk("%d.%m %H:%M") }}</td>
+              <td>
+                <a href="/admin/user/{{ it.user.id }}">{{ it.user.platform_username or "Без имени" }}</a>
+                {% if vk_group_id() %}
+                  · <a href="https://vk.com/gim{{ vk_group_id() }}?sel={{ it.user.external_id }}" target="_blank" rel="noopener">диалог</a>
+                {% endif %}
+              </td>
+              <td>
+                {% if it.chart %}
+                  {{ it.chart.person_name or "Без имени" }} · {{ it.chart.birth_local.strftime("%d.%m.%Y") }}
+                {% else %}<span class="muted">карта удалена</span>{% endif %}
+              </td>
+              <td class="nowrap">
+                {% if o.delivered_at %}отправлен {{ o.delivered_at | msk("%d.%m %H:%M") }}
+                {% elif it.in_work %}
+                  в работе до {{ it.due_at | msk("%d.%m %H:%M") }}
+                  {% if it.due_at < now %}<span class="badge">просрочен</span>{% endif %}
+                {% elif o.status.value == "pending" %}<span class="muted">ждёт оплаты</span>
+                {% else %}{{ o.status.value }}{% endif %}
+              </td>
+              <td class="num">{{ o.amount // 100 }} ₽</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Заказов пока нет.</p>
+  {% endif %}
+{% endblock %}
+
+{% block footer %}
+  Служебная страница. Ссылку на оплату отправляйте только в личку сообщества.
+{% endblock %}

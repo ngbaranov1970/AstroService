@@ -545,22 +545,16 @@ async def find_users(session: AsyncSession, query: str) -> list[User]:
         user = await session.get(User, int(query[1:]))
         return [user] if user else []
 
-    link = _VK_LINK.match(query)
-    screen = link.group(1) if link else query
-    vk_user_id = _plain_vk_id(screen)
-    if vk_user_id is None and link:
-        # Короткое имя (vk.com/durov) знает только VK; сообщество или
-        # несуществующее имя — никого, по имени такую ссылку не ищем.
-        resolved = await vk_api.resolve_screen_name(screen)
-        if resolved is None:
-            return []
-        vk_user_id = str(resolved)
-
+    vk_user_id = await resolve_vk_user_id(query)
     if vk_user_id is not None:
         user = await session.scalar(
-            select(User).where(User.platform == Platform.VK, User.external_id == vk_user_id)
+            select(User).where(User.platform == Platform.VK, User.external_id == str(vk_user_id))
         )
         return [user] if user else []
+    if _VK_LINK.match(query):
+        # Ссылка на сообщество или несуществующее имя — никого; по имени
+        # такую строку не ищем.
+        return []
 
     pattern = f"%{query}%"
     # Имя из анкеты живёт в картах, а не в users.name: на проде то пустое у всех.
@@ -576,6 +570,24 @@ async def find_users(session: AsyncSession, query: str) -> list[User]:
         .limit(USER_SEARCH_LIMIT)
     )
     return list(await session.scalars(stmt))
+
+
+async def resolve_vk_user_id(query: str) -> int | None:
+    """VK id человека из ссылки на профиль, `id123` или голых цифр.
+
+    None — строка не про человека VK: имя, ссылка на сообщество или
+    несуществующее короткое имя. Короткое имя (vk.com/durov) знает только
+    VK, поэтому для него идёт запрос к API.
+    """
+    query = query.strip()
+    link = _VK_LINK.match(query)
+    screen = link.group(1) if link else query
+    plain = _plain_vk_id(screen)
+    if plain is not None:
+        return int(plain)
+    if link:
+        return await vk_api.resolve_screen_name(screen)
+    return None
 
 
 def _plain_vk_id(screen: str) -> str | None:
