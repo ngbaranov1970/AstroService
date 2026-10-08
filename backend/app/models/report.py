@@ -46,6 +46,8 @@ class ReportType(str, enum.Enum):
     FULL_NATAL — платный полный разбор посекционно.
     PAIR_FREE, PAIR_FULL — совместимость: тизер и платный разбор пары.
     Их адрес в кеше — pair_id, а не chart_id (см. индексы у Report).
+    VIP_NATAL — разбор, который владелец правит руками и шлёт в личку;
+    после оплаты не генерируется (docs/sales-policy.md).
     MATRIX, EASTERN — заготовки под Матрицу Судьбы и восточный гороскоп;
     заведены сразу, чтобы добавление продукта не требовало правки CHECK.
     """
@@ -54,6 +56,7 @@ class ReportType(str, enum.Enum):
     FULL_NATAL = "full_natal"
     PAIR_FREE = "pair_free"
     PAIR_FULL = "pair_full"
+    VIP_NATAL = "vip_natal"
     MATRIX = "matrix"
     EASTERN = "eastern"
 

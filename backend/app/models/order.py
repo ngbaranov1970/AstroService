@@ -20,6 +20,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     func,
 )
 from sqlalchemy import (
@@ -247,6 +248,12 @@ class Order(Base):
     # потому что вопрос «когда пришли деньги» — это выручка по дням, и
     # ответ на него не должен требовать разбора логов вебхука.
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- VIP-разбор (только report_type = vip_natal) ------------------------
+    # Черновик лежит здесь, а не в reports: строка reports открыла бы текст
+    # в приложении до правки. «В работе» = PAID и delivered_at IS NULL.
+    draft_text: Mapped[str | None] = mapped_column(Text)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @property
     def is_paid(self) -> bool:
