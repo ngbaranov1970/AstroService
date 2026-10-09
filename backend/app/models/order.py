@@ -260,6 +260,9 @@ class Order(Base):
     # Черновик лежит здесь, а не в reports: строка reports открыла бы текст
     # в приложении до правки. «В работе» = PAID и delivered_at IS NULL.
     draft_text: Mapped[str | None] = mapped_column(Text)
+    # Вариант от DeepSeek (правка или новый черновик), ждущий «принять / отказаться».
+    # Пока он не принят, draft_text не трогаем: сравнивать надо со старым.
+    draft_candidate: Mapped[str | None] = mapped_column(Text)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Пол вводят в форме заказа; у заказов до 09.10.2026 он NULL.
     client_gender: Mapped[ClientGender | None] = mapped_column(

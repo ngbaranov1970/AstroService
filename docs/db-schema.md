@@ -102,7 +102,8 @@ erDiagram
         jsonb    provider_data "сырое уведомление ЮKassa"
         timestamptz created_at
         timestamptz paid_at
-        text     draft_text "nullable; черновик VIP, пока владелец правит"
+        text     draft_text "nullable; черновик VIP, после отправки — отправленный текст"
+        text     draft_candidate "nullable; вариант DeepSeek, ждёт принять/отказаться"
         timestamptz delivered_at "nullable; VIP отправлен в личку"
         enum     client_gender "nullable; female/male, только VIP — для рода в тексте"
     }
@@ -269,8 +270,12 @@ erDiagram
 `OrderStatus` описывает деньги, а не работу владельца, и смешивать их значит
 ломать проверки «оплачено ли». Черновик лежит в `orders.draft_text`, а не в
 `reports`: строка `reports` для карты открывает текст в приложении, и черновик
-`vip_natal` стал бы виден клиенту до правки. На «Готово» пишется строка
-`reports` с типом `vip_natal` и проставляется `delivered_at`. Пол клиента
+`vip_natal` стал бы виден клиенту до правки. На «Готово» текст уходит в личку и
+проставляется `delivered_at`; строки в `reports` нет и после отправки — копию в
+приложении отложили (docs/sales-policy.md, шаг 8), отправленный текст остаётся в
+`draft_text`. Вариант от DeepSeek, ждущий решения владельца, лежит в
+`draft_candidate`: `draft_text` до «Принять» не трогаем, сравнивать надо со
+старым. Пол клиента
 (`client_gender`) хранится в заказе, а не в `charts`: он нужен только
 VIP-промптам (черновик, правка, ответ клиенту), и колонка в `charts`
 касалась бы всех карт приложения ради одного сценария.

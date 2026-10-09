@@ -143,6 +143,21 @@ def build_user(natal: dict, gender: ClientGender | None, *, time_known: bool = T
     Имя в промпт не идёт, как и в остальных натальных разборах. При
     time_known=False домов, углов и аспектов к углам в сообщении нет.
     """
+    lines = chart_block(natal, gender, time_known=time_known)
+    lines.append("")
+    lines.append(
+        "Напиши личный разбор этой натальной карты по правилам из системного "
+        "сообщения. Верни только JSON, без обёртки markdown."
+    )
+    return "\n".join(lines)
+
+
+def chart_block(natal: dict, gender: ClientGender | None, *, time_known: bool = True) -> list[str]:
+    """Строки расчёта карты: пол, планеты, углы, дома, аспекты.
+
+    Публичная, потому что её зовёт vip_edit: правка обязана видеть карту
+    ровно так, как её видел черновик.
+    """
     lines: list[str] = []
     if gender is not None:
         lines.append(_GENDER_LINES[gender])
@@ -175,13 +190,7 @@ def build_user(natal: dict, gender: ClientGender | None, *, time_known: bool = T
             f"- {a['p1_ru']} {a['type_ru']} {a['p2_ru']} (орб {abs(a['orb']):.1f}°)"
             for a in aspects
         ]
-
-    lines.append("")
-    lines.append(
-        "Напиши личный разбор этой натальной карты по правилам из системного "
-        "сообщения. Верни только JSON, без обёртки markdown."
-    )
-    return "\n".join(lines)
+    return lines
 
 
 def _strip_fence(text: str) -> str:
