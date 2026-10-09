@@ -10,17 +10,23 @@ docs/sales-policy.md.
 from __future__ import annotations
 
 import logging
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.db import get_sessionmaker
 from app.models import Chart, Order, OrderStatus, Platform, ReportType, User
 from app.services import charts, orders, users
+from app.vk import api as vk_api
 
 logger = logging.getLogger(__name__)
+
+MOSCOW = ZoneInfo("Europe/Moscow")
 
 # Метка канала у людей, впервые попавших в базу через заказ из лички:
 # по ней их видно отдельно от пришедших в приложение.
@@ -145,3 +151,86 @@ async def get_order(session: AsyncSession, order_id: int) -> VipOrder | None:
         return None
     order, user, chart = row
     return VipOrder(order=order, user=user, chart=chart)
+
+
+# --- Уведомление об оплате ---------------------------------------------------
+
+
+# Письмо клиенту после оплаты. Точного часа не называем: обещание к минуте
+# становится поводом для претензии.
+CLIENT_PAID_TEXT = (
+    "Оплата получена, спасибо! "
+    "Ваш VIP-разбор будет готов в течение суток, но, как правило, гораздо быстрее. "
+    "Пришлю его сюда, в этот диалог."
+)
+
+
+def owner_paid_text(item: VipOrder, *, client_note: str) -> str:
+    """Письмо владельцу: кто оплатил, срок, ссылка на карточку и судьба письма клиенту."""
+    order, user = item.order, item.user
+    who = user.platform_username or (item.chart.person_name if item.chart else None) or "без имени"
+    due = item.due_at.astimezone(MOSCOW) if item.due_at else None
+    lines = [
+        f"Оплачен VIP-заказ №{order.id}: {who}, {order.amount // 100} ₽.",
+        f"Сдать до {due:%d.%m %H:%M} МСК." if due else "Срок не посчитан: нет paid_at.",
+        f"Диалог: https://vk.ru/gim{get_settings().vk_group_id}?sel={user.external_id}",
+        client_note,
+    ]
+    base = get_settings().public_base_url
+    if base:
+        lines.append(f"{base.rstrip('/')}/admin/vip/{order.id}")
+    return "\n".join(lines)
+
+
+def _random_id(order_id: int, role: str) -> int:
+    """random_id письма от номера заказа: повтор в течение часа VK отбросит сам."""
+    # crc32 даёт 32 бита, старший гасим: random_id у VK знаковый.
+    return zlib.crc32(f"vip-paid:{order_id}:{role}".encode()) & 0x7FFFFFFF
+
+
+async def notify_paid(order_id: int) -> None:
+    """Фоновая задача после зачисления VIP: письмо клиенту, затем владельцу.
+
+    Ставить её надо только по признаку «зачислено этим вызовом», иначе
+    письма уйдут повторно. Ошибки не бросает — оплата уже записана,
+    упавшее письмо остаётся строкой в логе и «в работе» в админке.
+    """
+    settings = get_settings()
+    if not settings.vk_messaging_enabled:
+        logger.warning("Заказ %s оплачен, но писать нечем: нет ключа или VK_GROUP_ID", order_id)
+        return
+
+    # Своя сессия: сессия запроса к этому моменту закрыта (см. app/generation.py).
+    async with get_sessionmaker()() as session:
+        item = await get_order(session, order_id)
+    if item is None or not item.order.is_paid:
+        return
+
+    client_note = "Клиенту написал: «оплата получена»."
+    try:
+        [result] = await vk_api.send_messages(
+            [int(item.user.external_id)],
+            CLIENT_PAID_TEXT,
+            random_id=_random_id(order_id, "client"),
+        )
+        if not result.delivered:
+            client_note = f"Клиенту НЕ ушло (VK {result.error_code}) — напиши сам."
+            logger.warning("Заказ %s: письмо клиенту не ушло, VK %s", order_id, result.error_code)
+    except (vk_api.VkError, ValueError) as e:
+        client_note = "Клиенту НЕ ушло (VK не ответил) — напиши сам."
+        logger.error("Заказ %s: письмо клиенту не ушло: %s", order_id, e)
+
+    owner_id = settings.vip_owner_vk_id
+    if owner_id is None:
+        logger.warning("Заказ %s оплачен, VIP_OWNER_VK_ID не задан — владельцу не пишем", order_id)
+        return
+    try:
+        [result] = await vk_api.send_messages(
+            [owner_id],
+            owner_paid_text(item, client_note=client_note),
+            random_id=_random_id(order_id, "owner"),
+        )
+        if not result.delivered:
+            logger.error("Заказ %s: письмо владельцу не ушло, VK %s", order_id, result.error_code)
+    except (vk_api.VkError, ValueError) as e:
+        logger.error("Заказ %s: письмо владельцу не ушло: %s", order_id, e)

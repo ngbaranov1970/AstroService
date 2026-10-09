@@ -382,12 +382,15 @@ async def apply_notification(
     return order, just_paid
 
 
-async def sync_status(session: AsyncSession, order: Order) -> Order:
+async def sync_status(session: AsyncSession, order: Order) -> bool:
     """Спросить ЮKassa о платеже этого заказа и привести статус в соответствие.
 
     Нужна на странице возврата: вебхук идёт своим темпом, а человек уже
     смотрит на экран и хочет увидеть купленное. Ничего не делает, если
     платежа ещё нет или заказ уже закрыт.
+
+    Возвращает тот же признак, что apply_notification: деньги зачислены
+    ИМЕННО ЭТИМ вызовом. Из двух путей оплаты True увидит ровно один.
 
     Платёж, неизвестный магазину, закрывает заказ (CANCELED), а не бросает
     ошибку: платить по нему нечем, и вызывающий заведёт новый.
@@ -395,7 +398,7 @@ async def sync_status(session: AsyncSession, order: Order) -> Order:
     Бросает PaymentError.
     """
     if order.provider_payment_id is None or order.status is not OrderStatus.PENDING:
-        return order
+        return False
 
     payment_id = order.provider_payment_id
     try:
@@ -411,7 +414,7 @@ async def sync_status(session: AsyncSession, order: Order) -> Order:
                 "Заказ %s отменён: платёж %s магазину неизвестен",
                 order.id, payment_id,
             )
-        return order
+        return False
 
     # Перечитываем строку под блокировкой, и только теперь применяем платёж:
     # вебхук про этот же платёж приходит одновременно с возвратом человека и
@@ -420,8 +423,7 @@ async def sync_status(session: AsyncSession, order: Order) -> Order:
     # Блокировка берётся ПОСЛЕ запроса к их API: он длится до 30 с, и всё это
     # время вебхук ждал бы освобождения строки.
     await session.refresh(order, with_for_update=True)
-    await _apply_payment(session, order, payment)
-    return order
+    return await _apply_payment(session, order, payment)
 
 
 async def _apply_payment(

@@ -24,7 +24,8 @@ VIP-разбор: его заказ заводит владелец в адми�
 Как только деньги пришли, текст ставится в очередь — и в вебхуке, и на
 странице возврата, что бы из них ни случилось первым. Двойной траты это не
 даёт: замок и кеш в services/reports.py считают один и тот же адрес отчёта
-одной работой. VIP в очередь не ставится: его готовит владелец руками.
+одной работой. VIP в очередь не ставится: его готовит владелец руками, а
+зачисление шлёт письма клиенту и владельцу (services/vip.notify_paid).
 """
 
 from __future__ import annotations
@@ -307,13 +308,18 @@ async def vip_pay_start(request: Request, order_token: str, session: SessionDep)
 
 
 @router.get("/pay/order/{order_token}/done", dependencies=[Depends(deps.forbid_in_vk)])
-async def vip_pay_done(request: Request, order_token: str, session: SessionDep) -> Response:
+async def vip_pay_done(
+    request: Request, order_token: str, session: SessionDep, background: BackgroundTasks
+) -> Response:
     """Возврат с формы ЮKassa по VIP-заказу. Генерацию не ставит — разбор пишут руками."""
     target, order = await _vip_context(session, order_token)
     order_id = order.id
     try:
-        await orders.sync_status(session, order)
+        just_paid = await orders.sync_status(session, order)
         await session.commit()
+        # Деньги зачислил возврат, а не вебхук — уведомление шлём отсюда.
+        if just_paid:
+            background.add_task(vip.notify_paid, order_id)
     except yookassa.PaymentError:
         await session.rollback()
         logger.warning("Заказ %s: статус спросить не удалось", order_id)
@@ -399,7 +405,10 @@ async def yookassa_webhook(
     # уведомление ЮKassa присылает по нескольку раз, и на «is_paid» повтор
     # заводил бы лишнюю фоновую задачу и лишние report_requested/report_ready.
     if order is not None and just_paid:
-        await _start_generation(session, background, order)
+        if order.report_type in _ORDER_ONLY_TYPES:
+            background.add_task(vip.notify_paid, order.id)
+        else:
+            await _start_generation(session, background, order)
     return Response(status_code=status.HTTP_200_OK)
 
 
