@@ -34,6 +34,18 @@
         Имя для разбора
         <input type="text" name="person_name" value="{{ form.person_name }}" maxlength="64">
       </label>
+      {# Пол — для рода в тексте разбора («ты родилась»). #}
+      <p class="muted">Пол</p>
+      <label class="checkbox">
+        <input type="radio" name="gender" value="female" required
+               {% if form.gender == "female" %}checked{% endif %}>
+        Женский
+      </label>
+      <label class="checkbox">
+        <input type="radio" name="gender" value="male"
+               {% if form.gender == "male" %}checked{% endif %}>
+        Мужской
+      </label>
       <label>
         Дата рождения
         <input type="date" name="birth_date" value="{{ form.birth_date }}" required>

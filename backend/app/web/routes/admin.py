@@ -32,7 +32,7 @@ from starlette.responses import Response
 
 from app import generation
 from app.db import get_session
-from app.models import Platform, ReportType
+from app.models import ClientGender, Platform, ReportType
 from app.schemas.charts import ChartIn
 from app.services import admin as admin_service
 from app.services import broadcast, card, content, events, orders, reports, vip
@@ -245,6 +245,7 @@ class _VipForm:
 
     vk: str = ""
     person_name: str = ""
+    gender: str = ""
     birth_date: str = ""
     birth_time: str = ""
     city: str = ""
@@ -262,6 +263,7 @@ async def vip_create(
     session: SessionDep,
     vk: Annotated[str, Form()] = "",
     person_name: Annotated[str, Form()] = "",
+    gender: Annotated[str, Form()] = "",
     birth_date: Annotated[str, Form()] = "",
     birth_time: Annotated[str, Form()] = "",
     city: Annotated[str, Form()] = "",
@@ -277,6 +279,7 @@ async def vip_create(
     form = _VipForm(
         vk=vk.strip(),
         person_name=person_name.strip(),
+        gender=gender,
         birth_date=birth_date,
         birth_time=birth_time,
         city=city.strip(),
@@ -287,6 +290,12 @@ async def vip_create(
         return await _vip_response(
             request, session, form, error="Не узнали человека VK: нужна ссылка на профиль, id123 или число"
         )
+
+    # Пол нужен промпту для рода в тексте; required в форме обходится старой вкладкой.
+    try:
+        client_gender = ClientGender(form.gender)
+    except ValueError:
+        return await _vip_response(request, session, form, error="Укажите пол клиента")
 
     places = charts_service.search_places(form.city)
     if not places:
@@ -325,6 +334,7 @@ async def vip_create(
             # Зона по координатам, как в приложении: иначе его карта того же
             # человека получила бы другой input_hash и задвоилась.
             place=charts_service.place_from_coords(chosen.lat, chosen.lon, chosen.label),
+            client_gender=client_gender,
             person_name=payload.person_name,
         )
     except orders.NotForSaleError:

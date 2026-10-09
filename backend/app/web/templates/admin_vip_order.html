@@ -45,6 +45,13 @@
             {% else %}<span class="muted">карта удалена</span>{% endif %}
           </td>
         </tr>
+        <tr>
+          <td>Пол</td>
+          <td>
+            {% if o.client_gender %}{{ "женский" if o.client_gender.value == "female" else "мужской" }}
+            {% else %}<span class="muted">не указан</span>{% endif %}
+          </td>
+        </tr>
         <tr><td>Сумма</td><td>{{ o.amount // 100 }} ₽</td></tr>
         <tr><td>Заведён</td><td>{{ o.created_at | msk }}</td></tr>
         <tr>

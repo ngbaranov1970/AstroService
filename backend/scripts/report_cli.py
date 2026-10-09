@@ -13,6 +13,7 @@
     uv run python scripts/report_cli.py 1990-05-11 17:20 Касимов --show-prompt
     uv run python scripts/report_cli.py 1990-05-11 17:20 Касимов --prompt full_natal
     uv run python scripts/report_cli.py 1990-05-11 - Касимов --prompt full_natal
+    uv run python scripts/report_cli.py 1988-07-14 10:20 Судак --prompt vip_natal --gender female
 
 Текст отчёта идёт в stdout (можно перенаправить в файл), вся служебная
 информация — место, модель, токены — в stderr.
@@ -33,7 +34,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from astro_core.geo import City, search_cities, tz_at  # noqa: E402
 from astro_core.natal import compute_natal  # noqa: E402
 from app.llm import client  # noqa: E402
-from app.llm.prompts import free_natal, full_natal  # noqa: E402
+from app.llm.prompts import free_natal, full_natal, vip_natal  # noqa: E402
+from app.models import ClientGender  # noqa: E402
 from app.services.charts import UNKNOWN_TIME  # noqa: E402
 
 # Промпты подключаются по имени флага --prompt: каждый модуль сам знает
@@ -41,7 +43,7 @@ from app.services.charts import UNKNOWN_TIME  # noqa: E402
 # сверх этого общего контракта (см. docstring free_natal.py). Необязательные
 # TEMPERATURE/MAX_TOKENS/render() читаем через getattr — промпт, который
 # отвечает готовым текстом, обходится без них.
-PROMPTS = {"free_natal": free_natal, "full_natal": full_natal}
+PROMPTS = {"free_natal": free_natal, "full_natal": full_natal, "vip_natal": vip_natal}
 
 # Время «-» — неизвестно, как в pair_report_cli.py.
 UNKNOWN_MARK = "-"
@@ -92,12 +94,21 @@ def main() -> None:
     parser.add_argument("--tz", help="зона IANA (иначе определяется по координатам)")
     parser.add_argument("--name", help="имя для персонализации текста")
     parser.add_argument(
+        "--gender",
+        choices=[g.value for g in ClientGender],
+        help="пол клиента для vip_natal (род в тексте)",
+    )
+    parser.add_argument(
         "--prompt",
         choices=sorted(PROMPTS),
         default="free_natal",
         help="какой промпт-модуль использовать (по умолчанию free_natal)",
     )
-    parser.add_argument("--model", default=client.DEFAULT_MODEL, help="модель DeepSeek")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="модель DeepSeek (по умолчанию MODEL промпт-модуля, иначе client.DEFAULT_MODEL)",
+    )
     parser.add_argument(
         "--temperature",
         type=float,
@@ -120,6 +131,8 @@ def main() -> None:
     if temperature is None:
         temperature = getattr(prompt, "TEMPERATURE", client.DEFAULT_TEMPERATURE)
     max_tokens = getattr(prompt, "MAX_TOKENS", 4096)
+    if args.model is None:
+        args.model = getattr(prompt, "MODEL", client.DEFAULT_MODEL)
 
     # Неизвестное время считаем от того же полудня, что и продукт (services/charts.py).
     time_known = args.time != UNKNOWN_MARK
@@ -128,7 +141,12 @@ def main() -> None:
     lat, lon, tz, place = _resolve_place(args)
 
     natal = compute_natal(birth_dt, lat, lon, tz)
-    user_prompt = prompt.build_user(natal, name=args.name, time_known=time_known)
+    # У vip_natal вместо имени пол: имя в VIP-промпт не идёт.
+    if prompt is vip_natal:
+        gender = ClientGender(args.gender) if args.gender else None
+        user_prompt = prompt.build_user(natal, gender, time_known=time_known)
+    else:
+        user_prompt = prompt.build_user(natal, name=args.name, time_known=time_known)
 
     print(f"Место: {place}   tz {tz}", file=sys.stderr)
     print(f"Промпт: {prompt.VERSION}", file=sys.stderr)

@@ -65,6 +65,13 @@ class OrderStatus(str, enum.Enum):
     REFUNDED = "refunded"
 
 
+class ClientGender(str, enum.Enum):
+    """Пол клиента VIP-разбора — для рода в тексте («ты родилась»)."""
+
+    FEMALE = "female"
+    MALE = "male"
+
+
 class Order(Base):
     """Заказ: намерение купить конкретный отчёт и след того, чем оно кончилось.
 
@@ -254,6 +261,17 @@ class Order(Base):
     # в приложении до правки. «В работе» = PAID и delivered_at IS NULL.
     draft_text: Mapped[str | None] = mapped_column(Text)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Пол вводят в форме заказа; у заказов до 09.10.2026 он NULL.
+    client_gender: Mapped[ClientGender | None] = mapped_column(
+        SAEnum(
+            ClientGender,
+            name="client_gender",
+            native_enum=False,
+            create_constraint=True,
+            length=8,
+            values_callable=lambda cls: [m.value for m in cls],
+        )
+    )
 
     @property
     def is_paid(self) -> bool:

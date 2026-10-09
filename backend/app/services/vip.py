@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_sessionmaker
-from app.models import Chart, Order, OrderStatus, Platform, ReportType, User
+from app.models import Chart, ClientGender, Order, OrderStatus, Platform, ReportType, User
 from app.services import charts, orders, users
 from app.vk import api as vk_api
 
@@ -82,6 +82,7 @@ async def create_order(
     birth_local: datetime,
     time_known: bool,
     place: charts.Place,
+    client_gender: ClientGender,
     person_name: str | None = None,
 ) -> Order:
     """Завести VIP-заказ на человека из диалога сообщества.
@@ -110,6 +111,8 @@ async def create_order(
     order = await orders.get_or_create_order(
         session, user=user, chart=chart, report_type=ReportType.VIP_NATAL
     )
+    # Пол пишем и в найденный заказ: повтор формы исправляет ошибку выбора.
+    order.client_gender = client_gender
     logger.info(
         "VIP-заказ %s (%s): пользователь %s, карта %s",
         order.id, order.status.value, user.id, chart.id,
