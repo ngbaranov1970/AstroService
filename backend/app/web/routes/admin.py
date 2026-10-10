@@ -35,7 +35,7 @@ from app.db import get_session
 from app.models import ClientGender, Platform, ReportType
 from app.schemas.charts import ChartIn
 from app.services import admin as admin_service
-from app.services import broadcast, card, content, events, orders, reports, vip
+from app.services import broadcast, card, content, events, orders, reports, vip, vip_draft
 from app.services import charts as charts_service
 from app.services import users as users_service
 from app.vk import api as vk_api
@@ -345,18 +345,75 @@ async def vip_create(
 
 @router.get("/vip/{order_id}")
 async def vip_order(request: Request, session: SessionDep, order_id: int) -> Response:
-    """Карточка VIP-заказа: кто, по какой карте, статус и ссылка на оплату."""
+    """Карточка VIP-заказа: кто, по какой карте, статус, ссылка на оплату и текст."""
     item = await vip.get_order(session, order_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого VIP-заказа нет")
+    return _vip_order_response(request, item)
+
+
+# Кнопки карточки VIP-заказа. Поле формы `text` у edit — просьба к DeepSeek,
+# у save — сам текст черновика; остальным оно не нужно.
+_VIP_ACTIONS = {
+    "draft": lambda s, oid, text: vip_draft.make_draft(s, oid),
+    "edit": vip_draft.request_edit,
+    "accept": lambda s, oid, text: vip_draft.accept_candidate(s, oid),
+    "reject": lambda s, oid, text: vip_draft.reject_candidate(s, oid),
+    "save": vip_draft.save_draft,
+    "deliver": lambda s, oid, text: vip_draft.deliver(s, oid),
+}
+
+
+@router.post("/vip/{order_id}/{action}")
+async def vip_order_action(
+    request: Request,
+    session: SessionDep,
+    order_id: int,
+    action: str,
+    text: Annotated[str, Form()] = "",
+) -> Response:
+    """Действие с текстом VIP-разбора. Успех — редирект на карточку, ошибка — карточка с ней.
+
+    draft и edit ждут ответа DeepSeek около двух минут прямо в запросе:
+    заказов единицы, ждёт один владелец.
+    """
+    handler = _VIP_ACTIONS.get(action)
+    if handler is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Нет такого действия")
+    try:
+        await handler(session, order_id, text)
+    except vip_draft.VipDraftError as e:
+        await session.rollback()
+        item = await vip.get_order(session, order_id)
+        if item is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого VIP-заказа нет") from e
+        return _vip_order_response(
+            request, item, error=str(e), edit_request=text if action == "edit" else ""
+        )
+    await session.commit()
+    # 303 и GET: F5 на карточке не повторит POST и второй вызов DeepSeek.
+    return RedirectResponse(f"/admin/vip/{order_id}", status.HTTP_303_SEE_OTHER)
+
+
+def _vip_order_response(
+    request: Request, item: vip.VipOrder, *, error: str | None = None, edit_request: str = ""
+) -> Response:
+    """Карточка VIP-заказа с находками проверки фактов по черновику и варианту."""
+    order = item.order
     return templates.TemplateResponse(
         request,
         "admin_vip_order.html",
         {
             "item": item,
-            "pay_url": vip.payment_url(item.order),
+            "pay_url": vip.payment_url(order),
             "price": orders.price_rub(ReportType.VIP_NATAL),
             "delivery_hours": int(vip.DELIVERY_TIME.total_seconds() // 3600),
+            "error": error,
+            "edit_request": edit_request,
+            "draft_findings": vip_draft.check_draft(item),
+            "candidate_findings": (
+                vip_draft.check_draft(item, order.draft_candidate) if order.draft_candidate else []
+            ),
         },
     )
 

@@ -237,6 +237,11 @@ def _group_after(sent: list[_Tok], i: int) -> tuple[list[_Tok], int, bool]:
             group.append(sent[j])
             j += 1
         elif sent[j].text in ("и", ",") and j + 1 < len(sent) and sent[j + 1].planet:
+            # После «с/к» планета в начальной форме — уже новое подлежащее:
+            # «в секстиле с Нептуном, Плутон в трине…» — Плутон не партнёр секстиля.
+            nxt = sent[j + 1]
+            if prep and nxt.text.lower() == nxt.planet.lower():
+                break
             j += 1
         else:
             break

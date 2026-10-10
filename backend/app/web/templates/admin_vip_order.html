@@ -84,6 +84,108 @@
       <p class="error">Платежи не настроены: в .env нет ключей ЮKassa или PUBLIC_BASE_URL.</p>
     {% endif %}
   {% endif %}
+
+  {# --- Текст разбора: черновик, правки, отправка (services/vip_draft.py) --- #}
+
+  {# Находки проверки фактов по расчёту карты (services/vip_check.py). #}
+  {% macro findings_list(findings) %}
+    {% if findings %}
+      <ul>
+        {% for f in findings %}
+          <li><span class="badge">{{ f.kind }}</span> «{{ f.quote }}» — {{ f.message }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      {# Не «ошибок нет»: проверка видит только дома, знаки, куспиды и аспекты. #}
+      <p class="muted">Проверка ничего не нашла.</p>
+    {% endif %}
+  {% endmacro %}
+
+  {# Кнопки форм class="llm" гасим при отправке: второе нажатие — второй
+     платный вызов DeepSeek. Поля не гасим — disabled-поле не уходит в POST. #}
+  {% set llm_submit = "document.querySelectorAll('form.llm button').forEach(b => b.disabled = true); this.querySelector('.waiting').hidden = false" %}
+
+  <h2>Текст разбора</h2>
+
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+  {% if o.delivered_at %}
+    <p class="muted">Отправлено в личку {{ o.delivered_at | msk }} — ниже ровно отправленный текст.</p>
+    <div class="column" style="white-space: pre-wrap">{{ o.draft_text }}</div>
+
+  {% elif not o.draft_text %}
+    <form method="post" action="/admin/vip/{{ o.id }}/draft" class="llm toolbar" onsubmit="{{ llm_submit }}">
+      <button type="submit">Сделать черновик</button>
+      <span class="waiting" hidden>DeepSeek пишет — около двух минут, не закрывайте страницу.</span>
+    </form>
+
+  {% elif o.draft_candidate %}
+    {# Пока вариант не принят, черновик только читаем: вариант построен по
+       нынешнему тексту, и «Принять» стёрла бы ручные правки. #}
+    <div class="compare">
+      <article class="column">
+        <h3>Сейчас</h3>
+        <div style="white-space: pre-wrap">{{ o.draft_text }}</div>
+        <h3>Проверка</h3>
+        {{ findings_list(draft_findings) }}
+      </article>
+      <article class="column">
+        <h3>Вариант от DeepSeek</h3>
+        <div style="white-space: pre-wrap">{{ o.draft_candidate }}</div>
+        <h3>Проверка</h3>
+        {{ findings_list(candidate_findings) }}
+      </article>
+    </div>
+    <div class="toolbar" style="margin-top: 16px">
+      <form method="post" action="/admin/vip/{{ o.id }}/accept">
+        <button type="submit">Принять вариант</button>
+      </form>
+      <form method="post" action="/admin/vip/{{ o.id }}/reject">
+        <button type="submit" class="secondary">Отказаться</button>
+      </form>
+    </div>
+
+  {% else %}
+    <form method="post" action="/admin/vip/{{ o.id }}/save">
+      <label>
+        Черновик · {{ o.draft_text | length }} симв.
+        <textarea name="text" rows="30" style="width: 100%">{{ o.draft_text }}</textarea>
+      </label>
+      {# Каждая кнопка страницы — своя форма: несохранённая правка здесь
+         пропадёт при нажатии любой другой. #}
+      <div class="toolbar"><button type="submit">Сохранить</button></div>
+    </form>
+
+    <h3>Проверка</h3>
+    <p class="muted">По сохранённому тексту — после ручной правки сначала «Сохранить».</p>
+    {{ findings_list(draft_findings) }}
+
+    <h3>Попросить DeepSeek</h3>
+    <form method="post" action="/admin/vip/{{ o.id }}/edit" class="llm" onsubmit="{{ llm_submit }}">
+      <textarea name="text" rows="3" style="width: 100%" required
+                placeholder="Например: убери повтор про Луну, раздел о работе сделай короче">{{ edit_request }}</textarea>
+      <div class="toolbar">
+        <button type="submit">Попросить DeepSeek</button>
+        <span class="waiting" hidden>DeepSeek пишет — около двух минут, не закрывайте страницу.</span>
+      </div>
+    </form>
+    {# Повторный черновик ляжет вариантом рядом с нынешним, не поверх него. #}
+    <form method="post" action="/admin/vip/{{ o.id }}/draft" class="llm toolbar" onsubmit="{{ llm_submit }}">
+      <button type="submit" class="secondary">Новый черновик с нуля</button>
+      <span class="waiting" hidden>DeepSeek пишет — около двух минут, не закрывайте страницу.</span>
+    </form>
+
+    {% if o.is_paid %}
+      <h3>Отправка</h3>
+      {# Отправку не отменить — confirm() страхует от промаха мимо «Сохранить». #}
+      <form method="post" action="/admin/vip/{{ o.id }}/deliver" class="toolbar"
+            onsubmit="if (!confirm('Отправить разбор в личку клиенту?')) return false; this.querySelector('button').disabled = true">
+        <button type="submit">Готово — отправить в личку</button>
+      </form>
+    {% else %}
+      <p class="muted">Отправить в личку можно будет после оплаты.</p>
+    {% endif %}
+  {% endif %}
 {% endblock %}
 
 {% block footer %}
