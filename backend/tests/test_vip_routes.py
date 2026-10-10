@@ -131,7 +131,7 @@ def test_failed_edit_keeps_request(
 
     assert response.status_code == 200
     assert "не разобрался" in response.text
-    # Просьба вернулась в поле: набирать её заново после сбоя DeepSeek не нужно.
+    # Просьба вернулась в поле: набирать её заново после сбоя модели не нужно.
     assert "убери повтор про Луну</textarea>" in response.text
     assert order["item"].order.draft_candidate is None
 
@@ -167,6 +167,37 @@ def test_draft_is_generated_in_request(
     assert order["item"].order.draft_text == "Главное\n\nАбзац."
 
 
+def test_draft_uses_chosen_model(
+    client: TestClient, order: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+
+    async def fake_chat(system, user, **kw):
+        seen.update(kw)
+        return llm.LLMResult(text='{"sections": [{"title": "Т", "body": "А."}]}', model="m", usage=llm.Usage(1, 1, 0))
+
+    monkeypatch.setattr(vip_draft.llm, "chat", fake_chat)
+    monkeypatch.setattr(vip_draft.vip_natal, "build_user", lambda *a, **kw: "user")
+    response = client.post(f"{URL}/draft", data={"model": "deepseek-v4-pro"})
+
+    assert response.status_code == 303
+    assert seen["model"] == "deepseek-v4-pro"
+
+
+def test_draft_refuses_unknown_model(
+    client: TestClient, order: dict, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def must_not_call(*a, **kw):
+        raise AssertionError("модель не из списка не вызывается")
+
+    monkeypatch.setattr(vip_draft.llm, "chat", must_not_call)
+    response = client.post(f"{URL}/draft", data={"model": "openai/gpt-6-astra-pro"})
+
+    assert response.status_code == 200
+    assert "нет в списке" in response.text
+    assert session.commits == 0
+
+
 # --- карточка в разных состояниях -------------------------------------------------
 
 
@@ -181,7 +212,7 @@ def test_draft_is_generated_in_request(
         ),
         pytest.param(
             {"status": OrderStatus.PENDING, "paid_at": None, "draft_text": "Черновик до оплаты"},
-            ["Сохранить", "Попросить DeepSeek", "после оплаты", "«Черновик до »"],
+            ["Сохранить", "Попросить модель", "после оплаты", "«Черновик до »"],
             ["Готово — отправить в личку"],
             id="черновик до оплаты",
         ),
@@ -193,14 +224,14 @@ def test_draft_is_generated_in_request(
         ),
         pytest.param(
             {"draft_text": "Вычитанный текст", "draft_candidate": "Вариант модели"},
-            ["Вариант от DeepSeek", "Принять вариант", "Отказаться", "«Вычитанный т»", "«Вариант моде»"],
+            ["Новый вариант", "Принять вариант", "Отказаться", "«Вычитанный т»", "«Вариант моде»"],
             ['name="text" rows="30"', "Готово — отправить в личку"],
             id="есть непринятый вариант",
         ),
         pytest.param(
             {"draft_text": "Отправленный текст", "delivered_at": datetime(2026, 10, 9, 9, 0, tzinfo=UTC)},
             ["Отправлено в личку", "Отправленный текст"],
-            ["Сохранить", "Попросить DeepSeek", "/draft", "/deliver"],
+            ["Сохранить", "Попросить модель", "/draft", "/deliver"],
             id="отправлен",
         ),
     ],

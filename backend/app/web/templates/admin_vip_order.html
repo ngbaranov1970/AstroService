@@ -102,10 +102,19 @@
   {% endmacro %}
 
   {# Кнопки форм class="llm" гасим при отправке: второе нажатие — второй
-     платный вызов DeepSeek. Поля не гасим — disabled-поле не уходит в POST. #}
+     платный вызов модели. Поля не гасим — disabled-поле не уходит в POST. #}
   {% set llm_submit = "document.querySelectorAll('form.llm button').forEach(b => b.disabled = true); this.querySelector('.waiting').hidden = false" %}
 
   <h2>Текст разбора</h2>
+
+  {# Выбор модели у каждой llm-формы свой: поле уходит только со своей формой. #}
+  {% macro model_select() %}
+    <select name="model" aria-label="Модель">
+      {% for id, label in models.items() %}
+        <option value="{{ id }}"{% if id == model %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  {% endmacro %}
 
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 
@@ -115,8 +124,9 @@
 
   {% elif not o.draft_text %}
     <form method="post" action="/admin/vip/{{ o.id }}/draft" class="llm toolbar" onsubmit="{{ llm_submit }}">
+      {{ model_select() }}
       <button type="submit">Сделать черновик</button>
-      <span class="waiting" hidden>DeepSeek пишет — около двух минут, не закрывайте страницу.</span>
+      <span class="waiting" hidden>Модель пишет — до двух минут, не закрывайте страницу.</span>
     </form>
 
   {% elif o.draft_candidate %}
@@ -130,7 +140,7 @@
         {{ findings_list(draft_findings) }}
       </article>
       <article class="column">
-        <h3>Вариант от DeepSeek</h3>
+        <h3>Новый вариант</h3>
         <div style="white-space: pre-wrap">{{ o.draft_candidate }}</div>
         <h3>Проверка</h3>
         {{ findings_list(candidate_findings) }}
@@ -160,19 +170,21 @@
     <p class="muted">По сохранённому тексту — после ручной правки сначала «Сохранить».</p>
     {{ findings_list(draft_findings) }}
 
-    <h3>Попросить DeepSeek</h3>
+    <h3>Попросить модель</h3>
     <form method="post" action="/admin/vip/{{ o.id }}/edit" class="llm" onsubmit="{{ llm_submit }}">
       <textarea name="text" rows="3" style="width: 100%" required
                 placeholder="Например: убери повтор про Луну, раздел о работе сделай короче">{{ edit_request }}</textarea>
       <div class="toolbar">
-        <button type="submit">Попросить DeepSeek</button>
-        <span class="waiting" hidden>DeepSeek пишет — около двух минут, не закрывайте страницу.</span>
+        {{ model_select() }}
+        <button type="submit">Попросить</button>
+        <span class="waiting" hidden>Модель пишет — до двух минут, не закрывайте страницу.</span>
       </div>
     </form>
     {# Повторный черновик ляжет вариантом рядом с нынешним, не поверх него. #}
     <form method="post" action="/admin/vip/{{ o.id }}/draft" class="llm toolbar" onsubmit="{{ llm_submit }}">
+      {{ model_select() }}
       <button type="submit" class="secondary">Новый черновик с нуля</button>
-      <span class="waiting" hidden>DeepSeek пишет — около двух минут, не закрывайте страницу.</span>
+      <span class="waiting" hidden>Модель пишет — до двух минут, не закрывайте страницу.</span>
     </form>
 
     {% if o.is_paid %}

@@ -1,4 +1,4 @@
-"""Транспорт к DeepSeek: один вызов чата, ничего больше.
+"""Транспорт к LLM: один вызов чата, ничего больше.
 
 Слои LLM в проекте разделены так:
 - client.py (этот файл) — доставка запроса и разбор ответа. Не знает ни про
@@ -8,7 +8,9 @@
 - services/reports.py — кеш готовых отчётов и лимит бесплатных генераций.
 
 API DeepSeek совместим с OpenAI (POST /chat/completions), поэтому обходимся
-httpx без SDK: меньше зависимостей, видно каждый байт запроса.
+httpx без SDK: меньше зависимостей, видно каждый байт запроса. Модель с «/»
+в имени («anthropic/claude-sonnet-5.5») идёт через OpenRouter тем же
+форматом — для сравнения моделей (scripts/compare_models.py).
 
 Расход токенов возвращаем вызывающему (LLMResult.usage) — на нём построен
 контроль затрат: services-слой пишет его в свою таблицу отчётов.
@@ -20,7 +22,6 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from functools import lru_cache
 
 import httpx
 
@@ -31,6 +32,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.deepseek.com"
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
 
 # deepseek-v4-flash — основной для отчётов: в разы дешевле pro на выходных
 # токенах и держит 2500 параллельных запросов против 500. v4-pro можно
@@ -56,7 +58,7 @@ RETRY_DELAY_S = 3.0
 
 
 class LLMError(RuntimeError):
-    """Ошибка вызова DeepSeek после всех повторов (сеть, статус, формат)."""
+    """Ошибка вызова LLM после всех повторов (сеть, статус, формат)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,8 @@ class Usage:
     # включён всегда и дешевле в ~10 раз) — метрика для оптимизации промптов:
     # стабильный системный префикс = больше cache hit.
     cached_prompt_tokens: int
+    # Цена запроса в долларах — её считает только OpenRouter; у DeepSeek None.
+    cost_usd: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,27 +80,47 @@ class LLMResult:
     usage: Usage
 
 
-@lru_cache(maxsize=1)
-def _client() -> httpx.AsyncClient:
-    """Один AsyncClient на процесс: переиспользуем TCP/TLS-соединения.
+def is_openrouter(model: str) -> bool:
+    """Модели OpenRouter пишутся как «провайдер/модель», у DeepSeek слэша нет."""
+    return "/" in model
+
+
+def _provider(model: str) -> str:
+    return "OpenRouter" if is_openrouter(model) else "DeepSeek"
+
+
+_clients: dict[str, httpx.AsyncClient] = {}
+
+
+def _client(model: str) -> httpx.AsyncClient:
+    """Один AsyncClient на провайдера: переиспользуем TCP/TLS-соединения.
 
     Ключ читается здесь, а не на импорте — модуль можно импортировать
     без заполненного .env (тесты, alembic), см. app/config.py.
+    Без OPENROUTER_API_KEY модель со слэшем даёт LLMError.
     """
-    return httpx.AsyncClient(
-        base_url=BASE_URL,
-        timeout=TIMEOUT,
-        headers={
-            "Authorization": f"Bearer {get_settings().deepseek_api_key.get_secret_value()}"
-        },
-    )
+    provider = _provider(model)
+    if provider not in _clients:
+        settings = get_settings()
+        if provider == "OpenRouter":
+            if settings.openrouter_api_key is None:
+                raise LLMError("OPENROUTER_API_KEY не задан в .env")
+            base_url, key = OPENROUTER_URL, settings.openrouter_api_key
+        else:
+            base_url, key = BASE_URL, settings.deepseek_api_key
+        _clients[provider] = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=TIMEOUT,
+            headers={"Authorization": f"Bearer {key.get_secret_value()}"},
+        )
+    return _clients[provider]
 
 
 async def close_client() -> None:
     """Закрыть соединения на shutdown приложения (lifespan FastAPI)."""
-    if _client.cache_info().currsize:
-        await _client().aclose()
-        _client.cache_clear()
+    for client in _clients.values():
+        await client.aclose()
+    _clients.clear()
 
 
 async def chat(
@@ -107,6 +131,7 @@ async def chat(
     temperature: float = DEFAULT_TEMPERATURE,
     max_tokens: int = 4096,
     thinking: bool = False,
+    reasoning_effort: str | None = None,
 ) -> LLMResult:
     """Один запрос «system + user → текст ответа».
 
@@ -116,19 +141,31 @@ async def chat(
     thinking=False потому, что в v4 режим рассуждений включён ПО УМОЛЧАНИЮ,
     а для развлекательных текстов он не улучшает результат, но умножает
     выходные токены и время ответа.
+
+    reasoning_effort — только для OpenRouter («none», «low», …); None — дефолт
+    модели. У Claude и GPT размышления делят с текстом бюджет max_tokens.
     """
-    payload = {
+    payload: dict = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         "max_tokens": max_tokens,
-        "thinking": {"type": "enabled" if thinking else "disabled"},
         "stream": False,
     }
-    if not thinking:
+    if is_openrouter(model):
+        # Ход размышлений не возвращаем: в тексте разбора он не нужен, а платим за него и так.
+        # temperature отправляем всегда: модели, которые её не принимают, OpenRouter
+        # выполняет без неё.
+        payload["reasoning"] = {"exclude": True}
+        if reasoning_effort is not None:
+            payload["reasoning"]["effort"] = reasoning_effort
         payload["temperature"] = temperature
+    else:
+        payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
+        if not thinking:
+            payload["temperature"] = temperature
 
     # В лог идут только размеры, не содержимое: в промпте лежит натальная
     # карта человека — дата, время и место рождения, то есть персональные
@@ -146,7 +183,7 @@ async def chat(
     last_error: Exception | None = None
     for attempt in (1, 2):
         try:
-            resp = await _client().post("/chat/completions", json=payload)
+            resp = await _client(model).post("/chat/completions", json=payload)
         except httpx.HTTPError as e:
             last_error = e
             logger.warning(
@@ -170,13 +207,15 @@ async def chat(
                 return result
             # Тело ошибки DeepSeek полезно в логах, но обрезаем: там может
             # быть эхо промпта.
-            last_error = LLMError(f"DeepSeek HTTP {resp.status_code}: {resp.text[:300]}")
+            provider = _provider(model)
+            last_error = LLMError(f"{provider} HTTP {resp.status_code}: {resp.text[:300]}")
             if resp.status_code not in RETRY_STATUS:
-                logger.warning("DeepSeek вернул %d — не повторяем", resp.status_code)
+                logger.warning("%s вернул %d — не повторяем", provider, resp.status_code)
                 break
             logger.warning(
-                "Попытка %d/2: DeepSeek вернул %d, повтор через %.0f с",
+                "Попытка %d/2: %s вернул %d, повтор через %.0f с",
                 attempt,
+                provider,
                 resp.status_code,
                 RETRY_DELAY_S,
             )
@@ -186,11 +225,12 @@ async def chat(
     # ERROR, а не просто исключение: вызывать нас будет фоновая задача, и без
     # этой строки причина провала не дойдёт ни до кого.
     logger.error(
-        "DeepSeek не ответил за 2 попытки (%.1f с): %s",
+        "%s не ответил за 2 попытки (%.1f с): %s",
+        model,
         time.perf_counter() - started,
         last_error,
     )
-    raise LLMError(f"DeepSeek недоступен: {last_error}") from last_error
+    raise LLMError(f"{model} недоступен: {last_error}") from last_error
 
 
 def _parse(resp: httpx.Response, *, requested_model: str) -> LLMResult:
@@ -200,13 +240,18 @@ def _parse(resp: httpx.Response, *, requested_model: str) -> LLMResult:
         choice = data["choices"][0]
         text = choice["message"]["content"]
         u = data["usage"]
+        # Кеш промпта DeepSeek отдаёт своим полем, OpenRouter — в формате OpenAI.
+        cached = u.get("prompt_cache_hit_tokens")
+        if cached is None:
+            cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
         usage = Usage(
             prompt_tokens=u["prompt_tokens"],
             completion_tokens=u["completion_tokens"],
-            cached_prompt_tokens=u.get("prompt_cache_hit_tokens", 0),
+            cached_prompt_tokens=cached,
+            cost_usd=u.get("cost"),
         )
-    except (KeyError, IndexError, ValueError) as e:
-        raise LLMError(f"Неожиданный формат ответа DeepSeek: {e}") from e
+    except (KeyError, IndexError, ValueError, TypeError) as e:
+        raise LLMError(f"Неожиданный формат ответа {requested_model}: {e}") from e
 
     # finish_reason == "length" значит, что текст обрезан по max_tokens:
     # для платного отчёта это брак — пусть вызывающий решает, что делать.
@@ -220,5 +265,9 @@ def _parse(resp: httpx.Response, *, requested_model: str) -> LLMResult:
         raise LLMError(
             f"Ответ обрезан по max_tokens (сгенерировано {usage.completion_tokens} ток.)"
         )
+
+    # Весь бюджет ушёл на размышления или провайдер отказал без ошибки — текста нет.
+    if not text:
+        raise LLMError(f"{requested_model} вернул пустой ответ ({choice.get('finish_reason')})")
 
     return LLMResult(text=text, model=data.get("model", requested_model), usage=usage)

@@ -17,6 +17,7 @@ from app.models import ClientGender
 VERSION = "vip_edit_v1"
 
 MODEL = vip_natal.MODEL
+REASONING_EFFORT = vip_natal.REASONING_EFFORT
 # Ниже, чем у черновика (1.0): правка должна менять только просьбу, а не
 # переписывать остальное своими словами. Значение не проверено приёмкой.
 TEMPERATURE = 0.7

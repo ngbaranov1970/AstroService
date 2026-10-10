@@ -32,6 +32,7 @@ from starlette.responses import Response
 
 from app import generation
 from app.db import get_session
+from app.llm.prompts import vip_natal
 from app.models import ClientGender, Platform, ReportType
 from app.schemas.charts import ChartIn
 from app.services import admin as admin_service
@@ -352,15 +353,15 @@ async def vip_order(request: Request, session: SessionDep, order_id: int) -> Res
     return _vip_order_response(request, item)
 
 
-# Кнопки карточки VIP-заказа. Поле формы `text` у edit — просьба к DeepSeek,
-# у save — сам текст черновика; остальным оно не нужно.
+# Кнопки карточки VIP-заказа. Поле формы `text` у edit — просьба к модели,
+# у save — сам текст черновика; `model` — только у draft и edit.
 _VIP_ACTIONS = {
-    "draft": lambda s, oid, text: vip_draft.make_draft(s, oid),
+    "draft": lambda s, oid, text, model: vip_draft.make_draft(s, oid, model),
     "edit": vip_draft.request_edit,
-    "accept": lambda s, oid, text: vip_draft.accept_candidate(s, oid),
-    "reject": lambda s, oid, text: vip_draft.reject_candidate(s, oid),
-    "save": vip_draft.save_draft,
-    "deliver": lambda s, oid, text: vip_draft.deliver(s, oid),
+    "accept": lambda s, oid, text, model: vip_draft.accept_candidate(s, oid),
+    "reject": lambda s, oid, text, model: vip_draft.reject_candidate(s, oid),
+    "save": lambda s, oid, text, model: vip_draft.save_draft(s, oid, text),
+    "deliver": lambda s, oid, text, model: vip_draft.deliver(s, oid),
 }
 
 
@@ -371,32 +372,38 @@ async def vip_order_action(
     order_id: int,
     action: str,
     text: Annotated[str, Form()] = "",
+    model: Annotated[str, Form()] = "",
 ) -> Response:
     """Действие с текстом VIP-разбора. Успех — редирект на карточку, ошибка — карточка с ней.
 
-    draft и edit ждут ответа DeepSeek около двух минут прямо в запросе:
+    draft и edit ждут ответа модели до двух минут прямо в запросе:
     заказов единицы, ждёт один владелец.
     """
     handler = _VIP_ACTIONS.get(action)
     if handler is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Нет такого действия")
     try:
-        await handler(session, order_id, text)
+        await handler(session, order_id, text, model)
     except vip_draft.VipDraftError as e:
         await session.rollback()
         item = await vip.get_order(session, order_id)
         if item is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого VIP-заказа нет") from e
         return _vip_order_response(
-            request, item, error=str(e), edit_request=text if action == "edit" else ""
+            request, item, error=str(e), edit_request=text if action == "edit" else "", model=model
         )
     await session.commit()
-    # 303 и GET: F5 на карточке не повторит POST и второй вызов DeepSeek.
+    # 303 и GET: F5 на карточке не повторит POST и второй платный вызов модели.
     return RedirectResponse(f"/admin/vip/{order_id}", status.HTTP_303_SEE_OTHER)
 
 
 def _vip_order_response(
-    request: Request, item: vip.VipOrder, *, error: str | None = None, edit_request: str = ""
+    request: Request,
+    item: vip.VipOrder,
+    *,
+    error: str | None = None,
+    edit_request: str = "",
+    model: str = "",
 ) -> Response:
     """Карточка VIP-заказа с находками проверки фактов по черновику и варианту."""
     order = item.order
@@ -410,6 +417,9 @@ def _vip_order_response(
             "delivery_hours": int(vip.DELIVERY_TIME.total_seconds() // 3600),
             "error": error,
             "edit_request": edit_request,
+            "models": vip_natal.MODELS,
+            # После сбоя выбор не сбрасываем: повтор чаще всего на той же модели.
+            "model": model if model in vip_natal.MODELS else vip_natal.MODEL,
             "draft_findings": vip_draft.check_draft(item),
             "candidate_findings": (
                 vip_draft.check_draft(item, order.draft_candidate) if order.draft_candidate else []
