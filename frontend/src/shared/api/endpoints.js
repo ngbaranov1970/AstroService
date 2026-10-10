@@ -113,6 +113,13 @@ export function denyGroupMessages() {
   return http.post('/vk/messages-denied')
 }
 
+/** Записать нажатие «Напиши нам» в воронку VIP-разбора.
+ *  place — где нажали: 'home' (главная) или 'report' (конец разбора).
+ *  Ответ пустой; работает и вне VK — ссылка на личку не оплата. */
+export function trackVipCta(place) {
+  return http.post('/vk/vip-cta', { place })
+}
+
 /** Знак Солнца по одной дате рождения — короткий путь к рассылке без карты.
  *  birthDate — строка 'YYYY-MM-DD', как её собирает DateStep.
  *  Отвечает {sign: 'Дева'} или {sign: null}: в день смены знака одной даты

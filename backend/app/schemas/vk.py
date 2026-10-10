@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -39,6 +40,12 @@ class GroupStateOut(BaseModel):
     # решает, спрашивать ли дату. Знак из карты сюда не кладём: у кого карта
     # есть, тому дату и так не показывают.
     sun_sign: str | None = None
+
+
+class VipCtaIn(BaseModel):
+    """Где нажали «Напиши нам»: главная или конец разбора."""
+
+    place: Literal["home", "report"]
 
 
 class SunSignIn(BaseModel):

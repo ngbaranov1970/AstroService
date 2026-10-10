@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from app.api.deps import CurrentUser, SessionDep
 from app.config import get_settings
 from app.models import Platform, User
-from app.schemas.vk import GroupStateOut, SunSignIn, SunSignOut
+from app.schemas.vk import GroupStateOut, SunSignIn, SunSignOut, VipCtaIn
 from app.services import events
 from app.services import users as users_service
 from app.vk import api as vk_api
@@ -112,6 +112,18 @@ async def sun_sign(body: SunSignIn, user: CurrentUser, session: SessionDep) -> S
         await events.log(session, events.SUN_SIGN_ENTERED, user_id=user.id, sign=sign)
     await session.commit()
     return SunSignOut(sign=sign)
+
+
+@router.post("/vip-cta", status_code=status.HTTP_204_NO_CONTENT)
+async def vip_cta(body: VipCtaIn, user: CurrentUser, session: SessionDep) -> Response:
+    """Человек нажал «Напиши нам» — пишем событие воронки VIP.
+
+    Без _require_vk: ссылка на личку сообщества — не оплата, блок стоит и в
+    браузере. Каждое нажатие — событие: уникальных считает выборка по user_id.
+    """
+    await events.log(session, events.VIP_CTA_CLICKED, user_id=user.id, place=body.place)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _require_vk(user: User) -> None:

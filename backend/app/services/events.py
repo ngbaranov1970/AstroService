@@ -119,6 +119,10 @@ GROUP_MESSAGES_DENIED = "group_messages_denied"
 # Написал в сообщество сам. Это и согласие на ответ, и сигнал живости.
 GROUP_MESSAGE_RECEIVED = "group_message_received"
 
+# Нажал «Напиши нам» в приложении — вход в воронку VIP (docs/sales-policy.md).
+# В props place: home или report. Дошёл ли до сообщения — GROUP_MESSAGE_RECEIVED.
+VIP_CTA_CLICKED = "vip_cta_clicked"
+
 # Ввёл дату на коротком пути к рассылке. В props знак или cusp=True — день
 # смены знака, отправлен в онбординг. Даты в props нет: это персональные данные.
 SUN_SIGN_ENTERED = "sun_sign_entered"

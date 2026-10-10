@@ -19,6 +19,7 @@ import AppButton from '@/shared/ui/AppButton.vue'
 import FullReportTile from './FullReportTile.vue'
 import ReportFeedback from './ReportFeedback.vue'
 import ReportSections from './ReportSections.vue'
+import WriteUsCard from './WriteUsCard.vue'
 
 const route = useRoute()
 
@@ -57,6 +58,14 @@ const isFree = computed(() => PAID_AFTER[type.value] !== undefined)
 const fullReport = computed(() =>
   isFree.value ? api.value.report(token.value, PAID_AFTER[type.value]) : null,
 )
+
+// Полный натальный снят с продажи (08.10.2026): запертый ведёт в личку на
+// VIP, а не на оплату (docs/sales-policy.md). Совместимость продаётся
+// по-старому — у пары плитка прежняя. Функция, а не computed: спрашивают о
+// двух разных записях — плитке под бесплатным и самом запертом разборе
+function offersVip(report) {
+  return scope.value === 'chart' && report?.status === REPORT_STATUS.LOCKED
+}
 
 // Мостик к платному: фраза перед плиткой, объясняющая, чего в прочитанном
 // тексте нет. В промпте её держать нельзя — текст кешируется один на пару, а
@@ -238,7 +247,8 @@ watch(
              пару и показывается ещё на главной, где читать человеку нечего -->
         <p v-if="bridgeText" class="mb-4 font-read text-read text-ink-muted">{{ bridgeText }}</p>
 
-        <FullReportTile :token="token" :report="fullReport" :scope="scope" />
+        <WriteUsCard v-if="offersVip(fullReport)" place="report" />
+        <FullReportTile v-else :token="token" :report="fullReport" :scope="scope" />
       </div>
 
       <!-- Оценка текста: по ней сравниваются поколения промпта. Спрашиваем
@@ -309,7 +319,8 @@ watch(
            показывает конец бесплатного разбора — она умеет и состав секций
            перечислить, и увести на сайт, не называя это оплатой -->
       <div v-else-if="isLocked" class="w-full">
-        <FullReportTile :token="token" :report="current" :scope="scope" />
+        <WriteUsCard v-if="offersVip(current)" place="report" />
+        <FullReportTile v-else :token="token" :report="current" :scope="scope" />
       </div>
 
       <!-- Отказ: текст подобран по коду, а кнопка есть только там, где повтор

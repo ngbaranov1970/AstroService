@@ -110,3 +110,18 @@ def test_future_date_is_rejected(client: TestClient, logged: list, user: FakeUse
 
     assert response.status_code == 422
     assert user.sun_sign is None
+
+
+# --- «Напиши нам» (POST /vk/vip-cta) ------------------------------------------
+
+
+def test_vip_cta_logs_place(client: TestClient, logged: list) -> None:
+    response = client.post("/api/v1/vk/vip-cta", json={"place": "home"})
+
+    assert response.status_code == 204
+    assert logged == [{"name": events.VIP_CTA_CLICKED, "user_id": 1, "place": "home"}]
+
+
+def test_vip_cta_rejects_unknown_place(client: TestClient, logged: list) -> None:
+    assert client.post("/api/v1/vk/vip-cta", json={"place": "<script>"}).status_code == 422
+    assert logged == []

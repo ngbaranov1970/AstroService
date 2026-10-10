@@ -8,6 +8,7 @@ import { computed, watch } from 'vue'
 
 import GroupCard from '@/features/community/GroupCard.vue'
 import FullReportTile from '@/features/report/FullReportTile.vue'
+import WriteUsCard from '@/features/report/WriteUsCard.vue'
 import { REPORT_STATUS } from '@/shared/api/endpoints'
 import { useCharts } from '@/shared/composables/useCharts'
 import { useReports } from '@/shared/composables/useReports'
@@ -60,6 +61,11 @@ const fullReport = computed(() => report(token.value, 'full_natal'))
 // Предлагаем платное только тому, кто дочитал бесплатное: до первого текста
 // «полный разбор из шести секций» — обещание неизвестно чего
 const freeIsReady = computed(() => report(token.value, 'free_natal')?.status === REPORT_STATUS.READY)
+
+// Полный разбор снят с продажи (08.10.2026): запертый — значит не купленный,
+// и вместо оплаты ведём в личку на VIP. Купленный по-прежнему открывается
+// плиткой (docs/sales-policy.md)
+const fullIsLocked = computed(() => fullReport.value?.status === REPORT_STATUS.LOCKED)
 
 // Без точного времени асцендент считан от полудня — бейдж покажет причину
 const timeKnown = computed(() => current.value?.time_known ?? true)
@@ -127,10 +133,13 @@ watch(
         <ReportTile v-for="tile in ready.narrow" :key="tile.key" :tile="tile" />
       </div>
 
-      <!-- Полный разбор — последним в секции: сначала то, что уже есть, потом
-           платное предложение. Плитка сама решает, вести ли на оплату (заперт)
-           или в текст (уже куплен) и показывать ли цену: в VK её нет -->
-      <FullReportTile v-if="fullReport && freeIsReady" :token="token" :report="fullReport" />
+      <!-- Предложение — последним в секции: сначала то, что уже есть. Не купил
+           полный разбор — «Напиши нам», купил — плитка ведёт в его текст.
+           <template> — обёртка без своего тега: v-if на ней решает за обоих -->
+      <template v-if="fullReport && freeIsReady">
+        <WriteUsCard v-if="fullIsLocked" place="home" />
+        <FullReportTile v-else :token="token" :report="fullReport" />
+      </template>
 
       <!-- Приглашение завести вторую карту стоит сразу за разборами: рядом с
            готовым текстом понятно, что именно получит близкий. Внизу экрана,
