@@ -56,7 +56,7 @@ templates.env.globals["pair_price_rub"] = PAIR_PRICE_RUB
 
 # Дата редакции оферты и политики. Меняется вместе с текстом: человек должен
 # видеть, ту ли версию он принимал.
-REVISION_DATE = "13 сентября 2026 г."
+REVISION_DATE = "15 октября 2026 г."
 
 router = APIRouter(include_in_schema=False)
 

@@ -206,7 +206,7 @@ def test_draft_refuses_unknown_model(
     [
         pytest.param(
             {"status": OrderStatus.PENDING, "paid_at": None},
-            ["Сделать черновик", "/pay/order/tok"],
+            ["Сделать черновик", "/pay/order/tok", "<option value=\"anthropic/claude-opus-5.5\" selected>Claude Opus"],
             ["Сохранить", "отправить в личку"],
             id="ждёт оплаты, черновика нет",
         ),
