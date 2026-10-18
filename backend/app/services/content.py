@@ -306,14 +306,27 @@ async def find_post(
     return await session.scalar(stmt)
 
 
+def has_card(post: Post) -> bool:
+    """Есть ли у поста картинка: только у обзора неба до v8.
+
+    v8 печатает шесть пунктов вместо «Стоит / Подождёт», на карточку они не
+    влезают (docs/astro-context.md, «Утренний пост — список дел»). Признак —
+    форма ответа, а не номер версии: брак разбора картинку сохраняет.
+    """
+    if post.kind != PostKind.DAILY_SKY:
+        return False
+    parsed = daily_sky.parse(post.text)
+    return parsed is None or "headline" not in parsed
+
+
 async def card_parts(session: AsyncSession, post_id: int) -> tuple[date, str, str] | None:
     """Что нужно карточке поста в ленту: (дата, «Стоит», «Подождёт»).
 
-    None — поста нет или это не обзор неба: картинка есть только у него.
+    None — поста нет или картинки у него нет (см. has_card).
     Брак разбора даёт пустые строки, и карточка выходит без концовки.
     """
     post = await session.get(Post, post_id)
-    if post is None or post.kind != PostKind.DAILY_SKY:
+    if post is None or not has_card(post):
         return None
     parsed = daily_sky.parse(post.text) or {}
     return post.target_date, parsed.get("do", ""), parsed.get("wait", "")

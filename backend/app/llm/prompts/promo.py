@@ -50,6 +50,10 @@ MAIL_INVITE = (
     "Подписаться можно в приложении"
 )
 
+# Последняя строка утреннего поста daily_sky v8 — формулировка владельца,
+# дословно. «Личный» — про рассылку, она расписывает знак по домам.
+MORNING_APP = "Личный гороскоп каждый день — в приложении"
+
 # Последняя строка вечернего поста — повод для комментариев под ним.
 COMMENT_QUESTION = "А твой вчерашний гороскоп совпал?"
 
@@ -86,6 +90,12 @@ def mail_invite() -> str:
     """Приглашение в рассылку со ссылкой на Mini App; без VK_APP_ID — без ссылки."""
     app_id = get_settings().vk_app_id
     return f"{MAIL_INVITE} vk.ru/app{app_id}" if app_id else f"{MAIL_INVITE}."
+
+
+def morning_app() -> str:
+    """Последняя строка утреннего поста со ссылкой; без VK_APP_ID — без ссылки."""
+    app_id = get_settings().vk_app_id
+    return f"{MORNING_APP}: vk.ru/app{app_id}" if app_id else f"{MORNING_APP}."
 
 
 def line(seed: int | None = None) -> str:

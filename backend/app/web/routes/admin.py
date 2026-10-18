@@ -527,6 +527,7 @@ async def _content_response(
                     "post": post,
                     "text": text,
                     "words": len(text.split()),
+                    "has_card": content.has_card(post),
                     # Вечер публикации для sign_lines: он пишется на завтра.
                     "evening_before": post.target_date - timedelta(days=1),
                 }

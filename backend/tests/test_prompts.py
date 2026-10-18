@@ -355,3 +355,98 @@ def test_sign_lines_build_user_bez_planet_i_s_proshlymi_frazami() -> None:
     assert "- вчерашняя мысль." in text
     for name in ("Марс", "Юпитер", "Сатурн", "Меркурий", "Венера"):
         assert name not in text
+
+
+# Образец утреннего поста v8 от владельца (18.10.2026) — render обязан
+# собрать его символ в символ, кроме ссылки: она зависит от VK_APP_ID.
+_SKY_V8_SAMPLE = """🌙 Воскресенье, 18 октября
+Утром Луна дружит с Меркурием, вечером ссорится с Солнцем
+
+✅ Договаривайся о важном до полудня — сегодня тебя услышат
+✅ Читай договоры и инструкции, разбирай бумаги
+✅ Доделывай начатое — пойдёт без надрыва
+
+⛔ После 19:00 не спорь с близкими — сорвёшься на тех, кто ни при чём
+⛔ Не обещай больше, чем можешь сделать
+⛔ Не принимай решений на эмоциях вечером
+
+А ты сегодня успел до полудня? 👇"""
+
+
+def _sky_v8_answer(**changes: object) -> str:
+    data = {
+        "date": "Воскресенье, 18 октября",
+        "headline": "Утром Луна дружит с Меркурием, вечером ссорится с Солнцем",
+        "do": [
+            "Договаривайся о важном до полудня — сегодня тебя услышат",
+            "Читай договоры и инструкции, разбирай бумаги",
+            "Доделывай начатое — пойдёт без надрыва",
+        ],
+        "dont": [
+            "После 19:00 не спорь с близкими — сорвёшься на тех, кто ни при чём",
+            "Не обещай больше, чем можешь сделать",
+            "Не принимай решений на эмоциях вечером",
+        ],
+        "question": "А ты сегодня успел до полудня?",
+    }
+    data.update(changes)
+    return json.dumps(data, ensure_ascii=False)
+
+
+def test_daily_sky_v8_render_sobiraet_obrazec() -> None:
+    from app.llm.prompts import daily_sky
+
+    assert daily_sky.render(_sky_v8_answer()) == f"{_SKY_V8_SAMPLE}\n\n{promo.morning_app()}"
+
+
+def test_daily_sky_v8_rezhet_lishnie_punkty_i_tochki() -> None:
+    from app.llm.prompts import daily_sky
+
+    post = daily_sky.parse(_sky_v8_answer(do=["Раз.", "", "Два", "Три", "Четыре"]))
+
+    assert post is not None
+    assert post["do"] == ["Раз", "Два", "Три"]
+
+
+def test_daily_sky_v8_bez_voprosa_post_est() -> None:
+    from app.llm.prompts import daily_sky
+
+    text = daily_sky.render(_sky_v8_answer(question=""))
+
+    assert "👇" not in text
+    assert text.endswith(promo.morning_app())
+
+
+def test_daily_sky_v8_pustoy_headline_brak() -> None:
+    from app.llm.prompts import daily_sky
+
+    answer = _sky_v8_answer(headline=" ")
+
+    assert daily_sky.parse(answer) is None
+    assert daily_sky.render(answer) == answer
+
+
+def test_daily_sky_v7_sobiraetsya_po_staromu() -> None:
+    # Посты v7 ещё лежат в базе: /admin/content показывает их тем же render().
+    from app.llm.prompts import daily_sky
+
+    answer = json.dumps(
+        {"date": "17 октября, суббота", "body": "Первый.\nВторой.", "do": "звонить", "wait": "спорить"},
+        ensure_ascii=False,
+    )
+    text = daily_sky.render(answer, seed=1)
+
+    assert text.startswith("17 октября, суббота\n\n")
+    assert "Первый.\n\nВторой." in text
+    assert text.endswith("Стоит: звонить\nПодождёт: спорить")
+
+
+def test_has_card_tolko_u_v7() -> None:
+    from app.models import Post, PostKind
+    from app.services import content
+
+    v7 = json.dumps({"date": "17 октября, суббота", "body": "Текст.", "do": "a", "wait": "b"}, ensure_ascii=False)
+
+    assert content.has_card(Post(kind=PostKind.DAILY_SKY, text=v7))
+    assert not content.has_card(Post(kind=PostKind.DAILY_SKY, text=_sky_v8_answer()))
+    assert not content.has_card(Post(kind=PostKind.SIGN_LINES, text=v7))
