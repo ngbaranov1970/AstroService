@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -299,6 +300,19 @@ def test_sign_lines_render_po_obrazcu() -> None:
     assert lines[13].startswith(promo.MAIL_INVITE)
     assert lines[14] == promo.COMMENT_QUESTION
     assert len(lines) == 15
+
+
+def test_sign_lines_render_aktsiya_menyaet_kontsovku() -> None:
+    answer = _sign_lines_answer(sign_lines.SIGN_ORDER)
+    last_day = promo.RETRO_MERCURY_UNTIL
+
+    with_promo = sign_lines.render(answer, day=last_day)
+    assert promo.RETRO_MERCURY in with_promo
+    assert promo.COMMENT_QUESTION not in with_promo
+
+    after = sign_lines.render(answer, day=last_day + timedelta(days=1))
+    assert promo.RETRO_MERCURY not in after
+    assert after.endswith(promo.COMMENT_QUESTION)
 
 
 def test_sign_lines_render_brak_otdayot_kak_est() -> None:

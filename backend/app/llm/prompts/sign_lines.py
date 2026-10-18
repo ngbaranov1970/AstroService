@@ -164,15 +164,18 @@ def _tidy(line: str) -> str:
     return line if line.endswith((".", "!", "?", "…")) else f"{line}."
 
 
-def render(text: str, seed: int | None = None) -> str:
+def render(text: str, seed: int | None = None, day: date | None = None) -> str:
     """JSON-ответ модели → готовый текст поста по образцу владельца.
 
     seed не используется: приглашение здесь одно, а аргумент есть затем, что
-    content.render зовёт все рендеры постов одинаково. Брак разбора отдаём
-    как есть — за текст заплачено.
+    content.render зовёт все рендеры постов одинаково. day — target_date поста:
+    до promo.RETRO_MERCURY_UNTIL концовку заменяет блок акции. Брак разбора
+    отдаём как есть — за текст заплачено.
     """
     lines = parse(text)
     if lines is None:
         return text
     body = [f"{SIGN_EMOJI[sign]} {sign} — {_tidy(line)}" for sign, line in lines.items()]
+    if day is not None and day <= promo.RETRO_MERCURY_UNTIL:
+        return "\n".join([TITLE, *body, "", promo.retro_mercury()])
     return "\n".join([TITLE, *body, promo.mail_invite(), promo.COMMENT_QUESTION])

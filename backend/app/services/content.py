@@ -354,6 +354,9 @@ def render(post: Post) -> str:
     (модель ответила не JSON) отдаём как есть: за текст заплачено, и увидеть
     его глазами полезнее, чем получить ошибку.
     """
+    # Концовка вечернего поста зависит от его даты — см. promo.RETRO_MERCURY_UNTIL.
+    if post.kind is PostKind.SIGN_LINES:
+        return sign_lines.render(post.text, seed=post.id, day=post.target_date)
     module = _PROMPTS.get(post.kind)
     renderer = getattr(module, "render", None)
     # id как зерно приписки: страница зовёт render() на каждую перезагрузку, и
