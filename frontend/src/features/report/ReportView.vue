@@ -59,6 +59,18 @@ const fullReport = computed(() =>
   isFree.value ? api.value.report(token.value, PAID_AFTER[type.value]) : null,
 )
 
+// Где разрезать текст, чтобы вставить подписку на гороскоп дня: номер секции
+// сразу за «Солнце: <знак>» у бесплатного натального. Ищем по заголовку, а не
+// «вторая по счёту»: текст над первым `##` даёт лишнюю безымянную секцию.
+// findIndex — как next(i for i, s in enumerate(...) if ...) в Python, только
+// вместо StopIteration возвращает -1. Нет Солнца — null, блок уходит в конец
+const sunCut = computed(() => {
+  const sections = current.value?.sections ?? []
+  // ?. — «если слева null/undefined, дальше не идём и получаем undefined»
+  const index = sections.findIndex((section) => section.title?.startsWith('Солнце'))
+  return index === -1 ? null : index + 1
+})
+
 // Полный натальный снят с продажи (08.10.2026): запертый ведёт в личку на
 // VIP, а не на оплату (docs/sales-policy.md). Совместимость продаётся
 // по-старому — у пары плитка прежняя. Функция, а не computed: спрашивают о
@@ -237,7 +249,22 @@ watch(
 
     <!-- 2. Текст готов — ради этого экрана всё и затевалось -->
     <template v-else-if="isReady">
-      <ReportSections :sections="current.sections ?? []" />
+      <!-- Подписка на гороскоп дня — сразу после Солнца: человек прочитал про
+           себя первое точное и ещё не устал. Текст режем на две части и
+           рисуем ReportSections дважды; slice(a, b) — как list[a:b] в Python.
+           Вне VK GroupCard не рисуется сам -->
+      <template v-if="sunCut !== null">
+        <ReportSections :sections="current.sections.slice(0, sunCut)" />
+        <div class="mt-8">
+          <GroupCard />
+        </div>
+        <!-- mt-8 повторяет gap-8 между секциями внутри ReportSections: шов
+             между двумя половинами текста не должен быть виден -->
+        <div class="mt-8">
+          <ReportSections :sections="current.sections.slice(sunCut)" />
+        </div>
+      </template>
+      <ReportSections v-else :sections="current.sections ?? []" />
 
       <!-- Полный разбор предлагаем в конце бесплатного: человек уже прочитал
            текст и знает, за чем идёт дальше. Плитка сама решает, вести ли
@@ -257,10 +284,9 @@ watch(
         <ReportFeedback :token="token" :type="type" />
       </div>
 
-      <!-- Подписка на гороскоп дня. Место выбрано тем же доводом: соглашаются
-           на письма от того, чей текст только что понравился. Вне VK блок
-           не рисуется сам -->
-      <div class="mt-8">
+      <!-- Подписка в конце — для разборов без секции «Солнце» (совместимость):
+           соглашаются на письма от того, чей текст только что понравился -->
+      <div v-if="sunCut === null" class="mt-8">
         <GroupCard />
       </div>
     </template>
