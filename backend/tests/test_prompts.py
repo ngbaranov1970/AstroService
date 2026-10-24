@@ -320,7 +320,7 @@ def test_sign_lines_render_data_v_zagolovke() -> None:
 
     text = sign_lines.render(_sign_lines_answer(sign_lines.SIGN_ORDER), day=date(2026, 10, 25))
 
-    assert text.split("\n")[0] == "Гороскоп на завтра, 25 октября:"
+    assert text.split("\n")[0] == "Гороскоп на воскресенье 25 октября"
 
 
 def test_sign_lines_render_brak_otdayot_kak_est() -> None:
