@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from app.llm.prompts import daily_horoscope, promo
+from app.llm.prompts import daily_horoscope, daily_sky, promo
 
 VERSION = "sign_lines_v2"
 
@@ -35,6 +35,13 @@ SIGN_ORDER = daily_horoscope.SIGN_ORDER
 SIGN_EMOJI: dict[str, str] = dict(zip(SIGN_ORDER, "♈♉♊♋♌♍♎♏♐♑♒♓"))
 
 TITLE = "Гороскоп на завтра:"
+
+
+def title(day: date | None) -> str:
+    """Заголовок с числом и месяцем дня гороскопа: «Гороскоп на завтра, 25 октября:»."""
+    if day is None:
+        return TITLE
+    return f"Гороскоп на завтра, {day.day} {daily_sky._MONTHS_RU[day.month - 1]}:"
 
 # Формы фразы по кругу — как в образце владельца, где совет стоит рядом с
 # наблюдением и ироничным «не начинай спор».
@@ -177,5 +184,5 @@ def render(text: str, seed: int | None = None, day: date | None = None) -> str:
         return text
     body = [f"{SIGN_EMOJI[sign]} {sign} — {_tidy(line)}" for sign, line in lines.items()]
     if day is not None and day <= promo.RETRO_MERCURY_UNTIL:
-        return "\n".join([TITLE, *body, "", promo.retro_mercury()])
-    return "\n".join([TITLE, *body, promo.mail_invite(), promo.COMMENT_QUESTION])
+        return "\n".join([title(day), *body, "", promo.retro_mercury()])
+    return "\n".join([title(day), *body, promo.mail_invite(), promo.COMMENT_QUESTION])

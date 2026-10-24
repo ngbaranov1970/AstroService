@@ -315,6 +315,14 @@ def test_sign_lines_render_aktsiya_menyaet_kontsovku() -> None:
     assert after.endswith(promo.COMMENT_QUESTION)
 
 
+def test_sign_lines_render_data_v_zagolovke() -> None:
+    from datetime import date
+
+    text = sign_lines.render(_sign_lines_answer(sign_lines.SIGN_ORDER), day=date(2026, 10, 25))
+
+    assert text.split("\n")[0] == "Гороскоп на завтра, 25 октября:"
+
+
 def test_sign_lines_render_brak_otdayot_kak_est() -> None:
     assert sign_lines.render("не JSON") == "не JSON"
 
