@@ -4,8 +4,8 @@
 SYSTEM, build_user(), parse() и render(). Вход build_user — результат
 astro_core.transits.day_sky на день гороскопа, то есть на завтра.
 
-Модель пишет только двенадцать фраз; заголовок, эмодзи знаков, приглашение
-в рассылку и вопрос ставит render() дословно (docs/astro-context.md,
+Модель пишет только двенадцать фраз; заголовок, эмодзи знаков и концовку
+с подпиской ставит render() дословно (docs/astro-context.md,
 «Второй пост в ленту — вечерний гороскоп на завтра»).
 """
 
@@ -195,4 +195,4 @@ def render(text: str, seed: int | None = None, day: date | None = None) -> str:
     body = [f"{SIGN_EMOJI[sign]} {sign} — {_tidy(line)}" for sign, line in lines.items()]
     if day is not None and day <= promo.RETRO_MERCURY_UNTIL:
         return "\n".join([title(day), *body, "", promo.retro_mercury()])
-    return "\n".join([title(day), *body, promo.mail_invite(), promo.COMMENT_QUESTION])
+    return "\n".join([title(day), *body, promo.SIGN_LINES_FOOTER])

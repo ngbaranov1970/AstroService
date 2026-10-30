@@ -297,8 +297,8 @@ def test_sign_lines_render_po_obrazcu() -> None:
     assert lines[0] == sign_lines.TITLE
     assert lines[1] == "♈ Овен — фраза про Овен."
     assert lines[12] == "♓ Рыбы — фраза про Рыбы."
-    assert lines[13].startswith(promo.MAIL_INVITE)
-    assert lines[14] == promo.COMMENT_QUESTION
+    assert lines[13] == "🔔 Подпишись, чтобы завтра не пропустить свой гороскоп"
+    assert lines[14] == "👉 vk.ru/astrozvezdochet"
     assert len(lines) == 15
 
 
@@ -308,11 +308,11 @@ def test_sign_lines_render_aktsiya_menyaet_kontsovku() -> None:
 
     with_promo = sign_lines.render(answer, day=last_day)
     assert promo.RETRO_MERCURY in with_promo
-    assert promo.COMMENT_QUESTION not in with_promo
+    assert promo.SIGN_LINES_FOOTER not in with_promo
 
     after = sign_lines.render(answer, day=last_day + timedelta(days=1))
     assert promo.RETRO_MERCURY not in after
-    assert after.endswith(promo.COMMENT_QUESTION)
+    assert after.endswith(promo.SIGN_LINES_FOOTER)
 
 
 def test_sign_lines_render_data_v_zagolovke() -> None:
