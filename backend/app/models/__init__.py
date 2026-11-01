@@ -39,6 +39,7 @@ autogenerate как удалённая, а незагруженный класс
   колонка text, и внутри тела класса она затенила бы функцию.
 """
 
+from app.models.bot_dialog import BotCommentReply, BotDialog, BotEventSeen
 from app.models.chart import Chart
 from app.models.event import Event
 from app.models.order import ClientGender, Order, OrderStatus
@@ -48,6 +49,9 @@ from app.models.report import Report, ReportType
 from app.models.user import Platform, User
 
 __all__ = [
+    "BotCommentReply",
+    "BotDialog",
+    "BotEventSeen",
     "Chart",
     "ClientGender",
     "Event",

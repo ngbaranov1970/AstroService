@@ -14,6 +14,8 @@ erDiagram
     users ||--o{ orders  : "RESTRICT"
     users ||--o{ events  : "SET NULL"
     users ||--o{ pairs   : "CASCADE (инициатор)"
+    users ||--o| bot_dialogs : "CASCADE"
+    users ||--o{ bot_comment_replies : "CASCADE"
     charts ||--o{ reports : "CASCADE"
     charts ||--o{ orders  : "SET NULL"
     charts ||--o| users   : "SET NULL (своя карта)"
@@ -131,10 +133,29 @@ erDiagram
         int      tokens_cached
         timestamptz created_at
     }
+
+    bot_dialogs {
+        bigint   user_id PK_FK "1:1 с users — шаг FSM бота"
+        varchar  state         "idle / natal_date / …"
+        jsonb    data          "черновик ввода; уходит CASCADE"
+        timestamptz updated_at
+    }
+
+    bot_events_seen {
+        varchar  event_id PK   "id события Callback API"
+        timestamptz created_at
+    }
+
+    bot_comment_replies {
+        bigint   user_id FK    "PK вместе с post_id"
+        bigint   post_id       "id поста VK на стене, не наша posts"
+        timestamptz created_at
+    }
 ```
 
-`posts` в диаграмме стоит особняком: связей у неё нет ни с кем — пост
-сообщества не принадлежит ни человеку, ни карте.
+`posts` и `bot_events_seen` в диаграмме стоят особняком: связей у них нет
+ни с кем. Пост сообщества не принадлежит ни человеку, ни карте; `event_id`
+приходит от VK и ни на что у нас не ссылается.
 
 ## Связи по одной
 
@@ -151,6 +172,8 @@ erDiagram
 | `reports.pair_id` → `pairs.id` | 1 : N, nullable | **CASCADE** | Текст парного разбора без пары бессмыслен и содержит данные обоих |
 | `orders.pair_id` → `pairs.id` | 1 : N, nullable | **SET NULL** | Та же развилка, что у `orders.chart_id`: пару удалить можно, денежный факт — нет |
 | `events.user_id` → `users.id` | 1 : N, nullable | **SET NULL** | Событие обезличивается, но вчерашняя воронка не меняется задним числом. Relationship в ORM намеренно нет: событий тысячи, нужны они агрегатами |
+| `bot_dialogs.user_id` → `users.id` | 1 : 1 | **CASCADE** | Шаг FSM и черновик ввода — только про этого человека; удалили пользователя — диалог некому продолжать. PK = `user_id`, отдельного id нет. Relationship в ORM нет, как у events |
+| `bot_comment_replies.user_id` → `users.id` | 1 : N | **CASCADE** | Антиспам «уже ответили в комментарии»: без пользователя строка бессмысленна. `post_id` — id поста VK, FK на нашу `posts` нет |
 | `users.primary_chart_id` → `charts.id` | 1 : 1, nullable | **SET NULL** | Какая из карт — собственная карта человека: по её знаку Солнца идёт рассылка. Удаление карты гасит признак, но не уносит пользователя. Единственный ключ, направленный от `users` наружу, — отсюда цикл в схеме |
 
 ## Как это работает в жизни — поток данных
@@ -213,10 +236,24 @@ erDiagram
 | `events` | IDX `(name, ts)` | Воронка: сколько раз случилось событие X за неделю |
 | `events` | IDX `(user_id, ts)` | Путь одного человека — для поддержки и разбора отвала |
 | `posts` | UQ `(kind, target_date, event_key, prompt_version)` | Адрес кеша: повторный прогон генератора не платит DeepSeek за уже написанный текст. Своего индекса под чтение недели нет намеренно — при двухмесячном хранении в таблице порядка сотни строк |
+| `bot_dialogs` | PK `user_id` | Один активный диалог на человека: два параллельных FSM не заведёшь |
+| `bot_events_seen` | PK `event_id` | Повтор Callback от VK не обрабатывается второй раз (`INSERT … ON CONFLICT DO NOTHING`) |
+| `bot_comment_replies` | PK `(user_id, post_id)` | Под одним постом стены — не больше одного ответа-ссылки одному человеку |
 
 Внешний ключ в Postgres индекс сам по себе **не** создаёт — те индексы, что нужны, заведены явно.
 
 ## Места, где схема неочевидна
+
+**`bot_dialogs.data` может держать черновик даты и города**, пока человек
+проходит сценарий «КАРТА». Это не архив персональных данных и не второй
+`charts`: строка живёт ровно пока нужен шаг FSM и уходит CASCADE вместе с
+пользователем. В логи `data` и текст сообщений не пишем — правило из
+`CLAUDE.md` и `docs/vk-bot-plan.md`.
+
+**`bot_events_seen` чистится отдельно от диалога.** События Callback не
+привязаны к `users`: это защита инфраструктуры от ретраев VK. Старые
+`event_id` можно выкидывать (ориентир — старше 7 дней), на разборы и оплату
+это не влияет.
 
 **`reports` висит на двух родителях сразу** (`chart_id` и `user_id`). Это не ошибка
 нормализации, а осознанный дубль: владельца видно и через `charts`, но самый частый
