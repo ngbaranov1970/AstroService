@@ -57,7 +57,9 @@ def logged(monkeypatch: pytest.MonkeyPatch, user: FakeUser) -> list[dict]:
     async def fake_session():
         yield FakeSession()
 
+    # sun-sign ушёл в сервис; vip-cta по-прежнему пишет через vk_routes.events.
     monkeypatch.setattr(vk_routes.events, "log", fake_log)
+    monkeypatch.setattr(vk_routes.sun_sign_service.events, "log", fake_log)
     app.dependency_overrides[get_session] = fake_session
     app.dependency_overrides[current_user] = lambda: user
     yield calls

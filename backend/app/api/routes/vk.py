@@ -19,9 +19,9 @@ from app.config import get_settings
 from app.models import Platform, User
 from app.schemas.vk import GroupStateOut, SunSignIn, SunSignOut, VipCtaIn
 from app.services import events
+from app.services import sun_sign as sun_sign_service
 from app.services import users as users_service
 from app.vk import api as vk_api
-from astro_core.transits import sun_sign_on
 
 router = APIRouter(prefix="/vk", tags=["vk"])
 
@@ -104,12 +104,7 @@ async def sun_sign(body: SunSignIn, user: CurrentUser, session: SessionDep) -> S
     """
     _require_vk(user)
 
-    sign = sun_sign_on(body.birth_date)
-    if sign is None:
-        await events.log(session, events.SUN_SIGN_ENTERED, user_id=user.id, cusp=True)
-    else:
-        users_service.set_sun_sign(user, sign)
-        await events.log(session, events.SUN_SIGN_ENTERED, user_id=user.id, sign=sign)
+    sign = await sun_sign_service.enter_by_date(session, user, body.birth_date)
     await session.commit()
     return SunSignOut(sign=sign)
 

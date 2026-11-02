@@ -357,6 +357,20 @@ def ingresses(start: date, end: date) -> list[dict]:
     return out
 
 
+def sun_sign_bounds(day: date) -> tuple[str, str]:
+    """Знаки Солнца на начале и конце календарной даты по всем поясам.
+
+    Одна дата длится 50 часов (UTC+14 … UTC−12). Солнце назад не ходит, поэтому
+    хватает двух концов окна. Совпали — день однозначный; разные — день смены
+    знака, и без времени/места выбрать нельзя (бот тогда показывает оба).
+    """
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC) - timedelta(hours=14)
+    end = start + timedelta(hours=50)
+    first = _sign_index(_lon_speed(_to_jd(start), "Sun")[0])
+    last = _sign_index(_lon_speed(_to_jd(end), "Sun")[0])
+    return SIGNS_RU[_SIGN_CODES[first]], SIGNS_RU[_SIGN_CODES[last]]
+
+
 def sun_sign_on(day: date) -> str | None:
     """Знак Солнца по одной дате рождения («Лев») или None в день смены знака.
 
@@ -365,15 +379,10 @@ def sun_sign_on(day: date) -> str | None:
     около двух дней в месяц (docs/astro-context.md, «Знак для рассылки —
     без карты»).
     """
-    # Одна календарная дата длится 50 часов: начинается в UTC+14 и кончается
-    # в UTC−12. Солнце назад не ходит, поэтому хватает двух концов окна.
-    start = datetime(day.year, day.month, day.day, tzinfo=UTC) - timedelta(hours=14)
-    end = start + timedelta(hours=50)
-    first = _sign_index(_lon_speed(_to_jd(start), "Sun")[0])
-    last = _sign_index(_lon_speed(_to_jd(end), "Sun")[0])
+    first, last = sun_sign_bounds(day)
     if first != last:
         return None
-    return SIGNS_RU[_SIGN_CODES[first]]
+    return first
 
 
 def _scan_sign_change(body: str, jd_start: float, jd_end: float, step: float):
