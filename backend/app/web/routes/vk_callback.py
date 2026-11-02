@@ -27,14 +27,16 @@ import hmac
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chatbot import storage
 from app.config import get_settings
 from app.db import get_session
 from app.models import Platform
 from app.services import events, users
+from app.vk import bot as vk_bot
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,9 @@ _SOURCE = "vk_group"
 
 
 @router.post("/vk/callback")
-async def vk_callback(request: Request, session: SessionDep) -> PlainTextResponse:
+async def vk_callback(
+    request: Request, session: SessionDep, background: BackgroundTasks
+) -> PlainTextResponse:
     """Событие сообщества VK. Всегда отвечает 200, кроме чужих запросов.
 
     Возвращает строку подтверждения на type=confirmation и "ok" на всё
@@ -115,8 +119,14 @@ async def vk_callback(request: Request, session: SessionDep) -> PlainTextRespons
         logger.debug("Callback VK: событие %s пропущено", event_type)
         return _ok()
 
+    bot_message = (
+        settings.vk_bot_enabled and event_type == "message_new"
+        and obj.get("message", {}).get("peer_id") == vk_user_id
+    )
+    create_options = {"subscribed": False} if settings.vk_bot_enabled else {}
     user = await users.get_or_create(
-        session, platform=Platform.VK, external_id=str(vk_user_id), source=_SOURCE
+        session, platform=Platform.VK, external_id=str(vk_user_id), source=_SOURCE,
+        **create_options,
     )
     await users.fill_vk_name(user)
 
@@ -141,7 +151,16 @@ async def vk_callback(request: Request, session: SessionDep) -> PlainTextRespons
 
     # Текста сообщения в логе нет и не будет: люди пишут туда дату рождения
     # и вопросы про здоровье (CLAUDE.md, «Персональных данных в логах нет»).
+    dispatch = False
+    if bot_message:
+        event_id = body.get("event_id")
+        if isinstance(event_id, str) and 0 < len(event_id) <= 64:
+            dispatch = not await storage.seen(session, event_id)
+        else:
+            logger.warning("VK-бот: message_new без корректного event_id, пропущен")
     await session.commit()
+    if dispatch:
+        background.add_task(vk_bot.process_message, obj)
     return _ok()
 
 

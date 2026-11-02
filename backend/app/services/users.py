@@ -69,6 +69,7 @@ async def get_or_create(
     platform: Platform,
     external_id: str,
     source: str | None = None,
+    subscribed: bool | None = None,
 ) -> User:
     """Найти пользователя по паре (platform, external_id) или создать.
 
@@ -81,6 +82,8 @@ async def get_or_create(
     и переписывать его при каждом визите значит потерять ответ на вопрос
     «откуда пришли те, кто платит». У существующего пользователя аргумент
     молча игнорируется, и это не забывчивость, а правило.
+
+    subscribed задаёт подписку только новой строке; None оставляет дефолт модели.
 
     Коммит не делаем: транзакцией управляет вызывающий (см. app/db.py).
     """
@@ -106,9 +109,13 @@ async def get_or_create(
     # RETURNING отдаёт строку, только если вставка ДЕЙСТВИТЕЛЬНО произошла.
     # При конфликте (DO NOTHING) результат пуст — это и есть сигнал
     # «меня опередили», а не ошибка.
+    # Подписка задаётся только при создании; существующих пользователей не меняем.
+    values = {"platform": platform, "external_id": external_id, "source": source}
+    if subscribed is not None:
+        values["subscribed"] = subscribed
     stmt = (
         pg_insert(User)
-        .values(platform=platform, external_id=external_id, source=source)
+        .values(**values)
         .on_conflict_do_nothing(index_elements=["platform", "external_id"])
         .returning(User)
     )

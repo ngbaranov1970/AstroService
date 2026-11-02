@@ -167,6 +167,16 @@ def open_app_keyboard(label: str, *, launch_hash: str = "") -> str | None:
     return json.dumps(keyboard, ensure_ascii=False)
 
 
+async def send_message(
+    peer_id: int, text: str, *, random_id: int, keyboard: str | None = None
+) -> SendResult:
+    """Отправить ответ в один диалог; отказ адресату возвращается в результате."""
+    results = await _send_chunk([peer_id], text, random_id, keyboard)
+    if len(results) != 1:
+        raise VkError("VK messages.send: нет результата для одного адресата")
+    return results[0]
+
+
 async def send_messages(
     user_ids: list[int], text: str, *, random_id: int, keyboard: str | None = None
 ) -> list[SendResult]:
