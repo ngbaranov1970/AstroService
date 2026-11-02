@@ -60,6 +60,10 @@ def keyboard_json(reply: Reply) -> str | None:
         return None
     if len(reply.buttons) > (6 if reply.inline else 10):
         raise ValueError("Слишком много рядов клавиатуры")
+    # Inline: VK режет не только ряды, но и сумму кнопок (ошибка 911 при >10).
+    total = sum(len(row) for row in reply.buttons)
+    if reply.inline and total > 10:
+        raise ValueError("Inline-клавиатура VK: не больше 10 кнопок")
     rows = []
     for row in reply.buttons:
         if not 1 <= len(row) <= 5:
@@ -176,5 +180,12 @@ async def process_message(obj: dict[str, Any]) -> None:
                     return
                 part_index += 1
     except Exception as error:  # noqa: BLE001 — ошибка фона не должна менять ответ Callback
-        # Текст исключения провайдера может содержать сообщение пользователя.
-        logger.error("VK-бот: сбой user_id=%s error_type=%s", user_id, type(error).__name__)
+        # VkError — ответ API (код/описание), без текста человека. Остальное —
+        # только тип: str(error) может содержать дату рождения из исключения.
+        detail = str(error)[:120] if isinstance(error, api.VkError) else "-"
+        logger.error(
+            "VK-бот: сбой user_id=%s error_type=%s detail=%s",
+            user_id,
+            type(error).__name__,
+            detail,
+        )

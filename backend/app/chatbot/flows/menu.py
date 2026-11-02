@@ -32,7 +32,12 @@ def knows_sign(user: User) -> bool:
 
 
 def menu_reply(user: User) -> Reply:
-    """Обычная клавиатура главного меню; подпись подписки зависит от флага."""
+    """Меню inline-кнопками под сообщением.
+
+    Обычная клавиатура (снизу) на десктопе VK часто не рисуется или схлопывается
+    после ответа без keyboard — кнопки пропадают, текст меню остаётся.
+    Inline виден на вебе и в приложении (проверили 02.11.2026).
+    """
     sub_label = texts.BTN_UNSUBSCRIBE if user.subscribed else texts.BTN_SUBSCRIBE
     sub_cmd = "unsubscribe" if user.subscribed else "subscribe"
     return Reply(
@@ -51,6 +56,7 @@ def menu_reply(user: User) -> Reply:
                 Button(sub_label, {"cmd": sub_cmd}),
             ],
         ],
+        inline=True,
     )
 
 
@@ -88,7 +94,7 @@ async def start_ask_sign(
     *,
     pending: str | None = None,
 ) -> list[Reply]:
-    """Открыть выбор знака: 12 кнопок + «Ввести дату». pending — today/month."""
+    """Открыть выбор знака двумя сообщениями (лимит VK — 10 inline-кнопок)."""
     data: dict[str, Any] = {}
     if pending:
         data["pending"] = pending
@@ -97,7 +103,7 @@ async def start_ask_sign(
         text = texts.ASK_SIGN_AGAIN.format(sign=user.sun_sign)
     else:
         text = texts.ASK_SIGN
-    return [Reply(text=text, buttons=_sign_keyboard(), inline=True)]
+    return _sign_replies(text)
 
 
 async def handle_ask_sign(
@@ -138,18 +144,26 @@ def parse_birth_date(text: str) -> date | None:
         return None
 
 
-def _sign_keyboard() -> list[list[Button]]:
-    rows: list[list[Button]] = []
-    row: list[Button] = []
-    for sign in SIGN_ORDER:
-        row.append(Button(sign, {"cmd": "set_sign", "sign": sign}))
-        if len(row) == 3:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    rows.append([Button(texts.BTN_ENTER_DATE, {"cmd": "sign_date"})])
-    return rows
+def _sign_replies(text: str) -> list[Reply]:
+    """Две inline-клавиатуры: 9 знаков, затем 3 + «Ввести дату».
+
+    У messages.send для inline максимум 10 кнопок (ошибка 911) — 12 знаков
+    и дата в одном сообщении VK отвергает.
+    """
+    sign_buttons = [
+        Button(sign, {"cmd": "set_sign", "sign": sign}) for sign in SIGN_ORDER
+    ]
+    first = _button_rows(sign_buttons[:9], width=3)
+    second = _button_rows(sign_buttons[9:], width=3)
+    second.append([Button(texts.BTN_ENTER_DATE, {"cmd": "sign_date"})])
+    return [
+        Reply(text=text, buttons=first, inline=True),
+        Reply(text=texts.ASK_SIGN_MORE, buttons=second, inline=True),
+    ]
+
+
+def _button_rows(buttons: list[Button], *, width: int) -> list[list[Button]]:
+    return [buttons[i : i + width] for i in range(0, len(buttons), width)]
 
 
 async def _ask_date(

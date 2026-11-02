@@ -8,12 +8,13 @@
 	# ngbaranov.top не отключаем — на нём ссылки в уже выданных разборах,
 	# редирект сохраняет путь, и /r/<token> открывается на новом домене.
 	#
-	# Вебхук из редиректа исключён: уведомления старого магазина 1432173
-	# приходят POST'ом на ngbaranov.top, а за 301 POST не повторяют — деньги
-	# списались бы, а отчёт не открылся.
+	# POST из редиректа исключён: за 301 клиент тело не повторяет.
+	# /webhooks/* — ЮKassa старого магазина 1432173 на ngbaranov.top.
+	# /vk/callback — Callback API сообщества: в кабинете VK ещё может висеть
+	# старый URL, без исключения бот и флаги message_allow/deny молчат.
 	@legacy {
 		host ngbaranov.top www.astrozvezdochet.ru
-		not path /webhooks/*
+		not path /webhooks/* /vk/callback
 	}
 	handle @legacy {
 		redir https://astrozvezdochet.ru{uri} permanent

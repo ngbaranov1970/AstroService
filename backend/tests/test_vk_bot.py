@@ -92,6 +92,13 @@ def test_keyboard_rejects_oversize(inline, rows, width):
         bot.keyboard_json(reply)
 
 
+def test_keyboard_rejects_inline_over_10_buttons():
+    # Рядов мало, но кнопок 12 — VK отвечает 911.
+    reply = Reply("Текст", [[Button("К", {})] * 3] * 4, inline=True)
+    with pytest.raises(ValueError, match="10"):
+        bot.keyboard_json(reply)
+
+
 async def test_send_message_uses_existing_transport(monkeypatch):
     result = api.SendResult(user_id=100, message_id=42)
     send = AsyncMock(return_value=[result])
