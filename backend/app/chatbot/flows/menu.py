@@ -1,11 +1,12 @@
-"""Главное меню и выбор знака Солнца без карты.
+"""Главное меню, выбор знака и гороскоп на сегодня.
 
-Гороскоп на сегодня/месяц и подписка подключатся в задачах 5–7: здесь они
-либо ведут в ask_sign (знака нет), либо отвечают заглушкой (знак есть).
+Месяц и подписка — задачи 6–7: месяц пока заглушка, кнопки подписки есть,
+но флаг subscribed ещё не меняют.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, date, datetime
 from typing import Any
@@ -17,8 +18,12 @@ from app.chatbot.types import Button, Incoming, Reply
 from app.llm.prompts.daily_horoscope import SIGN_ORDER
 from app.models import BotDialog, User
 from app.schemas.charts import MIN_BIRTH_YEAR
+from app.services import broadcast, content
+from app.services import charts as charts_service
 from app.services import sun_sign as sun_sign_service
 from astro_core.transits import sun_sign_bounds, sun_sign_on
+
+logger = logging.getLogger(__name__)
 
 _DATE_RE = re.compile(
     r"^\s*(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s*$"
@@ -74,12 +79,18 @@ async def dispatch(
         return await _set_sign(session, user, dialog, payload.get("sign"))
     if cmd == "sign_date":
         return await _ask_date(session, dialog, dialog.data)
-    if cmd in {"today", "month"}:
+    if cmd == "today":
         if not knows_sign(user):
             return await start_ask_sign(
-                session, user, dialog, pending=cmd
+                session, user, dialog, pending="today"
             )
-        # Задачи 5–6 отдадут текст; пока не уводим в чужой FSM.
+        return await reply_today(session, user)
+    if cmd == "month":
+        if not knows_sign(user):
+            return await start_ask_sign(
+                session, user, dialog, pending="month"
+            )
+        # Задача 6 отдаст текст; пока не уводим в чужой FSM.
         return [Reply(text=texts.STUB_HOROSCOPE), menu_reply(user)]
     if cmd in {"subscribe", "unsubscribe"}:
         # Задача 7: явный opt-in. Пока не меняем флаг.
@@ -224,14 +235,56 @@ async def _after_sign_saved(
     sign: str,
     data: dict[str, Any],
 ) -> list[Reply]:
-    # pending (today/month) задачи 5–6 заберут; сейчас только подтверждаем знак.
     await storage.save(session, dialog, state=states.IDLE, data={})
     saved = Reply(text=texts.SIGN_SAVED.format(sign=sign))
     pending = data.get("pending")
-    if pending in {"today", "month"}:
-        # Знак только что появился — гороскоп ещё заглушка (задачи 5–6).
+    if pending == "today":
+        return [saved, *(await reply_today(session, user))]
+    if pending == "month":
+        # Задача 6: после выбора знака сразу отдать месяц.
         return [saved, Reply(text=texts.STUB_HOROSCOPE), menu_reply(user)]
     return [saved, menu_reply(user)]
+
+
+async def reply_today(session: AsyncSession, user: User) -> list[Reply]:
+    """Гороскоп на сегодня из поста рассылки; нет поста — «готовится» + меню."""
+    sign = await _resolve_sign(session, user)
+    if sign is None:
+        # knows_sign мог сработать по битой карте без Солнца и без sun_sign.
+        return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
+
+    try:
+        letters = await broadcast.letters_for(session, content.today_msk())
+        text = letters[sign]
+    except LookupError:
+        logger.info(
+            "chatbot.today not ready user_id=%s sign=%s", user.id, sign
+        )
+        return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
+    except KeyError:
+        # Пост есть, но знака в нём нет — тот же ответ, что «ещё готовится».
+        logger.warning(
+            "chatbot.today missing sign user_id=%s sign=%s", user.id, sign
+        )
+        return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
+
+    buttons: list[list[Button]] = []
+    if not user.subscribed:
+        buttons = [[Button(texts.BTN_DAILY, {"cmd": "subscribe"})]]
+    return [Reply(text=text, buttons=buttons, inline=bool(buttons))]
+
+
+async def _resolve_sign(session: AsyncSession, user: User) -> str | None:
+    """Знак как в рассылке: из своей карты, иначе users.sun_sign."""
+    if user.primary_chart_id is not None:
+        chart = await charts_service.get_chart(
+            session, user.primary_chart_id, user_id=user.id
+        )
+        if chart is not None and chart.calc:
+            from_chart = broadcast.sun_sign(chart.calc)
+            if from_chart:
+                return from_chart
+    return user.sun_sign
 
 
 def _date_in_range(value: date) -> bool:

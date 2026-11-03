@@ -239,19 +239,100 @@ async def test_today_without_sign_asks_sign(
     assert replies[0].text == texts.ASK_SIGN
 
 
-async def test_today_with_sign_stub(
+async def test_today_with_sign_returns_letter(
     session: FakeSession,
     user: FakeUser,
     dialog: FakeDialog,
     patched_storage: FakeDialog,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert patched_storage is dialog
     user.sun_sign = "Лев"
+    letter = "Лев\nСегодня хороший день."
+
+    async def fake_letters(_session: Any, _day: Any) -> dict[str, str]:
+        return {"Лев": letter}
+
+    monkeypatch.setattr(menu.broadcast, "letters_for", fake_letters)
     replies = await _handle(
         session, user, _incoming("", payload={"cmd": "today"})
     )
     assert dialog.state == states.IDLE
-    assert replies[0].text == texts.STUB_HOROSCOPE
+    assert replies[0].text == letter
+    assert replies[0].buttons == [
+        [menu.Button(texts.BTN_DAILY, {"cmd": "subscribe"})]
+    ]
+    assert replies[0].inline is True
+
+
+async def test_today_subscribed_omits_daily_button(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert patched_storage is dialog
+    user.sun_sign = "Лев"
+    user.subscribed = True
+
+    async def fake_letters(_session: Any, _day: Any) -> dict[str, str]:
+        return {"Лев": "текст"}
+
+    monkeypatch.setattr(menu.broadcast, "letters_for", fake_letters)
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "today"})
+    )
+    assert replies[0].text == "текст"
+    assert replies[0].buttons == []
+    assert replies[0].inline is False
+
+
+async def test_today_without_post_says_not_ready(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert patched_storage is dialog
+    user.sun_sign = "Лев"
+
+    async def fake_letters(_session: Any, _day: Any) -> dict[str, str]:
+        raise LookupError("нет поста")
+
+    monkeypatch.setattr(menu.broadcast, "letters_for", fake_letters)
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "today"})
+    )
+    assert replies[0].text == texts.TODAY_NOT_READY
+    assert replies[1].text == texts.MENU_TEXT
+
+
+async def test_pending_today_after_sign_returns_letter(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    logged: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert patched_storage is dialog
+    dialog.state = states.ASK_SIGN
+    dialog.data = {"pending": "today"}
+    letter = "Рак\nДень спокойный."
+
+    async def fake_letters(_session: Any, _day: Any) -> dict[str, str]:
+        return {"Рак": letter}
+
+    monkeypatch.setattr(menu.broadcast, "letters_for", fake_letters)
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "set_sign", "sign": "Рак"})
+    )
+    assert user.sun_sign == "Рак"
+    assert replies[0].text == texts.SIGN_SAVED.format(sign="Рак")
+    assert replies[1].text == letter
+    assert logged[0]["sign"] == "Рак"
 
 
 async def test_set_sign_does_not_subscribe(
