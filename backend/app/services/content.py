@@ -29,7 +29,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm import client
-from app.llm.prompts import astro_event, daily_horoscope, daily_sky, sign_lines
+from app.llm.prompts import (
+    astro_event,
+    daily_horoscope,
+    daily_sky,
+    monthly_horoscope,
+    sign_lines,
+)
 from app.models import Post, PostKind
 from astro_core import transits
 
@@ -41,6 +47,7 @@ _PROMPTS: dict[PostKind, ModuleType] = {
     PostKind.DAILY_SKY: daily_sky,
     PostKind.SIGN_LINES: sign_lines,
     PostKind.DAILY_HOROSCOPE: daily_horoscope,
+    PostKind.MONTHLY_HOROSCOPE: monthly_horoscope,
     PostKind.ASTRO_EVENT: astro_event,
 }
 
@@ -77,6 +84,7 @@ _CHANNEL: dict[PostKind, Channel] = {
     PostKind.DAILY_SKY: Channel.FEED,
     PostKind.SIGN_LINES: Channel.EVENING,
     PostKind.DAILY_HOROSCOPE: Channel.MAIL,
+    PostKind.MONTHLY_HOROSCOPE: Channel.MAIL,
     PostKind.ASTRO_EVENT: Channel.FEED,
 }
 
@@ -599,3 +607,35 @@ async def generate_week(
 
     # На день больше: вечерний пост последнего вечера адресован start+days.
     return await list_week(session, start, days=days + 1)
+
+
+async def generate_month(
+    session: AsyncSession,
+    month_start: date | None = None,
+) -> Post | None:
+    """Гороскоп на месяц: один пост на 1-е число (МСК), кеш по текущей VERSION.
+
+    Возвращает существующий или только что записанный пост; None — ошибка LLM
+    (уже в логе). Коммитит сам, как _generate: месяц пишется отдельно от
+    недельной пачки, и падение не должно откатывать чужие посты.
+    """
+    month_start = monthly_horoscope.month_start_of(month_start or today_msk())
+    existing = await find_post(session, PostKind.MONTHLY_HOROSCOPE, month_start)
+    if existing is not None:
+        logger.debug(
+            "Пост monthly_horoscope на %s уже есть — в LLM не идём", month_start
+        )
+        return existing
+    try:
+        return await _generate(
+            session,
+            kind=PostKind.MONTHLY_HOROSCOPE,
+            target_date=month_start,
+            user_message=monthly_horoscope.build_user(month_start),
+        )
+    except Exception:
+        await session.rollback()
+        logger.exception(
+            "Пост monthly_horoscope на %s не сгенерировался", month_start
+        )
+        return None

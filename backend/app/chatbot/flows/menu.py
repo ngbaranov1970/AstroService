@@ -1,7 +1,6 @@
-"""Главное меню, выбор знака и гороскоп на сегодня.
+"""Главное меню, выбор знака, гороскоп на сегодня и на месяц.
 
-Месяц и подписка — задачи 6–7: месяц пока заглушка, кнопки подписки есть,
-но флаг subscribed ещё не меняют.
+Подписка — задача 7: кнопки есть, флаг subscribed ещё не меняют.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot import states, storage, texts
 from app.chatbot.types import Button, Incoming, Reply
 from app.llm.prompts.daily_horoscope import SIGN_ORDER
+from app.llm.prompts import monthly_horoscope
 from app.models import BotDialog, User
 from app.schemas.charts import MIN_BIRTH_YEAR
 from app.services import broadcast, content
@@ -90,8 +90,7 @@ async def dispatch(
             return await start_ask_sign(
                 session, user, dialog, pending="month"
             )
-        # Задача 6 отдаст текст; пока не уводим в чужой FSM.
-        return [Reply(text=texts.STUB_HOROSCOPE), menu_reply(user)]
+        return await reply_month(session, user)
     if cmd in {"subscribe", "unsubscribe"}:
         # Задача 7: явный opt-in. Пока не меняем флаг.
         return [menu_reply(user)]
@@ -241,8 +240,7 @@ async def _after_sign_saved(
     if pending == "today":
         return [saved, *(await reply_today(session, user))]
     if pending == "month":
-        # Задача 6: после выбора знака сразу отдать месяц.
-        return [saved, Reply(text=texts.STUB_HOROSCOPE), menu_reply(user)]
+        return [saved, *(await reply_month(session, user))]
     return [saved, menu_reply(user)]
 
 
@@ -268,10 +266,46 @@ async def reply_today(session: AsyncSession, user: User) -> list[Reply]:
         )
         return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
 
+    return [_horoscope_reply(user, text)]
+
+
+async def reply_month(session: AsyncSession, user: User) -> list[Reply]:
+    """Гороскоп на текущий месяц; нет поста — «готовится» + меню."""
+    sign = await _resolve_sign(session, user)
+    if sign is None:
+        return [Reply(text=texts.MONTH_NOT_READY), menu_reply(user)]
+
+    month_start = monthly_horoscope.month_start_of(content.today_msk())
+    try:
+        letters = await broadcast.month_letters_for(session, month_start)
+        text = letters[sign]
+    except LookupError:
+        # Нет поста — сигнал владельцу в лог: cron/CLI ещё не прогнали месяц.
+        logger.info(
+            "chatbot.month not ready user_id=%s sign=%s month=%s",
+            user.id,
+            sign,
+            month_start,
+        )
+        return [Reply(text=texts.MONTH_NOT_READY), menu_reply(user)]
+    except KeyError:
+        logger.warning(
+            "chatbot.month missing sign user_id=%s sign=%s month=%s",
+            user.id,
+            sign,
+            month_start,
+        )
+        return [Reply(text=texts.MONTH_NOT_READY), menu_reply(user)]
+
+    return [_horoscope_reply(user, text)]
+
+
+def _horoscope_reply(user: User, text: str) -> Reply:
+    """Текст знака; неподписанному — inline «Гороскоп каждый день»."""
     buttons: list[list[Button]] = []
     if not user.subscribed:
         buttons = [[Button(texts.BTN_DAILY, {"cmd": "subscribe"})]]
-    return [Reply(text=text, buttons=buttons, inline=bool(buttons))]
+    return Reply(text=text, buttons=buttons, inline=bool(buttons))
 
 
 async def _resolve_sign(session: AsyncSession, user: User) -> str | None:

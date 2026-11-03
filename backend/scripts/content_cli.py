@@ -16,6 +16,8 @@
     uv run python scripts/content_cli.py 2026-09-06 --show-prompt
     uv run python scripts/content_cli.py 2026-09-06 --kind daily_horoscope
     uv run python scripts/content_cli.py 2026-09-28 --kind sign_lines   # на 28-е
+    uv run python scripts/content_cli.py 2026-11-01 --kind monthly_horoscope
+    uv run python scripts/content_cli.py 2026-11-15 --kind monthly_horoscope --show-prompt
 
 Текст поста идёт в stdout (можно перенаправить в файл), служебная информация —
 версия промпта, модель, токены — в stderr.
@@ -35,29 +37,32 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.llm import client
-from app.llm.prompts import daily_horoscope, daily_sky, sign_lines
+from app.llm.prompts import daily_horoscope, daily_sky, monthly_horoscope, sign_lines
 from astro_core import transits
 
-# Форматы, у которых вход — сутки целиком. Реестр повторяет _PROMPTS из
-# services/content.py, но своим списком: тот тянет за собой модели и базу,
-# а скрипт обязан работать там, где Postgres не поднят. У sign_lines дата —
-# день гороскопа, а не вечер публикации.
+# Форматы, у которых вход — сутки целиком (кроме monthly_horoscope — месяц).
+# Реестр повторяет _PROMPTS из services/content.py, но своим списком: тот тянет
+# за собой модели и базу, а скрипт обязан работать там, где Postgres не поднят.
+# У sign_lines дата — день гороскопа, а не вечер публикации.
 PROMPTS = {
     "daily_sky": daily_sky,
     "sign_lines": sign_lines,
     "daily_horoscope": daily_horoscope,
+    "monthly_horoscope": monthly_horoscope,
 }
 
 
 def _user_message(module, day: date, recent_texts: list[str] | None = None) -> str:
-    """Данные дня для промпта: небо суток, для daily_sky ещё и вчерашнее небо,
-    для sign_lines — фразы прошлых дней (ответы модели за этот же прогон).
+    """Данные для промпта: сутки, месяц или фразы прошлых дней.
 
     Смотрим на сигнатуру, а не перечисляем форматы: список разъехался бы с
     промптами. Первый день прогона прошлых фраз не получает — базы здесь нет.
     """
-    sky = transits.day_sky(day)
     params = signature(module.build_user).parameters
+    # Месячный гороскоп: любое число → 1-е, небо и события собирает сам модуль.
+    if "month_start" in params:
+        return module.build_user(monthly_horoscope.month_start_of(day))
+    sky = transits.day_sky(day)
     if "previous" in params:
         return module.build_user(sky, transits.day_sky(day - timedelta(days=1)))
     if "recent" in params:
@@ -120,6 +125,16 @@ def main() -> None:
 
     start = _parse_day(args.date)
     days = [start + timedelta(days=offset) for offset in range(args.days)]
+    # Месячный формат адресуется 1-м числом: --days иначе повторил бы один месяц.
+    if args.kind == "monthly_horoscope":
+        seen: set[date] = set()
+        months: list[date] = []
+        for day in days:
+            month = monthly_horoscope.month_start_of(day)
+            if month not in seen:
+                seen.add(month)
+                months.append(month)
+        days = months
 
     print(f"Промпт: {module.VERSION}", file=sys.stderr)
 

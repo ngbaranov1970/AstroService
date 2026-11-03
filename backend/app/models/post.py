@@ -43,6 +43,8 @@ class PostKind(str, enum.Enum):
     target_date — день гороскопа, публикуется накануне вечером.
     DAILY_HOROSCOPE — гороскоп дня на 12 знаков; с 05.09.2026 идёт только
     в рассылку по личным сообщениям, в ленту не публикуется.
+    MONTHLY_HOROSCOPE — гороскоп на месяц на 12 знаков; target_date — 1-е
+    число месяца (МСК), в ленту не публикуется (бот / MAIL).
     ASTRO_EVENT — пост про одно событие календаря (лунация, затмение, станция).
     SIGN_PORTRAIT, CELEBRITY, INVITE — форматы из контент-сетки, промптов у них
     ещё нет; заведены сразу, чтобы добавление формата не требовало правки CHECK.
@@ -51,6 +53,7 @@ class PostKind(str, enum.Enum):
     DAILY_SKY = "daily_sky"
     SIGN_LINES = "sign_lines"
     DAILY_HOROSCOPE = "daily_horoscope"
+    MONTHLY_HOROSCOPE = "monthly_horoscope"
     ASTRO_EVENT = "astro_event"
     SIGN_PORTRAIT = "sign_portrait"
     CELEBRITY = "celebrity"

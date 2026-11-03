@@ -16,7 +16,15 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.prompts import free_natal, full_natal, pair_free, pair_full, promo, sign_lines
+from app.llm.prompts import (
+    free_natal,
+    full_natal,
+    monthly_horoscope,
+    pair_free,
+    pair_full,
+    promo,
+    sign_lines,
+)
 from app.models import PairKind
 from app.web.templating import md
 
@@ -458,3 +466,69 @@ def test_has_card_tolko_u_v7() -> None:
     assert content.has_card(Post(kind=PostKind.DAILY_SKY, text=v7))
     assert not content.has_card(Post(kind=PostKind.DAILY_SKY, text=_sky_v8_answer()))
     assert not content.has_card(Post(kind=PostKind.SIGN_LINES, text=v7))
+
+
+# --- monthly_horoscope ----------------------------------------------------
+
+
+def _monthly_answer(signs) -> str:
+    return json.dumps(
+        {
+            "intro": "Вступление месяца.",
+            "signs": [{"sign": s, "text": f"текст про {s}."} for s in signs],
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_monthly_horoscope_parse_raskladyvaet_po_zodiaku() -> None:
+    text = "```json\n" + _monthly_answer(reversed(monthly_horoscope.SIGN_ORDER)) + "\n```"
+
+    parsed = monthly_horoscope.parse(text)
+
+    assert parsed is not None
+    intro, signs = parsed
+    assert intro == "Вступление месяца."
+    assert [s["sign"] for s in signs] == list(monthly_horoscope.SIGN_ORDER)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _monthly_answer(monthly_horoscope.SIGN_ORDER[:11]),
+        _monthly_answer([*monthly_horoscope.SIGN_ORDER, "Змееносец"]),
+        '{"intro": "x"}',
+        "не JSON",
+    ],
+)
+def test_monthly_horoscope_parse_brak_otdayot_none(text: str) -> None:
+    assert monthly_horoscope.parse(text) is None
+
+
+def test_monthly_horoscope_render_po_poryadku() -> None:
+    text = monthly_horoscope.render(_monthly_answer(monthly_horoscope.SIGN_ORDER))
+
+    assert text.startswith("Вступление месяца.\n\nОвен\nтекст про Овен.")
+    assert text.endswith("Рыбы\nтекст про Рыбы.")
+
+
+def test_monthly_horoscope_build_user_dym() -> None:
+    from datetime import date
+
+    # 15-е нормализуется к 1-му внутри build_user — адрес месяца один.
+    text = monthly_horoscope.build_user(date(2026, 11, 15))
+
+    assert "Месяц: ноябрь 2026" in text
+    assert "Медленные планеты на 1-е число:" in text
+    assert "Что стоит в знаке самого читателя:" in text
+    assert "События этого месяца:" in text or "Событий этого месяца" in text
+    assert "Сатурн" in text or "Юпитер" in text
+    assert text.endswith(
+        "Напиши гороскоп на этот месяц по правилам из системного сообщения."
+    )
+
+
+def test_monthly_horoscope_month_start_of() -> None:
+    from datetime import date
+
+    assert monthly_horoscope.month_start_of(date(2026, 11, 15)) == date(2026, 11, 1)

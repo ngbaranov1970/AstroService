@@ -35,3 +35,6 @@ backend/data/seek_cache/
 
 # Logs
 *.log
+
+# Локальная вычитка промптов (не в репозиторий)
+backend/tmp/

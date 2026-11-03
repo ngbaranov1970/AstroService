@@ -25,7 +25,7 @@ from datetime import date
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.prompts import daily_horoscope
+from app.llm.prompts import daily_horoscope, monthly_horoscope
 from app.models import Chart, Event, Platform, PostKind, User
 from app.services import content, events
 from app.vk import api as vk_api
@@ -191,6 +191,33 @@ async def letters_for(session: AsyncSession, target_date: date) -> dict[str, str
     parsed = daily_horoscope.parse(post.text)
     if parsed is None:
         raise LookupError(f"Гороскоп за {target_date} не разобрался, рассылать нечего")
+
+    intro, signs = parsed
+    return {s["sign"]: compose(intro, s["sign"], s["text"]) for s in signs}
+
+
+async def month_letters_for(
+    session: AsyncSession, month_start: date
+) -> dict[str, str]:
+    """Двенадцать текстов за месяц: знак → intro + абзац.
+
+    month_start — 1-е число (адрес поста). LookupError, если поста нет или
+    брак разбора — как у letters_for для дня.
+    """
+    month_start = monthly_horoscope.month_start_of(month_start)
+    post = await content.find_post(
+        session, PostKind.MONTHLY_HOROSCOPE, month_start
+    )
+    if post is None:
+        raise LookupError(
+            f"Гороскопа за месяц {month_start} нет — сначала сгенерируйте пост"
+        )
+
+    parsed = monthly_horoscope.parse(post.text)
+    if parsed is None:
+        raise LookupError(
+            f"Гороскоп за месяц {month_start} не разобрался, отдавать нечего"
+        )
 
     intro, signs = parsed
     return {s["sign"]: compose(intro, s["sign"], s["text"]) for s in signs}

@@ -309,6 +309,93 @@ async def test_today_without_post_says_not_ready(
     assert replies[1].text == texts.MENU_TEXT
 
 
+async def test_month_with_sign_returns_letter(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert patched_storage is dialog
+    user.sun_sign = "Лев"
+    letter = "Вступление\n\nЛев\nНоябрь яркий."
+
+    async def fake_month(_session: Any, _day: Any) -> dict[str, str]:
+        return {"Лев": letter}
+
+    monkeypatch.setattr(menu.broadcast, "month_letters_for", fake_month)
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "month"})
+    )
+    assert dialog.state == states.IDLE
+    assert replies[0].text == letter
+    assert replies[0].buttons == [
+        [menu.Button(texts.BTN_DAILY, {"cmd": "subscribe"})]
+    ]
+
+
+async def test_month_without_post_says_not_ready(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert patched_storage is dialog
+    user.sun_sign = "Лев"
+
+    async def fake_month(_session: Any, _day: Any) -> dict[str, str]:
+        raise LookupError("нет поста")
+
+    monkeypatch.setattr(menu.broadcast, "month_letters_for", fake_month)
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "month"})
+    )
+    assert replies[0].text == texts.MONTH_NOT_READY
+    assert replies[1].text == texts.MENU_TEXT
+
+
+async def test_month_without_sign_asks_sign(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "month"})
+    )
+    assert dialog.state == states.ASK_SIGN
+    assert dialog.data.get("pending") == "month"
+    assert replies[0].text == texts.ASK_SIGN
+
+
+async def test_pending_month_after_sign_returns_letter(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    logged: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert patched_storage is dialog
+    dialog.state = states.ASK_SIGN
+    dialog.data = {"pending": "month"}
+    letter = "Рак\nМесяц спокойный."
+
+    async def fake_month(_session: Any, _day: Any) -> dict[str, str]:
+        return {"Рак": letter}
+
+    monkeypatch.setattr(menu.broadcast, "month_letters_for", fake_month)
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "set_sign", "sign": "Рак"})
+    )
+    assert user.sun_sign == "Рак"
+    assert replies[0].text == texts.SIGN_SAVED.format(sign="Рак")
+    assert replies[1].text == letter
+    assert logged[0]["sign"] == "Рак"
+
+
 async def test_pending_today_after_sign_returns_letter(
     session: FakeSession,
     user: FakeUser,
