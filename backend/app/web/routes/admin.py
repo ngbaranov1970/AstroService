@@ -155,6 +155,9 @@ async def funnel(
     counts = await admin_service.count_events(
         session, since=start, until=end, names=list(FUNNEL_EXTRA)
     )
+    bot = await admin_service.bot_stats(
+        session, since=start, until=end, include_testers=include_testers
+    )
 
     return templates.TemplateResponse(
         request,
@@ -162,6 +165,8 @@ async def funnel(
         {
             "funnels": funnels,
             "extra": [(title, counts.get(name, 0)) for name, title in FUNNEL_EXTRA.items()],
+            "bot": bot,
+            "bot_goal": admin_service.BOT_ALLOWED_GOAL,
             # Строками: они же уходят обратно в поля формы как есть.
             "since": first.isoformat(),
             "until": last.isoformat(),

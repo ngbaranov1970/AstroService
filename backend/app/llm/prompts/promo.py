@@ -51,6 +51,21 @@ SIGN_LINES_FOOTER = (
     "👉 vk.ru/astrozvezdochet"
 )
 
+# Вторая строка концовки — вход в бота; формулировка владельца 04.11.2026.
+BOT_LINE = "🤖 Гороскоп на день и на месяц, натальная карта и совместимость — в нашем боте"
+
+
+def sign_lines_footer(day: date | None = None) -> str:
+    """Концовка вечернего поста; при VK_BOT_ENABLED — плюс ссылка на бота.
+
+    ref метит пост датой гороскопа: номер записи VK до ручной публикации
+    неизвестен. Без флага строки нет — посты не зовут в выключенного бота.
+    """
+    if not get_settings().vk_bot_enabled:
+        return SIGN_LINES_FOOTER
+    ref = f"evening_{day:%Y%m%d}" if day else "evening"
+    return f"{SIGN_LINES_FOOTER}\n{BOT_LINE}\n👉 vk.me/astrozvezdochet?ref={ref}"
+
 # Последняя строка утреннего поста daily_sky v8 — формулировка владельца,
 # дословно. «Личный» — про рассылку, она расписывает знак по домам.
 MORNING_APP = "Личный гороскоп каждый день — в приложении"

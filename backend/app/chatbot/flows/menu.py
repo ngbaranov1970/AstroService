@@ -18,7 +18,7 @@ from app.chatbot.types import Button, Incoming, Reply
 from app.llm.prompts import monthly_horoscope
 from app.llm.prompts.daily_horoscope import SIGN_ORDER
 from app.models import BotDialog, User
-from app.services import broadcast, content
+from app.services import broadcast, content, events
 from app.services import charts as charts_service
 from app.services import sun_sign as sun_sign_service
 from app.services import users as users_service
@@ -275,6 +275,7 @@ async def reply_today(session: AsyncSession, user: User) -> list[Reply]:
         )
         return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
 
+    await events.log(session, events.BOT_TODAY_SHOWN, user_id=user.id, sign=sign)
     return [_horoscope_reply(user, text)]
 
 
@@ -306,6 +307,7 @@ async def reply_month(session: AsyncSession, user: User) -> list[Reply]:
         )
         return [Reply(text=texts.MONTH_NOT_READY), menu_reply(user)]
 
+    await events.log(session, events.BOT_MONTH_SHOWN, user_id=user.id, sign=sign)
     return [_horoscope_reply(user, text)]
 
 

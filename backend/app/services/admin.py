@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import BigInteger, Float, cast, func, or_, select
@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Chart, Event, Order, Platform, Report, ReportType, User
 from app.services import events
 from app.vk import api as vk_api
+from astro_core import transits
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +505,117 @@ async def count_events(
         .group_by(Event.name)
     )
     return {name: count for name, count in await session.execute(stmt)}
+
+
+# --- Бот по неделям --------------------------------------------------------
+# Не когорта: у людей бота нет app_opened, от которого её строить. Считаем
+# людей по неделе самого события — метрика «15+ разрешений в неделю» так и
+# задана (docs/vk-bot-plan.md).
+
+# Цель по разрешениям писать в неделю.
+BOT_ALLOWED_GOAL = 15
+
+
+@dataclass(frozen=True, slots=True)
+class _BotColumn:
+    title: str
+    name: str
+    match: Callable[[dict[str, Any]], bool] = field(default=lambda props: True)
+    # report_ready и order_* пишут и Mini App, и сайт: засчитываем только тех,
+    # у кого в ту же неделю есть это событие бота.
+    only_with: str | None = None
+
+
+_BOT_COLUMNS: tuple[_BotColumn, ...] = (
+    _BotColumn("Разрешили писать", events.GROUP_MESSAGES_ALLOWED),
+    _BotColumn("Написали боту", events.GROUP_MESSAGE_RECEIVED),
+    _BotColumn("КАРТА начата", events.BOT_NATAL_STARTED),
+    _BotColumn(
+        "КАРТА готова", events.REPORT_READY, _of(ReportType.FREE_NATAL),
+        only_with=events.BOT_NATAL_STARTED,
+    ),
+    _BotColumn("Увидели VIP", events.BOT_VIP_SHOWN),
+    _BotColumn(
+        "Заказ VIP", events.ORDER_CREATED, _of(ReportType.VIP_NATAL),
+        only_with=events.BOT_VIP_SHOWN,
+    ),
+    _BotColumn(
+        "Оплата VIP", events.ORDER_PAID, _of(ReportType.VIP_NATAL),
+        only_with=events.BOT_VIP_SHOWN,
+    ),
+    _BotColumn("Комментарий → личка", events.BOT_COMMENT_TO_DM),
+    _BotColumn("Комментарий → владельцу", events.BOT_COMMENT_NO_DM),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BotWeek:
+    """Неделя с понедельника (МСК) и число людей по каждому столбцу."""
+
+    start: date
+    counts: list[int]
+
+
+@dataclass(frozen=True, slots=True)
+class BotStats:
+    titles: list[str]
+    weeks: list[BotWeek]
+    # (ref, людей) — по убыванию.
+    refs: list[tuple[str, int]]
+
+
+def _week_of(ts: datetime) -> date:
+    day = ts.astimezone(transits.MSK).date()
+    return day - timedelta(days=day.weekday())
+
+
+async def bot_stats(
+    session: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime,
+    include_testers: bool = False,
+) -> BotStats:
+    """Бот по неделям и разбивка пришедших по ref за [since, until).
+
+    Недели без единого события в ответ не попадают; свежие — первыми.
+    """
+    names = {column.name for column in _BOT_COLUMNS} | {events.BOT_REF}
+    stmt = (
+        select(Event.name, Event.user_id, Event.ts, Event.props)
+        .join(User, User.id == Event.user_id)
+        .where(Event.ts >= since, Event.ts < until, Event.name.in_(names))
+    )
+    if not include_testers:
+        stmt = stmt.where(User.is_tester.is_(False))
+    rows = [
+        (row.name, row.user_id, _week_of(row.ts), row.props or {})
+        for row in await session.execute(stmt)
+    ]
+
+    done = {(week, name, user_id) for name, user_id, week, _ in rows}
+    reached: dict[date, list[set[int]]] = {}
+    refs: dict[str, set[int]] = {}
+    for name, user_id, week, props in rows:
+        if name == events.BOT_REF:
+            refs.setdefault(str(props.get("ref")), set()).add(user_id)
+            continue
+        sets = reached.setdefault(week, [set() for _ in _BOT_COLUMNS])
+        for index, column in enumerate(_BOT_COLUMNS):
+            if name != column.name or not column.match(props):
+                continue
+            if column.only_with and (week, column.only_with, user_id) not in done:
+                continue
+            sets[index].add(user_id)
+
+    return BotStats(
+        titles=[column.title for column in _BOT_COLUMNS],
+        weeks=[
+            BotWeek(start=week, counts=[len(s) for s in sets])
+            for week, sets in sorted(reached.items(), reverse=True)
+        ],
+        refs=sorted(((ref, len(ids)) for ref, ids in refs.items()), key=lambda r: (-r[1], r[0])),
+    )
 
 
 # --- Карточка человека -----------------------------------------------------

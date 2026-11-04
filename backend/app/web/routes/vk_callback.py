@@ -1,4 +1,4 @@
-"""Callback API сообщества VK: события «разрешил / запретил / написал».
+"""Callback API сообщества VK: события «разрешил / запретил / написал / прокомментировал».
 
 Место в слоях: сервер VK → ЭТОТ ФАЙЛ → services/users.py. Своей логики
 нет — только разбор события, проверка подлинности и коммит.
@@ -37,6 +37,7 @@ from app.db import get_session
 from app.models import Platform
 from app.services import events, users
 from app.vk import bot as vk_bot
+from app.vk import comments
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,17 @@ async def vk_callback(
         return PlainTextResponse("forbidden", status_code=status.HTTP_403_FORBIDDEN)
 
     obj = body.get("object") or {}
+
+    # Комментарий — отдельная ветка до разрешений: КАРТА под постом не даёт
+    # права писать, и через общий путь ниже комментатор попал бы в рассылку.
+    if event_type == "wall_reply_new":
+        if settings.vk_bot_enabled and comments.parse_comment(obj) is not None:
+            dispatch = await _first_time(session, body)
+            await session.commit()
+            if dispatch:
+                background.add_task(comments.process_comment, obj)
+        return _ok()
+
     vk_user_id = _extract_user_id(event_type, obj)
     if vk_user_id is None:
         # Событие не про человека (лайк, запись на стене) или это наше же
@@ -151,17 +163,20 @@ async def vk_callback(
 
     # Текста сообщения в логе нет и не будет: люди пишут туда дату рождения
     # и вопросы про здоровье (CLAUDE.md, «Персональных данных в логах нет»).
-    dispatch = False
-    if bot_message:
-        event_id = body.get("event_id")
-        if isinstance(event_id, str) and 0 < len(event_id) <= 64:
-            dispatch = not await storage.seen(session, event_id)
-        else:
-            logger.warning("VK-бот: message_new без корректного event_id, пропущен")
+    dispatch = bot_message and await _first_time(session, body)
     await session.commit()
     if dispatch:
         background.add_task(vk_bot.process_message, obj)
     return _ok()
+
+
+async def _first_time(session: AsyncSession, body: dict[str, Any]) -> bool:
+    """Событие пришло впервые (VK повторяет неподтверждённые); без event_id — False."""
+    event_id = body.get("event_id")
+    if isinstance(event_id, str) and 0 < len(event_id) <= 64:
+        return not await storage.seen(session, event_id)
+    logger.warning("VK-бот: %s без корректного event_id, пропущен", body.get("type"))
+    return False
 
 
 def _extract_user_id(event_type: str | None, obj: dict[str, Any]) -> int | None:

@@ -87,6 +87,65 @@
     </div>
   {% endfor %}
 
+  {# --- VK-бот ---------------------------------------------------------------
+     Не когорта: люди по неделе самого события (services/admin.bot_stats).
+     Крайние недели периода неполные, если он начат или кончен не по
+     понедельнику. #}
+
+  <h2>VK-бот по неделям</h2>
+  {% if bot.weeks %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Неделя с</th>
+            {% for title in bot.titles %}<th class="num">{{ title }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for week in bot.weeks %}
+            <tr>
+              <td>{{ week.start.strftime("%d.%m.%Y") }}</td>
+              {% for count in week.counts %}
+                <td class="num">
+                  {# Первый столбец — главная метрика: цель видна прямо в клетке. #}
+                  {% if loop.first %}
+                    <strong>{{ count }}</strong>&nbsp;/&nbsp;{{ bot_goal }}
+                  {% else %}
+                    {{ count }}
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">За период событий бота нет.</p>
+  {% endif %}
+  <p class="muted">
+    «Разрешили писать» — все каналы, включая Mini App. «КАРТА готова» и VIP
+    засчитываются, только если человек в ту же неделю начал КАРТУ или открыл
+    VIP в боте.
+  </p>
+
+  <h2>Откуда пришли в бота (ref)</h2>
+  {% if bot.refs %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>Метка</th><th class="num">Людей</th></tr></thead>
+        <tbody>
+          {% for ref, count in bot.refs %}
+            <tr><td>{{ ref }}</td><td class="num">{{ count }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Переходов по ссылкам с меткой за период нет.</p>
+  {% endif %}
+
   {# --- Счётчики за период -------------------------------------------------
      Здесь считаются события, а не люди: приглашения открывают анонимно, и
      привязать их к когорте нечем. #}

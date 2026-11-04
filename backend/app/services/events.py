@@ -174,6 +174,22 @@ BOT_VIP_SHOWN = "bot_vip_shown"
 # Получил кнопку в Mini App на создание пары (ПАРА / «Совместимость»).
 BOT_PAIR_LINK = "bot_pair_link"
 
+# Пришёл в личку по ссылке vk.me/…?ref=<метка>. В props ref и ref_source.
+# users.source не трогаем: Callback уже записал туда vk_group до этого места.
+BOT_REF = "bot_ref"
+
+# Отдан гороскоп на сегодня / на месяц. В props знак.
+BOT_TODAY_SHOWN = "bot_today_shown"
+BOT_MONTH_SHOWN = "bot_month_shown"
+
+# КАРТА/ПАРА в комментарии, писать можно — сценарий ушёл в личку.
+# В props post_id и code.
+BOT_COMMENT_TO_DM = "bot_comment_to_dm"
+
+# КАРТА/ПАРА в комментарии, писать нельзя — владельцу ушло уведомление.
+# В props post_id и code; по паре user_id + post_id второе не шлём.
+BOT_COMMENT_NO_DM = "bot_comment_no_dm"
+
 
 async def log(
     session: AsyncSession,

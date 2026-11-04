@@ -32,7 +32,11 @@ class FakeDialog:
 
 @dataclass
 class FakeSession:
-    pass
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
 
 
 @pytest.fixture
@@ -262,6 +266,8 @@ async def test_today_with_sign_returns_letter(
     assert replies[0].buttons == [
         [menu.Button(texts.BTN_DAILY, {"cmd": "subscribe"})]
     ]
+    [event] = session.added
+    assert (event.name, event.props) == (menu.events.BOT_TODAY_SHOWN, {"sign": "Лев"})
     assert replies[0].inline is True
 
 
@@ -332,6 +338,8 @@ async def test_month_with_sign_returns_letter(
     assert replies[0].buttons == [
         [menu.Button(texts.BTN_DAILY, {"cmd": "subscribe"})]
     ]
+    [event] = session.added
+    assert (event.name, event.props) == (menu.events.BOT_MONTH_SHOWN, {"sign": "Лев"})
 
 
 async def test_month_without_post_says_not_ready(

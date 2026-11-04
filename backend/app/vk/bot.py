@@ -18,7 +18,7 @@ from app.chatbot.types import AppButton, Button, Incoming, Job, LinkButton, Outg
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.models import Platform
-from app.services import users
+from app.services import events, users
 from app.vk import api
 
 logger = logging.getLogger(__name__)
@@ -121,9 +121,9 @@ def _payload(value: Any) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def _random_id(peer_id: int, message_id: int, part: int) -> int:
-    key = f"vk_bot:{peer_id}:{message_id}:{part}".encode()
-    return int.from_bytes(hashlib.sha256(key).digest()[:4], "big") & 0x7FFFFFFF or 1
+def _random_id(peer_id: int, key: str, part: int) -> int:
+    raw = f"vk_bot:{peer_id}:{key}:{part}".encode()
+    return int.from_bytes(hashlib.sha256(raw).digest()[:4], "big") & 0x7FFFFFFF or 1
 
 
 def _split_job(outgoing: Sequence[Outgoing]) -> tuple[list[Reply], Job | None]:
@@ -138,7 +138,7 @@ def _split_job(outgoing: Sequence[Outgoing]) -> tuple[list[Reply], Job | None]:
 
 async def _send_replies(
     peer_id: int,
-    message_id: int,
+    key: str,
     replies: list[Reply],
     part_index: int,
     user_id: int | None,
@@ -151,7 +151,7 @@ async def _send_replies(
             result = await api.send_message(
                 peer_id,
                 part,
-                random_id=_random_id(peer_id, message_id, part_index),
+                random_id=_random_id(peer_id, key, part_index),
                 keyboard=keyboard if index == len(parts) - 1 else None,
             )
             if result.error_code is not None:
@@ -161,6 +161,28 @@ async def _send_replies(
                 return -1
             part_index += 1
     return part_index
+
+
+async def deliver(
+    peer_id: int, key: str, outgoing: Sequence[Outgoing], user_id: int
+) -> None:
+    """Отправить ответы ядра, выполняя Job по очереди; исключения не глотает.
+
+    key — основа random_id: повтор с тем же key VK не задвоит.
+    """
+    part_index = 0
+    while True:
+        replies, job = _split_job(outgoing)
+        part_index = await _send_replies(peer_id, key, replies, part_index, user_id)
+        if part_index < 0 or job is None:
+            return
+        # Долгая работа (разбор 30–60 с) — в своей сессии, уже после «считаю».
+        async with get_sessionmaker()() as session:
+            job_user = await users.get_by_id(session, user_id)
+            if job_user is None:
+                return
+            outgoing = await router.run_job(session, job_user, job)
+            await session.commit()
 
 
 async def process_message(obj: dict[str, Any]) -> None:
@@ -189,6 +211,17 @@ async def process_message(obj: dict[str, Any]) -> None:
                 subscribed=False,
             )
             user_id = user.id
+            # ref приходит только с первым сообщением после перехода по vk.me/…?ref=.
+            ref = message.get("ref")
+            if isinstance(ref, str) and ref:
+                ref_source = message.get("ref_source")
+                await events.log(
+                    session,
+                    events.BOT_REF,
+                    user_id=user.id,
+                    ref=ref[:64],
+                    ref_source=ref_source[:64] if isinstance(ref_source, str) else None,
+                )
             incoming = Incoming(
                 platform="vk",
                 external_id=str(sender),
@@ -200,19 +233,7 @@ async def process_message(obj: dict[str, Any]) -> None:
             # Сохраняем состояние до отправки: следующий ответ уже относится к нему.
             await session.commit()
 
-        part_index = 0
-        while True:
-            replies, job = _split_job(outgoing)
-            part_index = await _send_replies(peer_id, message_id, replies, part_index, user_id)
-            if part_index < 0 or job is None:
-                return
-            # Долгая работа (разбор 30–60 с) — в своей сессии, уже после «считаю».
-            async with get_sessionmaker()() as session:
-                job_user = await users.get_by_id(session, user_id)
-                if job_user is None:
-                    return
-                outgoing = await router.run_job(session, job_user, job)
-                await session.commit()
+        await deliver(peer_id, str(message_id), outgoing, user_id)
     except Exception as error:  # noqa: BLE001 — ошибка фона не должна менять ответ Callback
         # VkError — ответ API (код/описание), без текста человека. Остальное —
         # только тип: str(error) может содержать дату рождения из исключения.

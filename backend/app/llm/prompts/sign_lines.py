@@ -195,4 +195,4 @@ def render(text: str, seed: int | None = None, day: date | None = None) -> str:
     body = [f"{SIGN_EMOJI[sign]} {sign} — {_tidy(line)}" for sign, line in lines.items()]
     if day is not None and day <= promo.RETRO_MERCURY_UNTIL:
         return "\n".join([title(day), *body, "", promo.retro_mercury()])
-    return "\n".join([title(day), *body, promo.SIGN_LINES_FOOTER])
+    return "\n".join([title(day), *body, promo.sign_lines_footer(day)])

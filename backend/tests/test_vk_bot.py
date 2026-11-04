@@ -109,7 +109,8 @@ async def test_send_message_uses_existing_transport(monkeypatch):
 
 @pytest.fixture
 def session():
-    value = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+    value = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock(), added=[])
+    value.add = value.added.append
     return value
 
 
@@ -155,6 +156,9 @@ async def test_process_message_parses_and_sends_parts(adapter, session):
     assert incoming.external_id == "100"
     assert incoming.payload == {"cmd": "natal"}
     assert incoming.ref == "karta_1"
+    [event] = session.added
+    assert event.name == bot.events.BOT_REF
+    assert event.props == {"ref": "karta_1", "ref_source": None}
     assert adapter.create.await_args.kwargs["subscribed"] is False
     session.commit.assert_awaited_once()
     calls = adapter.send.await_args_list

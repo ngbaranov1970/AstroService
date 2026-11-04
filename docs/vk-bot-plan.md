@@ -295,6 +295,41 @@ backend/app/models/bot_dialog.py
 
 ### Задача 10. Кодовые слова в комментариях, ref-ссылки, метрики
 
+**Статус 04.11.2026:** реализована локально, без выкатки. `vk/comments.py`:
+КАРТА/ПАРА под постом → разрешение есть — «Увидела твой комментарий…» и
+сценарий ядра в личке (`bot.deliver`, общий с `process_message`), нет —
+уведомление владельцу (`VIP_OWNER_VK_ID`) со ссылкой на комментарий, одно на
+человека и пост (по событию `bot_comment_no_dm`). Ветка `wall_reply_new` в
+Callback стоит до логики разрешений: комментарий согласием на переписку не
+считается. Отступления от плана:
+- метка в вечернем посте — `ref=evening_<ГГГГММДД>` (дата гороскопа), а не
+  `karta_<post_id>`: пост публикуется руками, номера записи заранее нет.
+  Строка «🤖 … в нашем боте» в концовке `sign_lines` — только при
+  `VK_BOT_ENABLED=true` (`promo.sign_lines_footer`);
+- `users.source` не трогаем (Callback уже пишет `vk_group`), метка идёт
+  событием `bot_ref` с `ref` и `ref_source`;
+- `messages.isMessagesFromGroupAllowed` не зовём: разрешение берём только из
+  своей базы; давший его до Callback попадёт в ветку «владельцу»;
+- события: `bot_ref`, `bot_today_shown`, `bot_month_shown`,
+  `bot_comment_to_dm`, `bot_comment_no_dm`; `bot_comment_replied` не нужен;
+- `/admin/funnel`: блоки «VK-бот по неделям» (не когорта — по неделе
+  события, цель 15 разрешений) и «Откуда пришли в бота (ref)».
+Вживую не проверено: приходит ли `message.ref` из `vk.me/…?ref=` и
+`wall_reply_new` на наш Callback.
+
+**Решение 04.11.2026: в комментариях бот не отвечает.** Проверка на проде:
+`wall.createComment` ключом сообщества — ошибка 15 («cannot be called with
+current scopes»); права «стена» у ключей сообщества нет, а ключ
+администратора на сервере не держим (доступ к личному аккаунту владельца).
+Поэтому вместо ответа под комментарием:
+- разрешение сообщений есть → сценарий в личке через `messages.send`, как ниже;
+- разрешения нет → в комментарии тишина, а владельцу в личку уведомление
+  «под постом N написали КАРТА/ПАРА» со ссылкой на комментарий (ответить
+  можно руками); в сам вечерний пост — строка со ссылкой
+  `vk.me/astrozvezdochet?ref=karta_<post_id>`.
+`BotCommentReply`, `vk_bot_comment_replies` и `BOT_COMMENT_REPLIED` не нужны;
+пункты ниже про `wall.createComment` и антиспам ответов отменены.
+
 **Цель.** Вход из вечерних постов и подсчёт результата.
 
 **Файлы.** `backend/app/vk/comments.py`, `vk_callback.py` (`_extract_user_id` + ветка `wall_reply_new`), `services/events.py`, `services/admin.py` + шаблон воронки; тесты.
@@ -320,7 +355,7 @@ backend/app/models/bot_dialog.py
 ## 4. Проверки перед стартом
 
 - [ ] Часовой пояс сервера: `timedatectl`. Cron рассылки — 06:00 серверного времени (`docs/progress.md`); в `deploy/broadcast.sh` и `docker-compose.yml` TZ не задан. UTC → 09:00 МСК.
-- [ ] Ключ сообщества: права на `messages` (есть), `wall.createComment`; в Callback API включены `message_new`, `message_allow`, `message_deny`, `wall_reply_new`; включены «Возможности ботов» (иначе ошибка 912 на клавиатуры).
+- [x] Ключ сообщества: права на `messages` (есть), `wall.createComment` — **нет** (ошибка 15, 04.11.2026); в Callback API включены `message_new`, `message_allow`, `message_deny`, `wall_reply_new`; включены «Возможности ботов» (иначе ошибка 912 на клавиатуры).
 - [ ] Длина `free_natal` на 5–10 реальных картах (`scripts/report_cli.py`) против 4096 знаков.
 - [ ] `docs/sales-policy.md`: заменить устаревшие 450 ₽ на 149 ₽.
 - [ ] Тестовая оплата VIP 1 ₽ на проде (открытый пункт `docs/progress.md`).
