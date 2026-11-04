@@ -445,3 +445,10 @@ async def test_set_sign_does_not_subscribe(
     assert user.subscribed is False
     assert user.sun_sign == "Дева"
     assert logged[0]["sign"] == "Дева"
+
+
+def test_menu_is_bottom_keyboard(user: FakeUser) -> None:
+    # Inline-копия под сообщением дублировала нижнюю клавиатуру (04.11.2026).
+    reply = menu.menu_reply(user)
+    assert reply.inline is False
+    assert [button.label for button in reply.buttons[0]] == [texts.BTN_TODAY, texts.BTN_MONTH]

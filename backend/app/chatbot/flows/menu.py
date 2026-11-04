@@ -35,11 +35,11 @@ def knows_sign(user: User) -> bool:
 
 
 def menu_reply(user: User) -> Reply:
-    """Меню inline-кнопками под сообщением.
+    """Меню обычной клавиатурой внизу экрана.
 
-    Обычная клавиатура (снизу) на десктопе VK часто не рисуется или схлопывается
-    после ответа без keyboard — кнопки пропадают, текст меню остаётся.
-    Inline виден на вебе и в приложении (проверили 02.11.2026).
+    Inline-копию под сообщением убрали 04.11.2026: два ряда по две кнопки
+    обрезали подписи, а внизу оставалась старая клавиатура — меню дублировалось.
+    Цена: в VK на компьютере нижняя клавиатура иногда не рисуется (02.11.2026).
     """
     sub_label = texts.BTN_UNSUBSCRIBE if user.subscribed else texts.BTN_SUBSCRIBE
     sub_cmd = "unsubscribe" if user.subscribed else "subscribe"
@@ -59,7 +59,7 @@ def menu_reply(user: User) -> Reply:
                 Button(sub_label, {"cmd": sub_cmd}),
             ],
         ],
-        inline=True,
+        inline=False,
     )
 
 
