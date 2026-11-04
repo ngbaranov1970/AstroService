@@ -30,7 +30,10 @@ class FakeDialog:
 
 @dataclass
 class FakeSession:
-    pass
+    added: list[Any] = field(default_factory=list)
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
 
 
 @pytest.fixture
@@ -122,7 +125,8 @@ async def test_karta_starts_natal(
     replies = await _handle(session, user, _incoming(text))
     assert dialog.state == states.NATAL_DATE
     assert len(replies) == 1
-    assert replies[0].text == texts.NATAL_ASK_DATE
+    assert isinstance(replies[0], Reply)
+    assert replies[0].text == texts.NATAL_ASK_ALL
 
 
 @pytest.mark.parametrize("text", ["Пара", "пара", "ПАРА", " пара "])

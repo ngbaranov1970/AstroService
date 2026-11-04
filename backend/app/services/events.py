@@ -164,6 +164,16 @@ FEEDBACK = "feedback"
 # Прошёл по секретной ссылке /?t=... и стал тестером.
 TESTER_ACTIVATED = "tester_activated"
 
+# --- VK-бот (docs/vk-bot-plan.md) ------------------------------------------
+# Начал КАРТА в личке. Разность с chart_created — отвал на сборе данных.
+BOT_NATAL_STARTED = "bot_natal_started"
+
+# Открыл описание VIP в боте. Дальше — order_created и order_paid.
+BOT_VIP_SHOWN = "bot_vip_shown"
+
+# Получил кнопку в Mini App на создание пары (ПАРА / «Совместимость»).
+BOT_PAIR_LINK = "bot_pair_link"
+
 
 async def log(
     session: AsyncSession,

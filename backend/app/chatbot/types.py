@@ -6,6 +6,7 @@ Incoming, а из нашего Reply — вызов «отправить соо�
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -54,5 +55,20 @@ class Reply:
     """Один исходящий ответ: текст и опциональная клавиатура рядами кнопок."""
 
     text: str
-    buttons: list[list[AnyButton]] = field(default_factory=list)
+    # Sequence, а не list: list инвариантен, и list[list[Button]] сюда не прошёл бы.
+    buttons: Sequence[Sequence[AnyButton]] = field(default_factory=list)
     inline: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Job:
+    """Долгая работа после отправки предыдущих ответов (разбор — 30–60 с).
+
+    Адаптер сначала шлёт Reply до Job, потом зовёт router.run_job в новой
+    сессии и шлёт уже его ответы — человек не ждёт минуту в тишине.
+    """
+
+    name: str
+
+
+Outgoing = Reply | Job

@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks
 from pydantic import SecretStr
 from starlette.requests import Request
 
-from app.chatbot.types import AppButton, Button, LinkButton, Reply
+from app.chatbot.types import AppButton, Button, Job, LinkButton, Reply
 from app.config import Settings
 from app.models import Platform, User
 from app.services import users
@@ -190,6 +190,29 @@ async def test_send_refusal_stops_remaining_parts(adapter):
     adapter.send.return_value = api.SendResult(user_id=100, error_code=901)
     await bot.process_message(message())
     adapter.send.assert_awaited_once()
+
+
+async def test_job_runs_after_first_replies_in_new_session(adapter, monkeypatch, session):
+    """«Считаю» уходит до долгой работы, разбор — после неё, random_id не повторяются."""
+    adapter.handle.return_value = [Reply("Считаю"), Job("natal_report")]
+    order: list[str] = []
+
+    async def send(peer_id, text, **kwargs):
+        order.append(text)
+        return api.SendResult(user_id=100, message_id=1)
+
+    async def run_job(_session, user, job):
+        order.append(f"job:{job.name}:{user.id}")
+        return [Reply("Разбор")]
+
+    adapter.send.side_effect = send
+    monkeypatch.setattr(bot.users, "get_by_id", AsyncMock(return_value=User(id=7)))
+    monkeypatch.setattr(bot.router, "run_job", run_job)
+    await bot.process_message(message())
+    assert order == ["Считаю", "job:natal_report:7", "Разбор"]
+    ids = [call.kwargs["random_id"] for call in adapter.send.await_args_list]
+    assert len(set(ids)) == 2
+    assert session.commit.await_count == 2
 
 
 async def test_background_error_does_not_log_message(adapter, caplog):

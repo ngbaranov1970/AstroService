@@ -1,33 +1,31 @@
-"""Главное меню, выбор знака, гороскоп на сегодня и на месяц.
+"""Главное меню, выбор знака, гороскоп на сегодня и на месяц, подписка.
 
-Подписка — задача 7: кнопки есть, флаг subscribed ещё не меняют.
+Подписка — явный opt-in: новые пользователи бота создаются с subscribed=False
+(app/vk/bot.py), флаг включают только кнопки «Подписаться» / «Гороскоп
+каждый день». Выбор знака флаг не меняет.
 """
 
 from __future__ import annotations
 
 import logging
-import re
-from datetime import UTC, date, datetime
+from datetime import date
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chatbot import states, storage, texts
+from app.chatbot import parse, states, storage, texts
 from app.chatbot.types import Button, Incoming, Reply
-from app.llm.prompts.daily_horoscope import SIGN_ORDER
 from app.llm.prompts import monthly_horoscope
+from app.llm.prompts.daily_horoscope import SIGN_ORDER
 from app.models import BotDialog, User
-from app.schemas.charts import MIN_BIRTH_YEAR
 from app.services import broadcast, content
 from app.services import charts as charts_service
 from app.services import sun_sign as sun_sign_service
+from app.services import users as users_service
 from astro_core.transits import sun_sign_bounds, sun_sign_on
 
 logger = logging.getLogger(__name__)
 
-_DATE_RE = re.compile(
-    r"^\s*(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s*$"
-)
 _SIGN_BY_NORM = {s.lower().replace("ё", "е"): s for s in SIGN_ORDER}
 
 
@@ -91,10 +89,30 @@ async def dispatch(
                 session, user, dialog, pending="month"
             )
         return await reply_month(session, user)
-    if cmd in {"subscribe", "unsubscribe"}:
-        # Задача 7: явный opt-in. Пока не меняем флаг.
-        return [menu_reply(user)]
+    if cmd == "subscribe":
+        # Рассылка без знака человеку ничего не пришлёт (broadcast.recipients
+        # требует знак) — сначала спрашиваем знак, подписку доделает
+        # _after_sign_saved.
+        if not knows_sign(user):
+            return await start_ask_sign(
+                session, user, dialog, pending="subscribe"
+            )
+        return reply_subscribe(user)
+    if cmd == "unsubscribe":
+        return reply_unsubscribe(user)
     return None
+
+
+def reply_subscribe(user: User) -> list[Reply]:
+    """Явный opt-in на утреннюю рассылку; повторное нажатие безвредно."""
+    users_service.set_subscribed(user, True)
+    return [Reply(text=texts.SUBSCRIBED), menu_reply(user)]
+
+
+def reply_unsubscribe(user: User) -> list[Reply]:
+    """Выключить рассылку; разрешение VK на сообщения не трогаем."""
+    users_service.set_subscribed(user, False)
+    return [Reply(text=texts.UNSUBSCRIBED), menu_reply(user)]
 
 
 async def start_ask_sign(
@@ -130,28 +148,17 @@ async def handle_ask_sign(
     if sign is not None:
         return await _set_sign(session, user, dialog, sign)
 
-    parsed = parse_birth_date(normalized)
-    if parsed is None:
-        return [Reply(text=texts.SIGN_BAD_DATE)]
-    if not _date_in_range(parsed):
+    guess = parse.parse_birth(normalized)
+    if guess.bad_date:
         return [Reply(text=texts.SIGN_DATE_RANGE)]
-    return await _apply_birth_date(session, user, dialog, parsed, data)
+    if guess.birth_date is None:
+        return [Reply(text=texts.SIGN_BAD_DATE)]
+    return await _apply_birth_date(session, user, dialog, guess.birth_date, data)
 
 
 def parse_birth_date(text: str) -> date | None:
-    """Разобрать ДД.ММ.ГГГГ / ДД.ММ.ГГ; None — не дата."""
-    match = _DATE_RE.match(text)
-    if match is None:
-        return None
-    day_s, month_s, year_s = match.groups()
-    year = int(year_s)
-    if year < 100:
-        # Двузначный год: 00–29 → 2000+, иначе 1900+ — как привычные формы.
-        year += 2000 if year <= 29 else 1900
-    try:
-        return date(year, int(month_s), int(day_s))
-    except ValueError:
-        return None
+    """Дата в любой форме, что понимает parse.parse_birth; None — не дата."""
+    return parse.parse_birth(text).birth_date
 
 
 def _sign_replies(text: str) -> list[Reply]:
@@ -241,6 +248,8 @@ async def _after_sign_saved(
         return [saved, *(await reply_today(session, user))]
     if pending == "month":
         return [saved, *(await reply_month(session, user))]
+    if pending == "subscribe":
+        return [saved, *reply_subscribe(user)]
     return [saved, menu_reply(user)]
 
 
@@ -254,15 +263,15 @@ async def reply_today(session: AsyncSession, user: User) -> list[Reply]:
     try:
         letters = await broadcast.letters_for(session, content.today_msk())
         text = letters[sign]
-    except LookupError:
-        logger.info(
-            "chatbot.today not ready user_id=%s sign=%s", user.id, sign
-        )
-        return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
     except KeyError:
         # Пост есть, но знака в нём нет — тот же ответ, что «ещё готовится».
         logger.warning(
             "chatbot.today missing sign user_id=%s sign=%s", user.id, sign
+        )
+        return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
+    except LookupError:
+        logger.info(
+            "chatbot.today not ready user_id=%s sign=%s", user.id, sign
         )
         return [Reply(text=texts.TODAY_NOT_READY), menu_reply(user)]
 
@@ -279,18 +288,18 @@ async def reply_month(session: AsyncSession, user: User) -> list[Reply]:
     try:
         letters = await broadcast.month_letters_for(session, month_start)
         text = letters[sign]
-    except LookupError:
-        # Нет поста — сигнал владельцу в лог: cron/CLI ещё не прогнали месяц.
-        logger.info(
-            "chatbot.month not ready user_id=%s sign=%s month=%s",
+    except KeyError:
+        logger.warning(
+            "chatbot.month missing sign user_id=%s sign=%s month=%s",
             user.id,
             sign,
             month_start,
         )
         return [Reply(text=texts.MONTH_NOT_READY), menu_reply(user)]
-    except KeyError:
-        logger.warning(
-            "chatbot.month missing sign user_id=%s sign=%s month=%s",
+    except LookupError:
+        # Нет поста — сигнал владельцу в лог: cron/CLI ещё не прогнали месяц.
+        logger.info(
+            "chatbot.month not ready user_id=%s sign=%s month=%s",
             user.id,
             sign,
             month_start,
@@ -320,8 +329,3 @@ async def _resolve_sign(session: AsyncSession, user: User) -> str | None:
                 return from_chart
     return user.sun_sign
 
-
-def _date_in_range(value: date) -> bool:
-    if value.year < MIN_BIRTH_YEAR:
-        return False
-    return value <= datetime.now(UTC).date()

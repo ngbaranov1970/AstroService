@@ -10,10 +10,11 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from app.chatbot import router
-from app.chatbot.types import AppButton, Button, Incoming, LinkButton, Reply
+from app.chatbot.types import AppButton, Button, Incoming, Job, LinkButton, Outgoing, Reply
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.models import Platform
@@ -125,6 +126,43 @@ def _random_id(peer_id: int, message_id: int, part: int) -> int:
     return int.from_bytes(hashlib.sha256(key).digest()[:4], "big") & 0x7FFFFFFF or 1
 
 
+def _split_job(outgoing: Sequence[Outgoing]) -> tuple[list[Reply], Job | None]:
+    """Ответы до первой Job и сама Job; всё после Job ядро не возвращает."""
+    replies: list[Reply] = []
+    for item in outgoing:
+        if isinstance(item, Job):
+            return replies, item
+        replies.append(item)
+    return replies, None
+
+
+async def _send_replies(
+    peer_id: int,
+    message_id: int,
+    replies: list[Reply],
+    part_index: int,
+    user_id: int | None,
+) -> int:
+    """Отправить ответы частями; вернуть следующий номер части или -1 при отказе VK."""
+    for reply in replies:
+        keyboard = keyboard_json(reply)
+        parts = split_text(strip_markdown(reply.text))
+        for index, part in enumerate(parts):
+            result = await api.send_message(
+                peer_id,
+                part,
+                random_id=_random_id(peer_id, message_id, part_index),
+                keyboard=keyboard if index == len(parts) - 1 else None,
+            )
+            if result.error_code is not None:
+                logger.warning(
+                    "VK-бот: отказ отправки user_id=%s code=%s", user_id, result.error_code
+                )
+                return -1
+            part_index += 1
+    return part_index
+
+
 async def process_message(obj: dict[str, Any]) -> None:
     """Обработать личное message_new после ответа Callback; ошибки логируются без ПД."""
     message = obj.get("message") or {}
@@ -158,27 +196,23 @@ async def process_message(obj: dict[str, Any]) -> None:
                 payload=_payload(message.get("payload")),
                 ref=message.get("ref"),
             )
-            replies = await router.handle(session, user, incoming)
+            outgoing = await router.handle(session, user, incoming)
             # Сохраняем состояние до отправки: следующий ответ уже относится к нему.
             await session.commit()
 
         part_index = 0
-        for reply in replies:
-            keyboard = keyboard_json(reply)
-            parts = split_text(strip_markdown(reply.text))
-            for index, part in enumerate(parts):
-                result = await api.send_message(
-                    peer_id,
-                    part,
-                    random_id=_random_id(peer_id, message_id, part_index),
-                    keyboard=keyboard if index == len(parts) - 1 else None,
-                )
-                if result.error_code is not None:
-                    logger.warning(
-                        "VK-бот: отказ отправки user_id=%s code=%s", user_id, result.error_code
-                    )
+        while True:
+            replies, job = _split_job(outgoing)
+            part_index = await _send_replies(peer_id, message_id, replies, part_index, user_id)
+            if part_index < 0 or job is None:
+                return
+            # Долгая работа (разбор 30–60 с) — в своей сессии, уже после «считаю».
+            async with get_sessionmaker()() as session:
+                job_user = await users.get_by_id(session, user_id)
+                if job_user is None:
                     return
-                part_index += 1
+                outgoing = await router.run_job(session, job_user, job)
+                await session.commit()
     except Exception as error:  # noqa: BLE001 — ошибка фона не должна менять ответ Callback
         # VkError — ответ API (код/описание), без текста человека. Остальное —
         # только тип: str(error) может содержать дату рождения из исключения.
