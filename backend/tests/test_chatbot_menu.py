@@ -181,7 +181,7 @@ async def test_cusp_1985_06_22_offers_two_signs(
     assert dialog.state == states.ASK_SIGN
     assert replies[0].text == texts.ASK_SIGN_CUSP
     labels = [b.label for b in replies[0].buttons[0]]
-    assert labels == ["Близнецы", "Рак"]
+    assert labels == ["♊ Близнецы", "♋ Рак"]
     assert logged == []
 
 

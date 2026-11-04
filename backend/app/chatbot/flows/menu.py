@@ -17,6 +17,7 @@ from app.chatbot import parse, states, storage, texts
 from app.chatbot.types import Button, Incoming, Reply
 from app.llm.prompts import monthly_horoscope
 from app.llm.prompts.daily_horoscope import SIGN_ORDER
+from app.llm.prompts.sign_lines import SIGN_EMOJI
 from app.models import BotDialog, User
 from app.services import broadcast, content, events
 from app.services import charts as charts_service
@@ -167,9 +168,7 @@ def _sign_replies(text: str) -> list[Reply]:
     У messages.send для inline максимум 10 кнопок (ошибка 911) — 12 знаков
     и дата в одном сообщении VK отвергает.
     """
-    sign_buttons = [
-        Button(sign, {"cmd": "set_sign", "sign": sign}) for sign in SIGN_ORDER
-    ]
+    sign_buttons = [_sign_button(sign) for sign in SIGN_ORDER]
     first = _button_rows(sign_buttons[:9], width=3)
     second = _button_rows(sign_buttons[9:], width=3)
     second.append([Button(texts.BTN_ENTER_DATE, {"cmd": "sign_date"})])
@@ -177,6 +176,11 @@ def _sign_replies(text: str) -> list[Reply]:
         Reply(text=text, buttons=first, inline=True),
         Reply(text=texts.ASK_SIGN_MORE, buttons=second, inline=True),
     ]
+
+
+def _sign_button(sign: str) -> Button:
+    """Кнопка «♈ Овен»: значок только в подписи, в payload знак чистым словом."""
+    return Button(f"{SIGN_EMOJI[sign]} {sign}", {"cmd": "set_sign", "sign": sign})
 
 
 def _button_rows(buttons: list[Button], *, width: int) -> list[list[Button]]:
@@ -208,12 +212,7 @@ async def _apply_birth_date(
         return [
             Reply(
                 text=texts.ASK_SIGN_CUSP,
-                buttons=[
-                    [
-                        Button(left, {"cmd": "set_sign", "sign": left}),
-                        Button(right, {"cmd": "set_sign", "sign": right}),
-                    ]
-                ],
+                buttons=[[_sign_button(left), _sign_button(right)]],
                 inline=True,
             )
         ]
