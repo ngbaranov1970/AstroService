@@ -163,14 +163,15 @@ def parse_birth_date(text: str) -> date | None:
 
 
 def _sign_replies(text: str) -> list[Reply]:
-    """Две inline-клавиатуры: 9 знаков, затем 3 + «Ввести дату».
+    """Две inline-клавиатуры по 6 знаков в два столбца, во второй ещё «Ввести дату».
 
     У messages.send для inline максимум 10 кнопок (ошибка 911) — 12 знаков
-    и дата в одном сообщении VK отвергает.
+    и дата в одном сообщении VK отвергает. Три в ряд со значком обрезали
+    «Близнецы» и «Скорпион» на телефоне (04.11.2026).
     """
     sign_buttons = [_sign_button(sign) for sign in SIGN_ORDER]
-    first = _button_rows(sign_buttons[:9], width=3)
-    second = _button_rows(sign_buttons[9:], width=3)
+    first = _button_rows(sign_buttons[:6], width=2)
+    second = _button_rows(sign_buttons[6:], width=2)
     second.append([Button(texts.BTN_ENTER_DATE, {"cmd": "sign_date"})])
     return [
         Reply(text=text, buttons=first, inline=True),

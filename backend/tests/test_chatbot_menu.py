@@ -141,11 +141,14 @@ async def test_my_sign_opens_keyboard(
     assert len(replies) == 2
     assert replies[0].text == texts.ASK_SIGN
     assert replies[0].inline is True
-    # Inline VK ≤10 кнопок: 9 знаков, затем 3 + дата.
-    assert sum(len(row) for row in replies[0].buttons) == 9
+    # Inline VK ≤10 кнопок: 6 знаков, затем 6 + дата; по два в ряд — иначе
+    # «♊ Близнецы» не влезает на телефоне.
+    assert sum(len(row) for row in replies[0].buttons) == 6
+    assert all(len(row) == 2 for row in replies[0].buttons)
+    assert replies[0].buttons[0][0].label == "♈ Овен"
     assert replies[1].text == texts.ASK_SIGN_MORE
     assert replies[1].buttons[-1][0].label == texts.BTN_ENTER_DATE
-    assert sum(len(row) for row in replies[1].buttons) == 4
+    assert sum(len(row) for row in replies[1].buttons) == 7
 
 
 async def test_date_1990_05_11_sets_taurus(
