@@ -107,7 +107,8 @@ async def recipients(session: AsyncSession, target_date: date) -> list[Recipient
 
     Четыре условия отбора разной природы: канал (VK), согласие (subscribed),
     разрешение писать от самого VK (vk_messages_allowed_at) и известный знак.
-    Знак берётся из своей карты, а без карты — из users.sun_sign.
+    Знак — выбранный вручную (users.sun_sign), без него — из своей карты:
+    карту могли посчитать на друга через КАРТА в боте (решение 04.11.2026).
     """
     # TODO: доставать знак выражением jsonb_path_query_first, когда получателей
     # станут тысячи — сейчас на каждого едет весь calc, это ~11 КБ.
@@ -131,12 +132,12 @@ async def recipients(session: AsyncSession, target_date: date) -> list[Recipient
         if user_id in already:
             continue
         has_chart = calc is not None
-        sign = sun_sign(calc) if has_chart else None
-        if has_chart and sign is None:
-            # Карта есть, а Солнца в ней нет — расчёт битый. Оставляем след в
-            # логе и берём знак, введённый датой, если он есть.
-            logger.warning("В карте пользователя %s нет Солнца", user_id)
-        sign = sign or stored_sign
+        sign = stored_sign
+        if sign is None and has_chart:
+            sign = sun_sign(calc)
+            if sign is None:
+                # Карта есть, а Солнца в ней нет — расчёт битый.
+                logger.warning("В карте пользователя %s нет Солнца", user_id)
         if sign is None:
             continue
         out.append(

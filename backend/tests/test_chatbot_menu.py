@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -452,3 +453,16 @@ def test_menu_is_bottom_keyboard(user: FakeUser) -> None:
     reply = menu.menu_reply(user)
     assert reply.inline is False
     assert [button.label for button in reply.buttons[0]] == [texts.BTN_TODAY, texts.BTN_MONTH]
+
+
+async def test_manual_sign_beats_chart(
+    session: FakeSession, user: FakeUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def chart_leo(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(calc={"natal": {"planets": [{"name": "Sun", "sign_ru": "Лев"}]}})
+
+    monkeypatch.setattr(menu.charts_service, "get_chart", chart_leo)
+    user.primary_chart_id = 85
+    assert await menu._resolve_sign(session, user) == "Лев"
+    user.sun_sign = "Рак"
+    assert await menu._resolve_sign(session, user) == "Рак"

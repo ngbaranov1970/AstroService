@@ -320,7 +320,9 @@ def _horoscope_reply(user: User, text: str) -> Reply:
 
 
 async def _resolve_sign(session: AsyncSession, user: User) -> str | None:
-    """Знак как в рассылке: из своей карты, иначе users.sun_sign."""
+    """Знак как в рассылке: выбранный вручную, иначе из своей карты."""
+    if user.sun_sign:
+        return user.sun_sign
     if user.primary_chart_id is not None:
         chart = await charts_service.get_chart(
             session, user.primary_chart_id, user_id=user.id
@@ -329,5 +331,5 @@ async def _resolve_sign(session: AsyncSession, user: User) -> str | None:
             from_chart = broadcast.sun_sign(chart.calc)
             if from_chart:
                 return from_chart
-    return user.sun_sign
+    return None
 

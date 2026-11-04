@@ -272,3 +272,23 @@ async def test_run_dry_run_nichego_ne_shlet(stub, monkeypatch: pytest.MonkeyPatc
 
     assert report.delivered == 1
     assert session.added == []
+
+
+async def test_recipients_ruchnoi_znak_vazhnee_karty(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Карта могла быть посчитана на друга через КАРТА в боте (решение 04.11.2026).
+    class Result:
+        def all(self):
+            return [(1, "100", "Рак", CALC), (2, "200", None, CALC), (3, "300", "Дева", None)]
+
+    class Session:
+        async def execute(self, stmt):
+            return Result()
+
+    async def nothing_sent(session, target_date):
+        return set()
+
+    monkeypatch.setattr(broadcast, "_already_sent", nothing_sent)
+    out = await broadcast.recipients(Session(), TODAY)
+    assert [(r.user_id, r.sign, r.has_chart) for r in out] == [
+        (1, "Рак", True), (2, "Лев", True), (3, "Дева", False)
+    ]
