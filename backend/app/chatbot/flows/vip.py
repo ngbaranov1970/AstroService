@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot import states, storage, texts
 from app.chatbot.flows import natal
 from app.chatbot.types import Button, Incoming, LinkButton, Outgoing, Reply
-from app.models import BotDialog, ClientGender, ReportType, User
+from app.models import BotDialog, ClientGender, OrderStatus, ReportType, User
 from app.services import events, orders
 from app.services import vip as vip_service
 
@@ -195,6 +195,10 @@ async def _create(
     await storage.save(
         session, dialog, state=states.IDLE, data={"last": natal.birth_only(data)}
     )
+    if order.status is OrderStatus.PAID:
+        # create_order отдаёт прежний заказ на ту же карту — второй VIP не заводится.
+        logger.info("chatbot.vip already paid user_id=%s order_id=%s", user.id, order.id)
+        return [Reply(text=texts.VIP_ALREADY_PAID)]
     url = vip_service.payment_url(order)
     if url is None:
         # Владелец увидит заказ в /admin/vip и напишет сам; в лог — только id.

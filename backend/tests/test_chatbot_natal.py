@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot import parse, router, states, texts
 from app.chatbot.flows import natal, vip
 from app.chatbot.types import Button, Incoming, Job, LinkButton, Reply
-from app.models import ClientGender, User
+from app.models import ClientGender, OrderStatus, User
 
 # --- разбор свободного текста ------------------------------------------------
 
@@ -274,7 +274,7 @@ async def test_vip_reuses_last_chart_and_creates_order(monkeypatch, session, use
     _ready_dialog(dialog)
     dialog.state = states.IDLE
     dialog.data = {"last": natal.birth_only(dialog.data)}
-    order = SimpleNamespace(id=9, token="tok")
+    order = SimpleNamespace(id=9, token="tok", status=OrderStatus.PENDING)
     create = AsyncMock(return_value=order)
     monkeypatch.setattr(vip.vip_service, "create_order", create)
     monkeypatch.setattr(vip.vip_service, "payment_url", lambda o: "https://x/pay/order/tok")
@@ -313,8 +313,23 @@ async def test_vip_payment_unavailable(monkeypatch, session, user, dialog) -> No
     dialog.state = states.VIP_CONFIRM
     dialog.data |= {"name": None, "gender": "male"}
     monkeypatch.setattr(
-        vip.vip_service, "create_order", AsyncMock(return_value=SimpleNamespace(id=9))
+        vip.vip_service, "create_order",
+        AsyncMock(return_value=SimpleNamespace(id=9, status=OrderStatus.PENDING)),
     )
     monkeypatch.setattr(vip.vip_service, "payment_url", lambda o: None)
     out = await _say(session, user, "", {"cmd": "vip_confirm"})
     assert out[0].text == texts.VIP_PAY_UNAVAILABLE
+
+
+async def test_vip_already_paid_has_no_pay_link(monkeypatch, session, user, dialog) -> None:
+    # Второй VIP на ту же карту create_order не заводит — отдаёт оплаченный.
+    _ready_dialog(dialog)
+    dialog.state = states.VIP_CONFIRM
+    dialog.data |= {"name": None, "gender": "male"}
+    monkeypatch.setattr(
+        vip.vip_service, "create_order",
+        AsyncMock(return_value=SimpleNamespace(id=50, status=OrderStatus.PAID)),
+    )
+    out = await _say(session, user, "", {"cmd": "vip_confirm"})
+    assert [reply.text for reply in out] == [texts.VIP_ALREADY_PAID]
+    assert out[0].buttons == []
