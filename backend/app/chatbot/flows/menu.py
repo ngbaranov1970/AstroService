@@ -60,7 +60,7 @@ def menu_reply(user: User) -> Reply:
                 Button(sub_label, {"cmd": sub_cmd}),
             ],
             # cmd "vip" обрабатывает flows/vip.py — та же витрина, что под разбором карты.
-            [Button(texts.BTN_ASTROLOGER, {"cmd": "vip"}, color="positive")],
+            [Button(texts.BTN_ASTROLOGER, {"cmd": "vip"}, color="primary")],
         ],
         inline=False,
     )
