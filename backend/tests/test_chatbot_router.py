@@ -160,7 +160,7 @@ async def test_unknown_text_in_idle_shows_menu(
     assert dialog.state == states.IDLE
     assert len(replies) == 1
     assert replies[0].text == texts.MENU_TEXT
-    assert len(replies[0].buttons) == 3
+    assert len(replies[0].buttons) == 4
 
 
 async def test_menu_text_resets_state(

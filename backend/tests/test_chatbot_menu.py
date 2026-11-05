@@ -456,6 +456,10 @@ def test_menu_is_bottom_keyboard(user: FakeUser) -> None:
     reply = menu.menu_reply(user)
     assert reply.inline is False
     assert [button.label for button in reply.buttons[0]] == [texts.BTN_TODAY, texts.BTN_MONTH]
+    # VIP — отдельной строкой на всю ширину.
+    assert [(b.label, b.payload) for b in reply.buttons[-1]] == [
+        (texts.BTN_ASTROLOGER, {"cmd": "vip"})
+    ]
 
 
 async def test_manual_sign_beats_chart(
