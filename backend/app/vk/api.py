@@ -20,7 +20,6 @@ api.vk.ru. Ни базы, ни наших пользователей здесь 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
@@ -134,39 +133,6 @@ async def close_client() -> None:
         _client.cache_clear()
 
 
-def open_app_keyboard(label: str, *, launch_hash: str = "") -> str | None:
-    """Клавиатура из одной кнопки «открыть наше приложение» — JSON для messages.send.
-
-    launch_hash уезжает в строку запуска приложения: это единственный способ
-    сказать открытому экрану, из какого письма пришли.
-
-    None — в .env нет VK_APP_ID или VK_GROUP_ID. Не ошибка: письмо без кнопки
-    дойдёт, а упавшая на полпути рассылка — нет.
-    """
-    settings = get_settings()
-    if settings.vk_app_id is None or settings.vk_group_id is None:
-        logger.warning("Кнопка приложения не собрана: нет VK_APP_ID или VK_GROUP_ID")
-        return None
-
-    action: dict[str, Any] = {
-        "type": "open_app",
-        "label": label,
-        "app_id": settings.vk_app_id,
-        # Минус обязателен: идентификатор сообщества у VK отрицательный, и с
-        # положительным приложение откроется вне контекста группы.
-        "owner_id": -settings.vk_group_id,
-    }
-    if launch_hash:
-        action["hash"] = launch_hash
-
-    # inline: кнопка принадлежит своему письму и остаётся при нём в истории.
-    # Обычная клавиатура одна на весь диалог — вчерашняя перетёрла бы сегодняшнюю.
-    keyboard = {"inline": True, "buttons": [[{"action": action}]]}
-    # ensure_ascii=False — VK принимает UTF-8, а экранированная кириллица
-    # превращает надпись в \u-мусор при чтении логов и отладке.
-    return json.dumps(keyboard, ensure_ascii=False)
-
-
 async def send_message(
     peer_id: int, text: str, *, random_id: int, keyboard: str | None = None
 ) -> SendResult:
@@ -187,8 +153,8 @@ async def send_messages(
     производное от «кому и за какой день», делает перезапуск рассылки
     безвредным; случайное превращает его во вторую копию письма.
 
-    keyboard — готовый JSON от open_app_keyboard(); None отправляет письмо
-    без кнопок.
+    keyboard — готовый JSON клавиатуры (app.vk.bot.keyboard_json); None
+    отправляет письмо без кнопок.
 
     Список режется на пачки по 100 — предел метода. Бросает VkError, если
     сорвался весь вызов; отказ отдельному человеку возвращается в списке.

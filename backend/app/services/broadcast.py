@@ -9,10 +9,8 @@
 ходит: двенадцать абзацев написаны заранее на всю базу сразу, и стоимость
 рассылки не зависит от числа подписчиков.
 
-Внутри VK платного нет вовсе (docs/astro-context.md, «Рассылка ведёт в Mini
-App»), поэтому письмо ничего не продаёт: кнопка ведёт в приложение — к своей
-карте или, если карты нет и знак введён одной датой, к её расчёту
-(там же, «Знак для рассылки — без карты»).
+Кнопка под письмом запускает сценарий бота в этом же диалоге: у кого только
+знак — КАРТУ, у кого карта уже есть — VIP-разбор (решение 10.11.2026).
 """
 
 from __future__ import annotations
@@ -32,11 +30,10 @@ from app.vk import api as vk_api
 
 logger = logging.getLogger(__name__)
 
-# Надпись на кнопке под письмом. Обещает ровно то, что человек увидит,
-# нажав: свою карту, а не «подробности».
-BUTTON_LABEL = "Открыть свою карту"
-# Для того, у кого только знак: нажав, он попадёт в онбординг, а не к карте.
-NEW_CHART_BUTTON_LABEL = "Посчитать свою карту"
+# Кнопки под письмом: payload — те же cmd, что на кнопках меню бота.
+# Карта уже есть — ведём к VIP; только знак — к расчёту карты в боте.
+VIP_BUTTON = ("💫 Полный разбор", {"cmd": "vip"})
+NATAL_BUTTON = ("🌟 Моя натальная карта", {"cmd": "natal"})
 
 
 @dataclass(slots=True)
@@ -274,11 +271,7 @@ async def run(
         report.delivered = len(people)
         return report
 
-    launch_hash = _launch_hash(target_date)
-    keyboards = {
-        True: vk_api.open_app_keyboard(BUTTON_LABEL, launch_hash=launch_hash),
-        False: vk_api.open_app_keyboard(NEW_CHART_BUTTON_LABEL, launch_hash=launch_hash),
-    }
+    keyboards = {True: _bot_keyboard(*VIP_BUTTON), False: _bot_keyboard(*NATAL_BUTTON)}
 
     # Отправляем группами по знаку и кнопке: транспорт шлёт один текст с одной
     # клавиатурой на вызов. До 24 вызовов вместо письма на человека.
@@ -324,9 +317,16 @@ async def run(
     return report
 
 
-def _launch_hash(target_date: date) -> str:
-    """Метка канала в строке запуска приложения: из какого письма пришли."""
-    return f"b={target_date.isoformat()}"
+def _bot_keyboard(label: str, payload: dict) -> str | None:
+    """Inline-клавиатура из одной текстовой кнопки бота — JSON для messages.send."""
+    # Импорт здесь: chatbot/flows/menu.py сам импортирует broadcast, импорт
+    # app.vk.bot в шапке замкнул бы круг broadcast → vk.bot → router → menu.
+    from app.chatbot.types import Button, Reply
+    from app.vk.bot import keyboard_json
+
+    # inline: кнопка остаётся при своём письме, обычная клавиатура одна на диалог.
+    button = Button(label, payload, color="positive")
+    return keyboard_json(Reply(text="", buttons=[[button]], inline=True))
 
 
 async def _record(

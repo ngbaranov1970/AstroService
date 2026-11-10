@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -126,7 +127,6 @@ def stub(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(broadcast, "letters_for", fake_letters)
         monkeypatch.setattr(broadcast, "recipients", fake_recipients)
         monkeypatch.setattr(vk_api, "send_messages", fake_send)
-        monkeypatch.setattr(vk_api, "open_app_keyboard", lambda *a, **kw: "{}")
 
     return setup
 
@@ -165,23 +165,23 @@ async def test_run_knopka_zavisit_ot_karty(stub, monkeypatch: pytest.MonkeyPatch
             vk_api.SendResult(user_id=102, message_id=12),
         ],
     )
-    sent: list[tuple[list[int], str]] = []
+    sent: list[tuple[list[int], dict]] = []
 
     async def fake_send(user_ids, text, *, random_id, keyboard=None):
-        sent.append((list(user_ids), keyboard))
+        # Из клавиатуры берём только action кнопки: кому какая команда досталась
+        action = json.loads(keyboard)["buttons"][0][0]["action"]
+        sent.append((list(user_ids), action))
         return [vk_api.SendResult(user_id=u, message_id=u) for u in user_ids]
 
-    # Кнопка — её надпись, чтобы было видно, кому какая досталась
-    monkeypatch.setattr(vk_api, "open_app_keyboard", lambda label, **kw: label)
     monkeypatch.setattr(vk_api, "send_messages", fake_send)
 
     report = await broadcast.run(FakeSession(), TODAY)
 
     assert report.delivered == 2
-    assert sorted(sent) == [
-        ([101], broadcast.BUTTON_LABEL),
-        ([102], broadcast.NEW_CHART_BUTTON_LABEL),
-    ]
+    by_user = {ids[0]: action for ids, action in sent}
+    assert by_user[101]["type"] == "text"
+    assert json.loads(by_user[101]["payload"]) == {"cmd": "vip"}
+    assert json.loads(by_user[102]["payload"]) == {"cmd": "natal"}
 
 
 async def test_run_otkaz_901_gasit_razreshenie(stub) -> None:

@@ -30,7 +30,7 @@
 | Что | Где | Заметки |
 |---|---|---|
 | Callback API | `backend/app/web/routes/vk_callback.py` | `POST /vk/callback`; проверка `secret` (`hmac.compare_digest`) и `group_id`; обрабатывает `message_allow`, `message_deny`, `message_new` (только флаги и события); всегда `PlainTextResponse("ok")` |
-| VK API | `backend/app/vk/api.py` | `send_messages(user_ids, text, *, random_id, keyboard)`, `open_app_keyboard(label, launch_hash=)`, `is_group_member`, `_request(method, data)`, `VkError`; API 5.199 |
+| VK API | `backend/app/vk/api.py` | `send_messages(user_ids, text, *, random_id, keyboard)`, `is_group_member`, `_request(method, data)`, `VkError`; API 5.199 |
 | Настройки | `backend/app/config.py` (`Settings`, pydantic-settings) | `vk_group_id`, `vk_group_secure_key`, `vk_app_id` (54687046), `vk_callback_secret`, `vk_callback_confirmation`, `vip_owner_vk_id`, `public_base_url`, `app_base_url`, `yookassa_*` |
 | Пользователи | `backend/app/models/user.py`, `services/users.py` | `sun_sign`, `subscribed` (**default True**), `vk_messages_allowed_at`, `source`, `primary_chart_id`; `get_or_create`, `set_sun_sign`, `set_subscribed`, `mark_vk_messages_allowed` |
 | Карта | `services/charts.py` | `search_places(query, limit=8)`, `create_chart(session, *, user_id, birth_local, place, time_known)`; без времени подставляет `UNKNOWN_TIME = 12:00`; не коммитит |
@@ -287,7 +287,7 @@ backend/app/models/bot_dialog.py
 - Событие `ORDER_CREATED` уже пишется? **[ПРЕДПОЛОЖЕНИЕ: проверить в `orders.get_or_create_order`]**.
 
 **ПАРА.**
-- `ПАРА` или «Совместимость» → текст + inline-кнопка `open_app` с `hash="pair"` (`api.open_app_keyboard` уже умеет) → экран `pair-create` в Mini App.
+- `ПАРА` или «Совместимость» → текст + inline-кнопка `open_app` с `hash="pair"` (`AppButton` → `vk.bot.keyboard_json`) → экран `pair-create` в Mini App.
 - Аналитика: событие `BOT_PAIR_LINK` с `ref` на нашей стороне. Ref внутри hash (`pair&r=bot`) **[ПРЕДПОЛОЖЕНИЕ: `parseGoal` в `frontend/src/app/entry.js` может такую строку не понять — без правки фронта не добавлять]**; VK сам передаёт `vk_ref=bot_keyboard`.
 
 **Приёмка.** Заказ виден в `/admin`, ссылка ведёт на `/pay/order/{token}`; кнопка ПАРА открывает Mini App на создании пары.
