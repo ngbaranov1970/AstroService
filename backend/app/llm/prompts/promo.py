@@ -66,9 +66,12 @@ def sign_lines_footer(day: date | None = None) -> str:
     ref = f"evening_{day:%Y%m%d}" if day else "evening"
     return f"{SIGN_LINES_FOOTER}\n{BOT_LINE}\n👉 vk.me/astrozvezdochet?ref={ref}"
 
-# Последняя строка утреннего поста daily_sky v8 — формулировка владельца,
-# дословно. «Личный» — про рассылку, она расписывает знак по домам.
-MORNING_APP = "Личный гороскоп каждый день — в приложении"
+# Концовка утреннего поста daily_sky v8 — формулировка владельца 10.11.2026,
+# дословно: зовёт в бота за рассылкой по знаку.
+MORNING_FOOTER = (
+    "☀️ Подробный гороскоп твоего знака — каждое утро в личку, бесплатно\n"
+    "👉 vk.me/astrozvezdochet?ref=morning"
+)
 
 # Акция к ретроградному Меркурию: вместо концовки с подпиской идёт этот блок,
 # текст владельца, дословно. Дата — target_date поста (он пишется на завтра),
@@ -97,12 +100,6 @@ def retro_mercury() -> str:
     if not app_id:
         return RETRO_MERCURY
     return f"{RETRO_MERCURY}\n\nСвоя карта целиком — в приложении: vk.ru/app{app_id}"
-
-
-def morning_app() -> str:
-    """Последняя строка утреннего поста со ссылкой; без VK_APP_ID — без ссылки."""
-    app_id = get_settings().vk_app_id
-    return f"{MORNING_APP}: vk.ru/app{app_id}" if app_id else f"{MORNING_APP}."
 
 
 def line(seed: int | None = None) -> str:

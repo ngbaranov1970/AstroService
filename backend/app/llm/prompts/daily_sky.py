@@ -473,7 +473,7 @@ def _render_v8(post: dict) -> str:
         blocks.append("\n".join(f"⛔ {item}" for item in post["dont"]))
     if post["question"]:
         blocks.append(f"{post['question']} 👇")
-    blocks.append(promo.morning_app())
+    blocks.append(promo.MORNING_FOOTER)
     return "\n\n".join(blocks)
 
 

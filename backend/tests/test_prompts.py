@@ -412,7 +412,7 @@ def _sky_v8_answer(**changes: object) -> str:
 def test_daily_sky_v8_render_sobiraet_obrazec() -> None:
     from app.llm.prompts import daily_sky
 
-    assert daily_sky.render(_sky_v8_answer()) == f"{_SKY_V8_SAMPLE}\n\n{promo.morning_app()}"
+    assert daily_sky.render(_sky_v8_answer()) == f"{_SKY_V8_SAMPLE}\n\n{promo.MORNING_FOOTER}"
 
 
 def test_daily_sky_v8_rezhet_lishnie_punkty_i_tochki() -> None:
@@ -430,7 +430,7 @@ def test_daily_sky_v8_bez_voprosa_post_est() -> None:
     text = daily_sky.render(_sky_v8_answer(question=""))
 
     assert "👇" not in text
-    assert text.endswith(promo.morning_app())
+    assert text.endswith(promo.MORNING_FOOTER)
 
 
 def test_daily_sky_v8_pustoy_headline_brak() -> None:
