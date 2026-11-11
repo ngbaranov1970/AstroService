@@ -256,7 +256,7 @@ backend/app/models/bot_dialog.py
 3. → «Город рождения?» → `natal_city`; `charts.search_places(text, limit=5)`; 0 → «Не нашла, попробуй иначе»; 1 → сразу; 2–5 → inline-кнопки с подписью `place.label`, `payload={"place_idx": i}`; места хранить в `data`.
 4. → «Считаю, минуту…» (сразу) → `natal_wait`.
 5. `charts.create_chart(...)`, `commit`, `reports.get_or_create_report(session, chart=chart, user=user)` (30–60 с, мы уже в фоне), `strip_markdown`, `split_text` → 1–2 сообщения.
-6. Inline-кнопки под последним: «Полный разбор за 149 ₽» (`payload={"cmd":"vip"}`), «🔔 Гороскоп по утрам» (`payload={"cmd":"subscribe"}`). Состояние → `idle`.
+6. Inline-кнопки под последним: «Полный разбор» без цены (`payload={"cmd":"vip"}`; цена — на следующем экране), «🔔 Гороскоп по утрам» (`payload={"cmd":"subscribe"}`). Состояние → `idle`.
 - Повтор «КАРТА» в `natal_wait` → «Уже считаю, скоро пришлю».
 - `ReportLimitError` → текст «на сегодня лимит» ; `LLMError` → «Не получилось, попробуй через пару минут» + кнопка «Повторить».
 - События: `CHART_CREATED`, `REPORT_READY` (существующие) + `BOT_NATAL_STARTED` (новое, `services/events.py`).
@@ -279,7 +279,7 @@ backend/app/models/bot_dialog.py
 **Файлы.** `flows/vip.py`, `flows/pair.py`; тест.
 
 **VIP.**
-- Вход: «Натальная карта» в меню или кнопка «Полный разбор за 149 ₽».
+- Вход: «Натальная карта» в меню или кнопка «Полный разбор».
 - Текст: что входит, цена `orders.price_rub(ReportType.VIP_NATAL)` (не хардкодить 149), срок «в течение суток».
 - Данные: если только что был `КАРТА` — взять дату/время/место из `data`; иначе тот же сбор (шаги 1–3 задачи 8). Плюс имя (`vip_name`, можно «Пропустить») и пол (кнопки «Женский» / «Мужской» → `ClientGender`).
 - Сводка + «Всё верно» / «Исправить» → `vip.create_order(...)`, `commit`, `vip.payment_url(order)` → кнопка `open_link` «Оплатить 149 ₽». `None` → «Оплата временно недоступна, напишите нам» + уведомление владельцу.

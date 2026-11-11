@@ -333,7 +333,8 @@ Telegram (граница из CLAUDE.md):
 | `admin.py` | выборки админки: тексты (единица — отчёт, а не карта) и воронка (единица — человек) | нет |
 
 **LLM** `app/llm/`: `client.py` (транспорт к DeepSeek на httpx) и `prompts/` —
-`free_natal_v3`, `full_natal_v3`, `pair_free_v1` (тизер пары),
+`free_natal_v4` (тизер на 120–180 слов, с 11.11.2026), `full_natal_v3`,
+`pair_free_v1` (тизер пары),
 `pair_full_v1` (платный разбор пары), `vip_natal_v2` и `vip_edit_v1`
 (черновик VIP и его правка, модель `deepseek-v4-pro`), `daily_sky_v6` (лента),
 `daily_horoscope_v6` (рассылка), `astro_event_v1`, плюс `promo.py` с

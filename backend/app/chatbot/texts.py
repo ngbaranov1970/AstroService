@@ -84,7 +84,8 @@ TIME_UNKNOWN_LABEL = "время неизвестно"
 BTN_TIME_UNKNOWN = "Не знаю"
 BTN_OTHER_CITY = "Другой город"
 BTN_RETRY = "Повторить"
-BTN_VIP = "Полный разбор за {price} ₽"
+# Без цены: она на следующем экране (VIP_INTRO), а нажатие меряет интерес.
+BTN_VIP = "Полный разбор"
 
 # --- VIP: платный разбор через личку (flows/vip.py) ---
 VIP_INTRO = (

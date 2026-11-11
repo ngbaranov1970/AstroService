@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 JOB_REPORT = "natal_report"
 PURPOSE_FREE = "free"
 PURPOSE_VIP = "vip"
+
+# Разметка markdown в тексте разбора: решётки заголовков и звёздочки жирного.
+# Личка VK её не рисует — «## Заголовок» дошёл бы до человека с решётками.
+_MARKDOWN = re.compile(r"^#{1,4}\s+|\*\*", re.MULTILINE)
 
 # Разбор завис дольше этого (перезапуск процесса посреди Job) — даём начать заново.
 _WAIT_STALE = timedelta(minutes=5)
@@ -355,14 +360,12 @@ async def run_report(
 
     buttons: list[list[Button]] = []
     if orders.is_for_sale(ReportType.VIP_NATAL):
-        price = orders.price_rub(ReportType.VIP_NATAL)
-        buttons.append(
-            [Button(texts.BTN_VIP.format(price=price), {"cmd": "vip"}, color="positive")]
-        )
+        buttons.append([Button(texts.BTN_VIP, {"cmd": "vip"}, color="positive")])
     if not user.subscribed:
         buttons.append([Button(texts.BTN_DAILY, {"cmd": "subscribe"})])
     header = texts.NATAL_HEADER.format(summary=summary(data))
-    return [Reply(text=f"{header}\n\n{report.text}", buttons=buttons, inline=True)]
+    body = _MARKDOWN.sub("", report.text)
+    return [Reply(text=f"{header}\n\n{body}", buttons=buttons, inline=True)]
 
 
 def birth_only(data: dict[str, Any]) -> dict[str, Any]:

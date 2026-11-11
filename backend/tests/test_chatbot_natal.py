@@ -238,7 +238,7 @@ async def test_run_report_success(monkeypatch, session, user, dialog) -> None:
     monkeypatch.setattr(natal.charts_service, "create_chart", create)
     monkeypatch.setattr(
         natal.reports, "get_or_create_report",
-        AsyncMock(return_value=SimpleNamespace(text="## Солнце\nТекст разбора")),
+        AsyncMock(return_value=SimpleNamespace(text="## Солнце\nТекст **разбора**")),
     )
     out = await router.run_job(session, user, Job(natal.JOB_REPORT))
     kwargs = create.await_args.kwargs
@@ -247,6 +247,8 @@ async def test_run_report_success(monkeypatch, session, user, dialog) -> None:
     assert dialog.state == states.IDLE
     assert dialog.data["last"]["place"]["label"] == "Егорьевск, RU"
     assert out[0].text.startswith(texts.NATAL_HEADER.split("{")[0])
+    # Личка VK markdown не рисует: решётки и звёздочки до человека не доходят.
+    assert out[0].text.endswith("\n\nСолнце\nТекст разбора")
     payloads = [b.payload["cmd"] for row in out[0].buttons for b in row if isinstance(b, Button)]
     assert payloads == ["vip", "subscribe"]
     assert {"chart_created", "report_requested", "report_ready"} <= set(session.event_names())
