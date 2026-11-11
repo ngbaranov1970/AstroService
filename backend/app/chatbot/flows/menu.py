@@ -1,8 +1,8 @@
 """Главное меню, выбор знака, гороскоп на сегодня и на месяц, подписка.
 
 Подписка — явный opt-in: новые пользователи бота создаются с subscribed=False
-(app/vk/bot.py), флаг включают только кнопки «Подписаться» / «Гороскоп
-каждый день». Выбор знака флаг не меняет.
+(app/vk/bot.py), флаг включают только кнопки «Подписаться» и BTN_DAILY.
+Выбор знака флаг не меняет, только предлагает кнопку BTN_DAILY.
 """
 
 from __future__ import annotations
@@ -252,6 +252,13 @@ async def _after_sign_saved(
         return [saved, *(await reply_month(session, user))]
     if pending == "subscribe":
         return [saved, *reply_subscribe(user)]
+    # Знак выбран сам по себе — предлагаем рассылку: именно для неё знак и нужен.
+    if not user.subscribed:
+        saved = Reply(
+            text=saved.text,
+            buttons=[[Button(texts.BTN_DAILY, {"cmd": "subscribe"})]],
+            inline=True,
+        )
     return [saved, menu_reply(user)]
 
 
@@ -314,7 +321,7 @@ async def reply_month(session: AsyncSession, user: User) -> list[Reply]:
 
 
 def _horoscope_reply(user: User, text: str) -> Reply:
-    """Текст знака; неподписанному — inline «Гороскоп каждый день»."""
+    """Текст знака; неподписанному — inline-кнопка подписки BTN_DAILY."""
     buttons: list[list[Button]] = []
     if not user.subscribed:
         buttons = [[Button(texts.BTN_DAILY, {"cmd": "subscribe"})]]

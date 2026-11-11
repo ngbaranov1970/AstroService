@@ -451,6 +451,41 @@ async def test_set_sign_does_not_subscribe(
     assert logged[0]["sign"] == "Дева"
 
 
+async def test_set_sign_offers_daily_button(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    logged: list[dict],
+) -> None:
+    assert patched_storage is dialog
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "set_sign", "sign": "Дева"})
+    )
+    assert replies[0].text == texts.SIGN_SAVED.format(sign="Дева")
+    assert replies[0].buttons == [
+        [menu.Button(texts.BTN_DAILY, {"cmd": "subscribe"})]
+    ]
+    assert replies[0].inline is True
+    assert replies[-1].text == texts.MENU_TEXT
+
+
+async def test_set_sign_subscribed_omits_daily_button(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    logged: list[dict],
+) -> None:
+    assert patched_storage is dialog
+    user.subscribed = True
+    replies = await _handle(
+        session, user, _incoming("", payload={"cmd": "set_sign", "sign": "Дева"})
+    )
+    assert replies[0].buttons == []
+    assert replies[0].inline is False
+
+
 def test_menu_is_bottom_keyboard(user: FakeUser) -> None:
     # Inline-копия под сообщением дублировала нижнюю клавиатуру (04.11.2026).
     reply = menu.menu_reply(user)
