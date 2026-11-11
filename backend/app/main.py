@@ -25,6 +25,7 @@ from app.payments import yookassa
 from app.session_cookie import install_session_cookie
 from app.vk import api as vk_api
 from app.web.routes.admin import router as admin_router
+from app.web.routes.admin_login import router as admin_login_router
 from app.web.routes.landing import router as landing_router
 from app.web.routes.legal import router as legal_router
 from app.web.routes.pay import router as pay_router
@@ -120,6 +121,8 @@ def create_app() -> FastAPI:
     # Веб-вход через VK ID. Своей авторизации не требует по определению —
     # он её и выдаёт; cookie попытки ставит сам, мимо middleware выше.
     app.include_router(vkid_router)
+    # Форма входа — вне admin_router: на нём висит require_admin.
+    app.include_router(admin_login_router)
     app.include_router(admin_router)
     # Страницы оплаты и вебхук ЮKassa. Своей авторизации у них нет
     # намеренно: платят из внешнего браузера, где нашей cookie не бывает.

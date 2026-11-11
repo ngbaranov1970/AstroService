@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Вход в админку{% endblock %}
+
+{% block content %}
+  <h1>Вход в админку</h1>
+
+  {% if error %}
+    <p class="lead">{{ error }}</p>
+  {% endif %}
+
+  {# Обычная форма, а не окно HTTP Basic: его встроенные браузеры не
+     показывают. autocomplete помогает менеджеру паролей узнать поля. #}
+  <form method="post" action="/admin/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>
+      Логин
+      <input type="text" name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>
+      Пароль
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Войти</button>
+  </form>
+{% endblock %}
+
+{% block footer %}
+  Служебная страница.
+{% endblock %}

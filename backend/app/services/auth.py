@@ -241,3 +241,57 @@ def read_session(token: str) -> SessionInfo | None:
         surface = SURFACE_VK
 
     return SessionInfo(user_id=user_id, surface=surface)
+
+
+# --- Сессия админки --------------------------------------------------------
+
+# Неделя: владелец заходит в админку каждый день, а вход по форме с телефона
+# раз в сутки утомляет. Дольше не держим — за админкой данные рождения людей.
+ADMIN_SESSION_TTL = 7 * 24 * 60 * 60
+
+# Audience админского токена. Пользовательский токен его не несёт, и
+# jwt.decode с audience="admin" такой токен отвергнет — и наоборот.
+_ADMIN_AUDIENCE = "admin"
+
+
+def _admin_key() -> str | None:
+    """Ключ подписи админской сессии; None, если ADMIN_PASSWORD не задан.
+
+    Пароль входит в ключ: сменил ADMIN_PASSWORD — все выданные сессии
+    перестали читаться, отдельного «выйти везде» не нужно.
+    """
+    settings = get_settings()
+    if settings.admin_password is None:
+        return None
+    secret = settings.session_secret.get_secret_value() if settings.session_secret else ""
+    raw = f"admin:{secret}:{settings.admin_password.get_secret_value()}"
+    # Хеш, а не сырая склейка: HS256 нужен ключ от 32 байт, а короткий
+    # пароль без SESSION_SECRET дал бы короче.
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def issue_admin_session(username: str) -> str:
+    """Выпустить JWT админки на ADMIN_SESSION_TTL. Без пароля — RuntimeError."""
+    key = _admin_key()
+    if key is None:
+        raise RuntimeError("ADMIN_PASSWORD не задан — сессию админки выпустить нечем")
+    now = int(time.time())
+    payload = {"sub": username, "aud": _ADMIN_AUDIENCE, "iat": now, "exp": now + ADMIN_SESSION_TTL}
+    return jwt.encode(payload, key, _ALGORITHM)
+
+
+def read_admin_session(token: str) -> str | None:
+    """Имя вошедшего в админку из токена; None, если токен протух, битый или чужой."""
+    key = _admin_key()
+    if key is None:
+        return None
+    try:
+        payload = jwt.decode(token, key, algorithms=[_ALGORITHM], audience=_ADMIN_AUDIENCE)
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        # Сюда же попадают сессии, выпущенные до смены пароля, — это норма.
+        logger.info("Токен админки не прошёл проверку")
+        return None
+    sub = payload.get("sub")
+    return sub if isinstance(sub, str) and sub else None

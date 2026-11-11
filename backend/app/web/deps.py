@@ -7,16 +7,17 @@
 по заголовку `Authorization: Bearer`.
 
 Отсюда и состав файла: `in_vk` — выбор вёрстки, `forbid_in_vk` — охрана
-витрины с ценой, `require_admin` — охрана админки.
+витрины с ценой, `require_admin` — охрана админки
+(cookie-сессия, запасной вход — HTTP Basic).
 """
 
 from __future__ import annotations
 
 import logging
 import secrets
-from typing import Annotated
+from urllib.parse import urlencode
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.config import get_settings
@@ -59,40 +60,65 @@ def forbid_in_vk(request: Request) -> None:
 
 # --- Админка ---------------------------------------------------------------
 
-# auto_error=True: без заголовка авторизации FastAPI сам ответит 401 с
-# WWW-Authenticate, и браузер покажет окно логина и пароля.
-_basic = HTTPBasic(auto_error=True)
+# Cookie с сессией админки (auth.issue_admin_session). Ставит и снимает её
+# routes/admin_login.py.
+ADMIN_COOKIE = "astro_admin"
+
+# Basic оставлен запасным входом: curl и браузеры, где пароль уже сохранён.
+# auto_error=False — без заголовка вернёт None, а не 401: такого гостя мы
+# отправляем на форму входа.
+_basic = HTTPBasic(auto_error=False)
 
 
-def require_admin(
-    credentials: Annotated[HTTPBasicCredentials, Depends(_basic)],
-) -> str:
-    """HTTP Basic на /admin. Возвращает имя вошедшего, иначе бросает 401 или 503.
+def admin_password_set() -> bool:
+    """Задан ли ADMIN_PASSWORD. Нет — админка закрыта для всех (503)."""
+    if get_settings().admin_password is None:
+        logger.error("ADMIN_PASSWORD не задан — админка закрыта (503)")
+        return False
+    return True
 
-    За страницей — имена, даты и места рождения живых людей, а сервер по
-    определению в открытом интернете. Basic хватает на инструмент для двух
-    человек, но пароль идёт почти открытым текстом: обязателен HTTPS (Caddy).
-    Пароль не задан → 503, а не «пускаем всех».
-    """
+
+def admin_credentials_ok(username: str, password: str) -> bool:
+    """Сверить логин и пароль админки с настройками за постоянное время."""
     settings = get_settings()
     if settings.admin_password is None:
-        logger.error("ADMIN_PASSWORD не задан — админка закрыта (503)")
+        return False
+    # Оба сравнения выполняются всегда (не через `and`, который выйдет
+    # раньше): иначе по времени ответа видно, угадано ли имя. Байты, а не
+    # строки, — compare_digest не принимает не-ASCII.
+    user_ok = secrets.compare_digest(
+        username.encode("utf-8"), settings.admin_user.encode("utf-8")
+    )
+    password_ok = secrets.compare_digest(
+        password.encode("utf-8"),
+        settings.admin_password.get_secret_value().encode("utf-8"),
+    )
+    return user_ok and password_ok
+
+
+async def require_admin(request: Request) -> str:
+    """Охрана /admin: cookie-сессия, иначе HTTP Basic. Возвращает имя вошедшего.
+
+    Без входа GET уводит на /admin/login (303) — окно Basic встроенные
+    браузеры и webview не показывают. Остальные методы получают 401.
+    Пароль не задан → 503, а не «пускаем всех».
+    """
+    if not admin_password_set():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Админка не настроена",
         )
 
-    # Оба сравнения выполняются всегда (не через `and`, который выйдет
-    # раньше): иначе по времени ответа видно, угадано ли имя. Байты, а не
-    # строки, — compare_digest не принимает не-ASCII.
-    user_ok = secrets.compare_digest(
-        credentials.username.encode("utf-8"), settings.admin_user.encode("utf-8")
-    )
-    password_ok = secrets.compare_digest(
-        credentials.password.encode("utf-8"),
-        settings.admin_password.get_secret_value().encode("utf-8"),
-    )
-    if not (user_ok and password_ok):
+    token = request.cookies.get(ADMIN_COOKIE)
+    if token:
+        username = auth.read_admin_session(token)
+        if username is not None:
+            return username
+
+    credentials: HTTPBasicCredentials | None = await _basic(request)
+    if credentials is not None:
+        if admin_credentials_ok(credentials.username, credentials.password):
+            return credentials.username
         logger.warning("Неудачный вход в админку")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -100,4 +126,14 @@ def require_admin(
             # Без этого заголовка браузер не покажет окно повторного ввода.
             headers={"WWW-Authenticate": "Basic"},
         )
-    return credentials.username
+
+    if request.method in ("GET", "HEAD"):
+        target = request.url.path
+        if request.url.query:
+            target += f"?{request.url.query}"
+        raise HTTPException(
+            status_code=status.HTTP_303_SEE_OTHER,
+            headers={"Location": f"/admin/login?{urlencode({'next': target})}"},
+        )
+    # Без WWW-Authenticate: браузер не должен открывать окно Basic поверх формы.
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Нужен вход в админку")
