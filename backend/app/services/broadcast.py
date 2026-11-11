@@ -23,6 +23,7 @@ from datetime import date
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chatbot import texts
 from app.llm.prompts import daily_horoscope, monthly_horoscope
 from app.models import Chart, Event, Platform, PostKind, User
 from app.services import content, events
@@ -33,7 +34,8 @@ logger = logging.getLogger(__name__)
 # Кнопки под письмом: payload — те же cmd, что на кнопках меню бота.
 # Карта уже есть — ведём к VIP; только знак — к расчёту карты в боте.
 VIP_BUTTON = ("💫 Полный разбор", {"cmd": "vip"})
-NATAL_BUTTON = ("🌟 Моя натальная карта", {"cmd": "natal"})
+# Надпись как в меню бота: карту там считают на кого угодно, не только на себя.
+NATAL_BUTTON = (texts.BTN_NATAL, {"cmd": "natal"})
 
 
 @dataclass(slots=True)
