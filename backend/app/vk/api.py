@@ -265,7 +265,7 @@ async def get_full_names(user_ids: list[int]) -> dict[int, str]:
 
 
 async def resolve_screen_name(screen_name: str) -> int | None:
-    """VK id человека по короткому имени из ссылки (vk.com/durov).
+    """VK id человека по короткому имени из ссылки (vk.ru/durov).
 
     None — имя принадлежит сообществу или приложению, не существует, или VK
     не ответил: для поиска в админке всё это значит «не нашли».

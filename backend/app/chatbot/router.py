@@ -1,7 +1,7 @@
 """Маршрутизация сообщения: сброс → payload → кодовое слово → FSM → меню.
 
 Flows: menu (меню, знак, гороскопы, подписка), natal (КАРТА), vip (платный
-разбор). Долгую работу flows возвращают как Job — её выполняет run_job.
+разбор), gate (КАРТА и ПАРА только подписчикам сообщества). Долгую работу flows возвращают как Job — её выполняет run_job.
 Про VK не знает — только Incoming/Reply.
 """
 
@@ -15,8 +15,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chatbot import states, storage, texts
-from app.chatbot.flows import menu, natal, vip
-from app.chatbot.types import AppButton, Incoming, Job, Outgoing, Reply
+from app.chatbot.flows import gate, menu, natal, vip
+from app.chatbot.types import AppButton, Incoming, Job, MemberCheck, Outgoing, Reply
 from app.models import BotDialog, User
 from app.services import events
 
@@ -38,10 +38,13 @@ async def handle(
     session: AsyncSession,
     user: User,
     incoming: Incoming,
+    *,
+    is_member: MemberCheck | None = None,
 ) -> Sequence[Outgoing]:
     """Разобрать входящее и вернуть ответы (и, возможно, Job последним).
 
-    Сессию не коммитит. Не пишет в лог текст сообщения — только user_id и state.
+    is_member — проверка подписки на сообщество от адаптера; без неё КАРТА
+    и ПАРА открыты всем. Сессию не коммитит. Не пишет в лог текст сообщения — только user_id и state.
     """
     dialog = await storage.load(session, user.id)
     payload = incoming.payload or {}
@@ -59,14 +62,16 @@ async def handle(
         return [menu.menu_reply(user)]
 
     if "cmd" in payload:
-        return await _dispatch_cmd(session, user, dialog, payload)
+        return await _dispatch_cmd(session, user, dialog, payload, is_member)
 
     if normalized == _CODE_PARA:
-        return await _start_pair(session, user, dialog)
+        return await _start_pair(session, user, dialog, is_member)
     if normalized == _CODE_KARTA or normalized.startswith(_CODE_KARTA + " "):
         # «КАРТА 9.03.1987 Егорьевск» — данные сразу за кодовым словом.
         rest = incoming.text.strip()[len(_CODE_KARTA) :].strip()
-        return await natal.start(session, user, dialog, first_text=rest or None)
+        return await _start_natal(
+            session, user, dialog, is_member, first_text=rest or None
+        )
 
     if dialog.state == states.ASK_SIGN:
         return await menu.handle_ask_sign(session, user, dialog, incoming)
@@ -77,7 +82,9 @@ async def handle(
 
     # Человек сразу прислал «9,03,1987, время не помню, Егорьевск» без КАРТА.
     if natal.looks_like_birth_data(incoming.text):
-        return await natal.start(session, user, dialog, first_text=incoming.text)
+        return await _start_natal(
+            session, user, dialog, is_member, first_text=incoming.text
+        )
     return [menu.menu_reply(user)]
 
 
@@ -103,12 +110,21 @@ async def _dispatch_cmd(
     user: User,
     dialog: BotDialog,
     payload: dict[str, Any],
+    is_member: MemberCheck | None,
 ) -> Sequence[Outgoing]:
     cmd = str(payload.get("cmd", ""))
     if cmd in {"natal", "karta"}:
-        return await natal.start(session, user, dialog)
+        return await _start_natal(session, user, dialog, is_member)
     if cmd in {"pair", "para"}:
-        return await _start_pair(session, user, dialog)
+        return await _start_pair(session, user, dialog, is_member)
+    if cmd == gate.CMD_CHECK:
+        # «Я подписался»: проверяем заново и продолжаем с места остановки.
+        if payload.get("target") == gate.TARGET_PAIR:
+            return await _start_pair(session, user, dialog, is_member, retry=True)
+        return await _start_natal(
+            session, user, dialog, is_member,
+            first_text=gate.saved_text(dialog), retry=True,
+        )
 
     for flow in (natal, vip, menu):
         handled = await flow.dispatch(session, user, dialog, payload)
@@ -117,9 +133,38 @@ async def _dispatch_cmd(
     return [menu.menu_reply(user)]
 
 
-async def _start_pair(
-    session: AsyncSession, user: User, dialog: BotDialog
+async def _start_natal(
+    session: AsyncSession,
+    user: User,
+    dialog: BotDialog,
+    is_member: MemberCheck | None,
+    *,
+    first_text: str | None = None,
+    retry: bool = False,
 ) -> Sequence[Outgoing]:
+    """Бесплатная КАРТА: сначала подписка, потом сбор данных."""
+    blocked = await gate.closed(
+        session, user, dialog, is_member, gate.TARGET_NATAL,
+        first_text=first_text, retry=retry,
+    )
+    if blocked is not None:
+        return blocked
+    return await natal.start(session, user, dialog, first_text=first_text)
+
+
+async def _start_pair(
+    session: AsyncSession,
+    user: User,
+    dialog: BotDialog,
+    is_member: MemberCheck | None,
+    *,
+    retry: bool = False,
+) -> Sequence[Outgoing]:
+    blocked = await gate.closed(
+        session, user, dialog, is_member, gate.TARGET_PAIR, retry=retry
+    )
+    if blocked is not None:
+        return blocked
     # Кодовое слово перебивает текущий сценарий — обратно в idle.
     await storage.save(session, dialog, state=states.IDLE)
     await events.log(session, events.BOT_PAIR_LINK, user_id=user.id)

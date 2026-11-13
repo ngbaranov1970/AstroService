@@ -165,6 +165,13 @@ FEEDBACK = "feedback"
 TESTER_ACTIVATED = "tester_activated"
 
 # --- VK-бот (docs/vk-bot-plan.md) ------------------------------------------
+# Не подписан на сообщество — вместо КАРТЫ/ПАРЫ показана просьба подписаться.
+# В props target: natal или pair. Разность с gate_passed — кого подписка отсекла.
+GATE_SHOWN = "gate_shown"
+
+# Подписался после просьбы и прошёл дальше. В props target.
+GATE_PASSED = "gate_passed"
+
 # Начал КАРТА в личке. Разность с chart_created — отвал на сборе данных.
 BOT_NATAL_STARTED = "bot_natal_started"
 

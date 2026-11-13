@@ -17,7 +17,7 @@
     <a href="/admin/vip">все VIP-заказы</a>
     · <a href="/admin/user/{{ u.id }}">карточка человека</a>
     {% if vk_group_id() %}
-      · <a href="https://vk.com/gim{{ vk_group_id() }}?sel={{ u.external_id }}" target="_blank" rel="noopener">диалог сообщества</a>
+      · <a href="https://vk.ru/gim{{ vk_group_id() }}?sel={{ u.external_id }}" target="_blank" rel="noopener">диалог сообщества</a>
     {% endif %}
   </p>
 
@@ -28,7 +28,7 @@
           <td>Покупатель</td>
           <td>
             {{ u.platform_username or "Без имени" }}
-            · <a href="https://vk.com/id{{ u.external_id }}" target="_blank" rel="noopener">vk.com/id{{ u.external_id }}</a>
+            · <a href="https://vk.ru/id{{ u.external_id }}" target="_blank" rel="noopener">vk.ru/id{{ u.external_id }}</a>
           </td>
         </tr>
         <tr>

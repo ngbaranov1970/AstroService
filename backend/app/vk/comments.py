@@ -78,7 +78,7 @@ def parse_comment(obj: dict[str, Any]) -> dict[str, Any] | None:
 def comment_link(post_id: int, comment_id: int) -> str:
     """Ссылка, открывающая пост сразу на нужном комментарии."""
     group_id = get_settings().vk_group_id
-    return f"https://vk.com/wall-{group_id}_{post_id}?reply={comment_id}"
+    return f"https://vk.ru/wall-{group_id}_{post_id}?reply={comment_id}"
 
 
 def can_message(user: User) -> bool:
@@ -120,7 +120,9 @@ async def process_comment(obj: dict[str, Any]) -> None:
 
             if can_message(user):
                 incoming = Incoming(platform="vk", external_id=str(from_id), text=comment["text"])
-                outgoing = await router.handle(session, user, incoming)
+                outgoing = await router.handle(
+                    session, user, incoming, is_member=vk_bot.member_check(from_id)
+                )
                 await events.log(
                     session, events.BOT_COMMENT_TO_DM, user_id=user.id, post_id=post_id, code=code
                 )
@@ -157,7 +159,7 @@ async def _notify_owner(user: User, code: str, post_id: int, comment_id: int, ke
         logger.warning("VK-комментарий: VIP_OWNER_VK_ID не задан — владельцу не пишем")
         return True
     text = OWNER_TEXT.format(
-        name=user.platform_username or f"vk.com/id{user.external_id}",
+        name=user.platform_username or f"vk.ru/id{user.external_id}",
         code=code,
         link=comment_link(post_id, comment_id),
     )

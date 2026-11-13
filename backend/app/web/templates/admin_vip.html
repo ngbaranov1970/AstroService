@@ -27,7 +27,7 @@
       <label>
         Человек в VK
         <input type="text" name="vk" value="{{ form.vk }}" required
-               placeholder="vk.com/…, id123 или число">
+               placeholder="vk.ru/…, id123 или число">
         <small>Из диалога сообщества: заказ и ссылка на оплату — на этого человека.</small>
       </label>
       <label>
@@ -96,7 +96,7 @@
               <td>
                 <a href="/admin/user/{{ it.user.id }}">{{ it.user.platform_username or "Без имени" }}</a>
                 {% if vk_group_id() %}
-                  · <a href="https://vk.com/gim{{ vk_group_id() }}?sel={{ it.user.external_id }}" target="_blank" rel="noopener">диалог</a>
+                  · <a href="https://vk.ru/gim{{ vk_group_id() }}?sel={{ it.user.external_id }}" target="_blank" rel="noopener">диалог</a>
                 {% endif %}
               </td>
               <td>

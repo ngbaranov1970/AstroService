@@ -136,7 +136,7 @@ async def test_not_allowed_notifies_owner_once(flow):
     owner_id, text = flow.send.await_args.args
     assert owner_id == 1
     assert "Анна К" in text and "ПАРА" in text
-    assert f"vk.com/wall-{GROUP_ID}_31?reply=900" in text
+    assert f"vk.ru/wall-{GROUP_ID}_31?reply=900" in text
     assert names(flow.session) == [events.BOT_COMMENT_NO_DM]
     # Разрешение писать комментарий не ставит.
     assert flow.user.vk_messages_allowed_at is None

@@ -21,7 +21,7 @@
   <div class="card run">
     <form method="get" action="/admin/user" class="toolbar">
       <input type="search" name="q" value="{{ q }}" size="40" autofocus
-             placeholder="vk.com/…, VK id, #внутренний id или имя">
+             placeholder="vk.ru/…, VK id, #внутренний id или имя">
       <button type="submit">Найти</button>
     </form>
   </div>
@@ -69,10 +69,10 @@
             <tr>
               <td>VK</td>
               <td>
-                <a href="https://vk.com/id{{ u.external_id }}" target="_blank" rel="noopener">профиль</a>
+                <a href="https://vk.ru/id{{ u.external_id }}" target="_blank" rel="noopener">профиль</a>
                 {# Диалог открывается от имени сообщества: нужен вход админом группы. #}
                 {% if vk_group_id() %}
-                  · <a href="https://vk.com/gim{{ vk_group_id() }}?sel={{ u.external_id }}" target="_blank" rel="noopener">диалог сообщества</a>
+                  · <a href="https://vk.ru/gim{{ vk_group_id() }}?sel={{ u.external_id }}" target="_blank" rel="noopener">диалог сообщества</a>
                 {% endif %}
               </td>
             </tr>

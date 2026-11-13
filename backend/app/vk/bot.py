@@ -14,7 +14,16 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.chatbot import router
-from app.chatbot.types import AppButton, Button, Incoming, Job, LinkButton, Outgoing, Reply
+from app.chatbot.types import (
+    AppButton,
+    Button,
+    Incoming,
+    Job,
+    LinkButton,
+    MemberCheck,
+    Outgoing,
+    Reply,
+)
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.models import Platform
@@ -126,6 +135,13 @@ def _random_id(peer_id: int, key: str, part: int) -> int:
     return int.from_bytes(hashlib.sha256(raw).digest()[:4], "big") & 0x7FFFFFFF or 1
 
 
+def member_check(vk_id: int) -> MemberCheck | None:
+    """Проверка подписки на сообщество для ядра; None — гейт выключен в .env."""
+    if not get_settings().vk_bot_gate_enabled:
+        return None
+    return lambda: api.is_group_member(vk_id)
+
+
 def _split_job(outgoing: Sequence[Outgoing]) -> tuple[list[Reply], Job | None]:
     """Ответы до первой Job и сама Job; всё после Job ядро не возвращает."""
     replies: list[Reply] = []
@@ -229,7 +245,9 @@ async def process_message(obj: dict[str, Any]) -> None:
                 payload=_payload(message.get("payload")),
                 ref=message.get("ref"),
             )
-            outgoing = await router.handle(session, user, incoming)
+            outgoing = await router.handle(
+                session, user, incoming, is_member=member_check(sender)
+            )
             # Сохраняем состояние до отправки: следующий ответ уже относится к нему.
             await session.commit()
 

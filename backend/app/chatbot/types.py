@@ -6,9 +6,13 @@ Incoming, а из нашего Reply — вызов «отправить соо�
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+# Проверка «подписан ли на сообщество» от адаптера площадки. None в ответе —
+# площадка не ответила; зовётся только на входе в КАРТУ и ПАРУ (flows/gate.py).
+MemberCheck = Callable[[], Awaitable[bool | None]]
 
 
 @dataclass(frozen=True, slots=True)
