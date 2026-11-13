@@ -123,7 +123,7 @@ backend/app/models/bot_dialog.py  # bot_dialogs, bot_events_seen, bot_comment_re
 
 | Переменная | По умолчанию | Что делает |
 |---|---|---|
-| `VK_BOT_ENABLED` | `false` | выключатель диалога и комментариев; флаги разрешений работают всегда. Без него нет и строки про бота в вечернем посте (`promo.sign_lines_footer`) |
+| `VK_BOT_ENABLED` | `false` | выключатель диалога и комментариев; флаги разрешений работают всегда |
 | `VK_BOT_GATE_ENABLED` | `true` | КАРТА и ПАРА только подписчикам; `false` пускает всех |
 | `VK_GROUP_ID`, `VK_APP_ID` | — | нужны кнопке `open_app` и `groups.isMember` |
 | `VIP_OWNER_VK_ID` | — | кому писать про комментарии без разрешения и про оплату VIP |
@@ -237,9 +237,9 @@ backend/app/models/bot_dialog.py  # bot_dialogs, bot_events_seen, bot_comment_re
 
 `vk.me/astrozvezdochet?ref=<метка>` → событие `bot_ref` с `ref` и
 `ref_source`; `users.source` не трогаем (Callback уже записал `vk_group`).
-Метки: `evening_<ГГГГММДД>` в вечернем посте `sign_lines` (дата гороскопа —
-номер записи до ручной публикации неизвестен), `morning` в утреннем
-`daily_sky`.
+Метки: `morning` в утреннем `daily_sky`. Вечерний пост `sign_lines` с
+13.11.2026 в бота не зовёт — его концовка только про подписку на сообщество
+(решение владельца); старые метки `evening_<ГГГГММДД>` остаются в событиях.
 
 ---
 

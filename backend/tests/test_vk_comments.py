@@ -17,7 +17,6 @@ from pydantic import SecretStr
 from starlette.requests import Request
 
 from app.chatbot.types import Reply
-from app.llm.prompts import promo
 from app.models import Platform, User
 from app.services import admin, events
 from app.vk import api, comments
@@ -219,21 +218,6 @@ async def test_callback_duplicate_comment(route):
     callback.storage.seen.return_value = True
     _, background = await invoke(route, comment())
     assert background.tasks == []
-
-
-# --- концовка вечернего поста -----------------------------------------------
-
-
-def test_footer_with_bot(monkeypatch):
-    monkeypatch.setattr(promo, "get_settings", lambda: SimpleNamespace(vk_bot_enabled=True))
-    footer = promo.sign_lines_footer(date(2026, 11, 5))
-    assert footer.startswith(promo.SIGN_LINES_FOOTER)
-    assert footer.endswith(f"{promo.BOT_LINE}\n👉 vk.me/astrozvezdochet?ref=evening_20261105")
-
-
-def test_footer_without_bot(monkeypatch):
-    monkeypatch.setattr(promo, "get_settings", lambda: SimpleNamespace(vk_bot_enabled=False))
-    assert promo.sign_lines_footer(date(2026, 11, 5)) == promo.SIGN_LINES_FOOTER
 
 
 # --- бот на воронке ---------------------------------------------------------
