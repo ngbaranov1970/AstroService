@@ -38,11 +38,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.llm import client  # noqa: E402
-from app.llm.prompts import pair_free, pair_full  # noqa: E402
+from app.llm.prompts import pair_free, pair_full, pair_teaser, vip_pair  # noqa: E402
 
 # Полдень при неизвестном времени берём у продукта, а не заводим свой: считать
 # приёмкой не то, что потом посчитает сервис, — значит вычитывать чужой текст.
 from app.services.charts import UNKNOWN_TIME  # noqa: E402
+from app.services.pair_teaser import facts as teaser_facts  # noqa: E402
 from astro_core.geo import City, search_cities  # noqa: E402
 from astro_core.natal import compute_natal  # noqa: E402
 from astro_core.synastry import compute_synastry  # noqa: E402
@@ -51,7 +52,15 @@ from astro_core.synastry import compute_synastry  # noqa: E402
 # VERSION/SYSTEM/build_user, скрипт про их устройство не знает ничего сверх
 # общего контракта. Необязательные TEMPERATURE/MAX_TOKENS/render() читаем
 # через getattr.
-PROMPTS = {"pair_free": pair_free, "pair_full": pair_full}
+PROMPTS = {
+    "pair_free": pair_free,
+    "pair_full": pair_full,
+    # Промпты ПАРЫ из VK-бота: тизер из трёх строк и черновик платного разбора.
+    "pair_teaser": pair_teaser,
+    "vip_pair": vip_pair,
+}
+# Этим двум тип связи обязателен; у ботовых он всегда романтика.
+_NEED_KIND = ("pair_free", "pair_full")
 
 # Типы связи. Дублируют PairKind из моделей намеренно: скрипт базы не видит
 # вовсе, а импорт моделей ради двух строк потянул бы за собой SQLAlchemy.
@@ -166,7 +175,17 @@ def main() -> None:
     natal_b, known_b, where_b = _side(args.date_b, args.time_b, args.city_b, args.pick_b)
 
     calc = compute_synastry(natal_a, natal_b, a_time_known=known_a, b_time_known=known_b)
-    user_message = module.build_user(calc, kind=args.kind, name_a=args.name_a, name_b=args.name_b)
+    if args.prompt == "pair_teaser":
+        # Тизер получает не весь расчёт, а отобранные факты — как в сервисе.
+        user_message = module.build_user(teaser_facts(calc, natal_a, natal_b), name_b=args.name_b)
+    elif args.prompt == "vip_pair":
+        user_message = module.build_user(calc, name_a=args.name_a, name_b=args.name_b)
+    else:
+        user_message = module.build_user(
+            calc, kind=args.kind, name_a=args.name_a, name_b=args.name_b
+        )
+    # У vip_pair модель своя (Opus через OpenRouter) и с обязательными размышлениями.
+    model = args.model or getattr(module, "MODEL", client.DEFAULT_MODEL)
 
     print(f"A: {where_a}", file=sys.stderr)
     print(f"B: {where_b}", file=sys.stderr)
@@ -190,7 +209,7 @@ def main() -> None:
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
 
     print(
-        f"Модель {args.model}, temperature {temperature}, max_tokens {max_tokens}, "
+        f"Модель {model}, temperature {temperature}, max_tokens {max_tokens}, "
         f"прогонов {args.runs}\n",
         file=sys.stderr,
     )
@@ -202,9 +221,10 @@ def main() -> None:
                     result = await client.chat(
                         module.SYSTEM,
                         user_message,
-                        model=args.model,
+                        model=model,
                         temperature=temperature,
                         max_tokens=max_tokens,
+                        reasoning_effort=getattr(module, "REASONING_EFFORT", None),
                     )
                 except Exception as e:  # noqa: BLE001
                     # Один упавший прогон не должен уносить остальные: три
@@ -252,9 +272,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--pick-b", type=int, default=1, help="номер города B из подсказок")
     parser.add_argument(
         "--kind",
-        required=True,
         choices=KINDS,
-        help="тип связи: он идёт в промпт и заметно меняет текст",
+        help="тип связи: он идёт в промпт и заметно меняет текст "
+        "(обязателен для pair_free и pair_full)",
     )
     parser.add_argument("--name-a", help="имя стороны A (в тексте к ней обращаются на «ты»)")
     parser.add_argument("--name-b", help="имя стороны B")
@@ -264,7 +284,9 @@ def _parse_args() -> argparse.Namespace:
         default="pair_free",
         help="какой промпт использовать (по умолчанию тизер pair_free)",
     )
-    parser.add_argument("--model", default=client.DEFAULT_MODEL, help="модель DeepSeek")
+    parser.add_argument(
+        "--model", default=None, help="модель (по умолчанию из промпт-модуля, иначе DeepSeek)"
+    )
     parser.add_argument(
         "--temperature",
         type=float,
@@ -293,6 +315,8 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.runs < 1:
         sys.exit("--runs: нужно хотя бы один прогон")
+    if args.prompt in _NEED_KIND and args.kind is None:
+        sys.exit(f"--kind: обязателен для {args.prompt}")
     return args
 
 

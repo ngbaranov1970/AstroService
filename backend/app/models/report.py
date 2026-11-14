@@ -48,6 +48,8 @@ class ReportType(str, enum.Enum):
     Их адрес в кеше — pair_id, а не chart_id (см. индексы у Report).
     VIP_NATAL — разбор, который владелец правит руками и шлёт в личку;
     после оплаты не генерируется (docs/sales-policy.md).
+    VIP_PAIR — то же для пары из VK-бота: партнёр лежит в orders.pair_data,
+    строки в pairs у такого заказа нет (docs/vk-bot-plan.md).
     MATRIX, EASTERN — заготовки под Матрицу Судьбы и восточный гороскоп;
     заведены сразу, чтобы добавление продукта не требовало правки CHECK.
     """
@@ -57,6 +59,7 @@ class ReportType(str, enum.Enum):
     PAIR_FREE = "pair_free"
     PAIR_FULL = "pair_full"
     VIP_NATAL = "vip_natal"
+    VIP_PAIR = "vip_pair"
     MATRIX = "matrix"
     EASTERN = "eastern"
 

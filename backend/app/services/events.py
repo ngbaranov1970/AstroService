@@ -178,8 +178,27 @@ BOT_NATAL_STARTED = "bot_natal_started"
 # Открыл описание VIP в боте. Дальше — order_created и order_paid.
 BOT_VIP_SHOWN = "bot_vip_shown"
 
-# Получил кнопку в Mini App на создание пары (ПАРА / «Совместимость»).
-BOT_PAIR_LINK = "bot_pair_link"
+# --- ПАРА в личке (docs/vk-bot-plan.md) ------------------------------------
+# Шесть шагов подряд, у каждого в props ref — откуда человек вошёл: pair_menu,
+# pair_post, pair_dm, pair_vip или метка из vk.me/…?ref=.
+
+# Начал ПАРУ. Повторный заход через «Исправить» второй раз не пишется.
+BOT_PAIR_STARTED = "pair_started"
+
+# Ввёл данные партнёра. В props time_known — известно ли время партнёра.
+BOT_PAIR_PARTNER_GIVEN = "pair_partner_given"
+
+# Получил бесплатный тизер. По этим же строкам считается дневной потолок тизеров.
+BOT_PAIR_TEASER_SHOWN = "pair_teaser_shown"
+
+# Подтвердил сводку — заказ vip_pair создан. В props order_id.
+BOT_PAIR_ORDER_CREATED = "pair_order_created"
+
+# Заказ vip_pair оплачен. ref берётся из orders.pair_data: вебхук диалога не видит.
+BOT_PAIR_PAID = "pair_paid"
+
+# Разбор пары отправлен в личку из админки.
+BOT_PAIR_DELIVERED = "pair_delivered"
 
 # Пришёл в личку по ссылке vk.me/…?ref=<метка>. В props ref и ref_source.
 # users.source не трогаем: Callback уже записал туда vk_group до этого места.

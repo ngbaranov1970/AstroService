@@ -152,6 +152,21 @@ def _split_job(outgoing: Sequence[Outgoing]) -> tuple[list[Reply], Job | None]:
     return replies, None
 
 
+async def _upload_image(peer_id: int, reply: Reply, user_id: int | None) -> str | None:
+    """Вложение для Reply.image; None — картинки нет или VK её не принял.
+
+    Отказ не роняет ответ: без права «фотографии» у ключа сообщества (ошибка
+    15) тизер уходит одним текстом, код ошибки остаётся в логе.
+    """
+    if reply.image is None:
+        return None
+    try:
+        return await api.upload_message_photo(peer_id, reply.image)
+    except api.VkError as error:
+        logger.warning("VK-бот: картинка не загрузилась user_id=%s: %s", user_id, str(error)[:120])
+        return None
+
+
 async def _send_replies(
     peer_id: int,
     key: str,
@@ -163,12 +178,16 @@ async def _send_replies(
     for reply in replies:
         keyboard = keyboard_json(reply)
         parts = split_text(strip_markdown(reply.text))
+        attachment = await _upload_image(peer_id, reply, user_id)
         for index, part in enumerate(parts):
+            # Картинка едет с первой частью, клавиатура — с последней.
+            extra = {"attachment": attachment} if attachment and index == 0 else {}
             result = await api.send_message(
                 peer_id,
                 part,
                 random_id=_random_id(peer_id, key, part_index),
                 keyboard=keyboard if index == len(parts) - 1 else None,
+                **extra,
             )
             if result.error_code is not None:
                 logger.warning(

@@ -251,3 +251,25 @@ async def test_bot_stats_weeks_and_refs():
     assert by_title(current)["КАРТА готова"] == 1
     assert by_title(previous)["Разрешили писать"] == 1
     assert stats.refs == [("evening_20261105", 2), ("ads", 1)]
+
+
+async def test_pair_stats_by_ref():
+    now = datetime(2026, 11, 14, 12, tzinfo=UTC)
+    rows = [
+        (events.BOT_PAIR_STARTED, 1, {"ref": "pair_post"}),
+        (events.BOT_PAIR_STARTED, 1, {"ref": "pair_post"}),
+        (events.BOT_PAIR_STARTED, 2, {"ref": "pair_post"}),
+        (events.BOT_PAIR_STARTED, 2, {"ref": "pair_vip"}),
+        (events.BOT_PAIR_PARTNER_GIVEN, 1, {"ref": "pair_post", "time_known": False}),
+        (events.BOT_PAIR_TEASER_SHOWN, 1, {"ref": "pair_post"}),
+        (events.BOT_PAIR_ORDER_CREATED, 1, {"ref": "pair_post", "order_id": 5}),
+        (events.BOT_PAIR_PAID, 1, {"ref": "pair_post", "order_id": 5}),
+    ]
+    session = SimpleNamespace(execute=AsyncMock(return_value=rows))
+
+    stats = await admin.pair_stats(session, since=now, until=now)
+
+    assert stats.titles[0] == "Начали" and len(stats.titles) == 6
+    assert stats.rows == [("pair_post", [2, 1, 1, 1, 1, 0]), ("pair_vip", [1, 0, 0, 0, 0, 0])]
+    # Человек 2 вошёл с двух меток — в итоге он один.
+    assert stats.total == [2, 1, 1, 1, 1, 0]

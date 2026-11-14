@@ -45,7 +45,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.models import Chart, Order, OrderStatus, Pair, ReportType, User
 from app.payments import yookassa
-from app.services import charts, events, orders, pairs, reports, users, vip
+from app.services import charts, events, orders, pairs, reports, users, vip, vip_pair
 from app.web import deps
 from app.web.templating import templates
 
@@ -68,7 +68,7 @@ RETURN_CHART_TYPE = ReportType.FULL_NATAL
 # Платные типы, которые открытая страница не продаёт: VIP оплачивается
 # только по ссылке заказа из админки (docs/sales-policy.md). Иначе его
 # купили бы без переписки, и владелец узнал бы о заказе из выписки.
-_ORDER_ONLY_TYPES = frozenset({ReportType.VIP_NATAL})
+_ORDER_ONLY_TYPES = frozenset({ReportType.VIP_NATAL, ReportType.VIP_PAIR})
 
 # Платные типы, адресуемые парой. Реестр в services/reports.py закрытый
 # (_PAIR_TYPES), а здесь нужна только платная его часть.
@@ -263,10 +263,8 @@ async def pay_done(
 @router.get("/pay/order/{order_token}", dependencies=[Depends(deps.forbid_in_vk)])
 async def vip_pay_page(request: Request, order_token: str, session: SessionDep) -> Response:
     """Витрина VIP-заказа по ссылке из лички. Только читает, как и pay_page."""
-    target, _ = await _vip_context(session, order_token)
-    paid = await orders.has_paid(
-        session, user_id=target.owner.id, report_type=target.rtype, **target.address
-    )
+    target, order = await _vip_context(session, order_token)
+    paid = await _vip_paid(session, target, order)
     return templates.TemplateResponse(
         request,
         "pay.html",
@@ -281,12 +279,17 @@ async def vip_pay_start(request: Request, order_token: str, session: SessionDep)
     Новый заказ заводится на те же карту и покупателя, и возврат из ЮKassa
     придёт уже по его токену. Ссылка в личке поэтому не протухает.
     """
-    target, _ = await _vip_context(session, order_token)
+    target, order = await _vip_context(session, order_token)
     form_action = f"/pay/order/{order_token}"
+
+    def return_path(o: Order) -> str:
+        return f"/pay/order/{o.token}/done"
+
     try:
-        confirmation_url = await _begin_payment(
-            session, target, lambda order: f"/pay/order/{order.token}/done"
-        )
+        if order.report_type is ReportType.VIP_PAIR:
+            confirmation_url = await _begin_pair_payment(session, order, return_path)
+        else:
+            confirmation_url = await _begin_payment(session, target, return_path)
     except (orders.OrderError, yookassa.PaymentError) as e:
         await session.rollback()
         logger.warning("Оплата VIP по карте %s не началась: %s", target.chart.id, e)
@@ -316,6 +319,8 @@ async def vip_pay_done(
     order_id = order.id
     try:
         just_paid = await orders.sync_status(session, order)
+        if just_paid:
+            await _log_pair_paid(session, order)
         await session.commit()
         # Деньги зачислил возврат, а не вебхук — уведомление шлём отсюда.
         if just_paid:
@@ -363,6 +368,59 @@ async def _vip_context(session: AsyncSession, order_token: str) -> tuple[_Target
     return _Target(chart=chart, pair=None, owner=owner, rtype=order.report_type), order
 
 
+async def _vip_paid(session: AsyncSession, target: _Target, order: Order) -> bool:
+    """Оплачено ли то, что продаёт эта ссылка.
+
+    У пары — по партнёру из заказа, а не по карте клиента: вторая пара того
+    же человека иначе показалась бы оплаченной.
+    """
+    if order.report_type is ReportType.VIP_PAIR:
+        if order.is_paid or order.pair_data is None:
+            return order.is_paid
+        paid = await vip_pair.find_paid(
+            session, user_id=order.user_id, chart_id=order.chart_id, pair_data=order.pair_data
+        )
+        return paid is not None
+    return await orders.has_paid(
+        session, user_id=target.owner.id, report_type=target.rtype, **target.address
+    )
+
+
+async def _begin_pair_payment(
+    session: AsyncSession, order: Order, return_path: Callable[[Order], str]
+) -> str | None:
+    """То же, что _begin_payment, для заказа пары: адрес формы, None — уже оплачено.
+
+    Новый заказ после мёртвого платежа заводит vip_pair.reopen — он несёт
+    партнёра и черновик; _new_order завёл бы заказ без пары.
+    """
+    order = await vip_pair.reopen(session, order)
+    if order.is_paid:
+        return None
+    if order.confirmation_url:
+        await orders.sync_status(session, order)
+        if order.is_paid:
+            return None
+        if order.status is not OrderStatus.PENDING:
+            order = await vip_pair.reopen(session, order)
+    return await orders.start_payment(
+        session, order, return_url=_absolute(return_path(order))
+    )
+
+
+async def _log_pair_paid(session: AsyncSession, order: Order) -> None:
+    """Событие воронки ПАРЫ при зачислении. ref — из заказа: диалога здесь нет."""
+    if order.report_type is not ReportType.VIP_PAIR:
+        return
+    await events.log(
+        session,
+        events.BOT_PAIR_PAID,
+        user_id=order.user_id,
+        order_id=order.id,
+        ref=(order.pair_data or {}).get("ref"),
+    )
+
+
 # --- Вебхук ----------------------------------------------------------------
 
 
@@ -399,6 +457,8 @@ async def yookassa_webhook(
         logger.error("Вебхук ЮKassa: платёж %s проверить не удалось", payment_id)
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Повторите позже")
 
+    if order is not None and just_paid:
+        await _log_pair_paid(session, order)
     await session.commit()
 
     # Генерацию запускает ЗАЧИСЛЕНИЕ, а не оплаченность заказа: то же
@@ -657,6 +717,8 @@ def _page_context(
         # VIP не открывается сразу после оплаты, а приходит в личку —
         # шаблону это меняет и обещание, и состояние «уже оплачено».
         "is_vip": target.rtype in _ORDER_ONLY_TYPES,
+        # Пара из бота: данных рождения на витрине нет — за ней двое людей.
+        "is_vip_pair": target.rtype is ReportType.VIP_PAIR,
         "chart": target.chart,
         # Шаблон по нему решает, показывать ли данные рождения: у пары их на
         # странице нет — ссылку открывает кто угодно, а за парой двое людей.

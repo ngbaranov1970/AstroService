@@ -100,6 +100,7 @@
                 {% endif %}
               </td>
               <td>
+                {% if it.is_pair %}<span class="badge">пара</span>{% endif %}
                 {% if it.chart %}
                   {{ it.chart.person_name or "Без имени" }} · {{ it.chart.birth_local.strftime("%d.%m.%Y") }}
                 {% else %}<span class="muted">карта удалена</span>{% endif %}

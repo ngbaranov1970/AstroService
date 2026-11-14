@@ -2,7 +2,8 @@
 
 Порядок вопросов не жёсткий: каждое сообщение разбирается целиком
 (chatbot/parse.py), спрашиваем только то, чего ещё нет. Тот же сбор
-переиспользует VIP (purpose="vip") — после него управление у flows/vip.py.
+переиспользуют VIP (purpose="vip") и ПАРА (purpose="pair") — после него
+управление у flows/vip.py и flows/pair.py.
 Разбор (30–60 с) идёт отдельной работой Job после ответа «считаю».
 """
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 JOB_REPORT = "natal_report"
 PURPOSE_FREE = "free"
 PURPOSE_VIP = "vip"
+PURPOSE_PAIR = "pair"
 
 # Разметка markdown в тексте разбора: решётки заголовков и звёздочки жирного.
 # Личка VK её не рисует — «## Заголовок» дошёл бы до человека с решётками.
@@ -61,19 +63,25 @@ async def start(
     *,
     purpose: str = PURPOSE_FREE,
     first_text: str | None = None,
+    keep: dict[str, Any] | None = None,
+    ask_text: str = texts.NATAL_ASK_ALL,
 ) -> list[Outgoing]:
-    """Начать сбор. first_text — сообщение, которое уже содержит данные."""
+    """Начать сбор. first_text — сообщение, которое уже содержит данные.
+
+    keep — ключи data, которые сбор не должен стереть (ПАРА несёт так свой
+    поток и last); ask_text — первый вопрос, у ПАРЫ он свой.
+    """
     if dialog.state == states.NATAL_WAIT and not _wait_is_stale(dialog):
         return [Reply(text=texts.NATAL_ALREADY_WAITING)]
 
     await storage.save(
-        session, dialog, state=states.NATAL_DATE, data={"purpose": purpose}
+        session, dialog, state=states.NATAL_DATE, data={**(keep or {}), "purpose": purpose}
     )
     if purpose == PURPOSE_FREE:
         await events.log(session, events.BOT_NATAL_STARTED, user_id=user.id)
     if first_text:
         return await _absorb(session, user, dialog, first_text)
-    return [Reply(text=texts.NATAL_ASK_ALL)]
+    return [Reply(text=ask_text)]
 
 
 async def handle_text(
@@ -180,7 +188,7 @@ async def _next_step(
     *,
     quiet: bool = False,
 ) -> list[Outgoing]:
-    """Спросить первое недостающее; всё есть — к разбору или к VIP."""
+    """Спросить первое недостающее; всё есть — к разбору, к VIP или к ПАРЕ."""
     if "date" not in data:
         return await _ask(session, dialog, data, states.NATAL_DATE, quiet=quiet)
     if "time_known" not in data:
@@ -198,6 +206,11 @@ async def _next_step(
         from app.chatbot.flows import vip
 
         return await vip.after_birth_data(session, user, dialog, data)
+    if data.get("purpose") == PURPOSE_PAIR:
+        # Импорт внутри по той же причине: pair.py импортирует natal.
+        from app.chatbot.flows import pair
+
+        return await pair.after_self_data(session, user, dialog, data)
     return await _launch(session, dialog, data)
 
 

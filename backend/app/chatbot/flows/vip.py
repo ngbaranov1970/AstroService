@@ -41,13 +41,16 @@ async def show(session: AsyncSession, user: User) -> list[Outgoing]:
         return [Reply(text=texts.VIP_NOT_FOR_SALE)]
     await events.log(session, events.BOT_VIP_SHOWN, user_id=user.id)
     price = _price()
+    rows = [[Button(texts.BTN_VIP_GO.format(price=price), {"cmd": "vip_go"}, color="positive")]]
+    if orders.is_for_sale(ReportType.VIP_PAIR):
+        # cmd "pair_vip" обрабатывает flows/pair.py: пара без тизера и без гейта подписки.
+        pair_price = orders.price_rub(ReportType.VIP_PAIR)
+        rows.append([Button(texts.BTN_VIP_PAIR.format(price=pair_price), {"cmd": "pair_vip"})])
+    rows.append([Button(texts.BTN_MENU, {"cmd": "menu"})])
     return [
         Reply(
             text=texts.VIP_INTRO.format(price=price),
-            buttons=[
-                [Button(texts.BTN_VIP_GO.format(price=price), {"cmd": "vip_go"}, color="positive")],
-                [Button(texts.BTN_MENU, {"cmd": "menu"})],
-            ],
+            buttons=rows,
             inline=True,
         )
     ]
@@ -88,7 +91,7 @@ async def handle_text(
     """Текст в состояниях vip_*: имя; на кнопочных шагах — повторить вопрос."""
     data = dict(dialog.data or {})
     if dialog.state == states.VIP_NAME:
-        name = _clean_name(incoming.text)
+        name = clean_name(incoming.text)
         if not name:
             return await after_birth_data(session, user, dialog, data)
         data["name"] = name
@@ -215,6 +218,7 @@ async def _create(
     ]
 
 
-def _clean_name(text: str) -> str:
+def clean_name(text: str) -> str:
+    """«Меня зовут Анна.» → «Анна». Им же чистит имя партнёра flows/pair.py."""
     name = _NAME_PREFIX.sub("", text.strip()).strip(" .,!")
     return name[:_NAME_MAX]

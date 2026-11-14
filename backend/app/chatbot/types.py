@@ -62,6 +62,8 @@ class Reply:
     # Sequence, а не list: list инвариантен, и list[list[Button]] сюда не прошёл бы.
     buttons: Sequence[Sequence[AnyButton]] = field(default_factory=list)
     inline: bool = False
+    # PNG к сообщению (тизер пары). Адаптер грузит его сам; не вышло — шлёт текст.
+    image: bytes | None = None
 
 
 @dataclass(frozen=True, slots=True)

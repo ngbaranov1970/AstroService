@@ -1,4 +1,4 @@
-"""Вызовы VK API от имени сообщества: messages.send, groups.isMember, users.get.
+"""Вызовы VK API от имени сообщества: messages.send, фото в сообщение, groups.isMember, users.get.
 
 Место в слоях: services/рассылка и страница разбора → ЭТОТ ФАЙЛ →
 api.vk.ru. Ни базы, ни наших пользователей здесь нет: на вход идут
@@ -134,10 +134,18 @@ async def close_client() -> None:
 
 
 async def send_message(
-    peer_id: int, text: str, *, random_id: int, keyboard: str | None = None
+    peer_id: int,
+    text: str,
+    *,
+    random_id: int,
+    keyboard: str | None = None,
+    attachment: str | None = None,
 ) -> SendResult:
-    """Отправить ответ в один диалог; отказ адресату возвращается в результате."""
-    results = await _send_chunk([peer_id], text, random_id, keyboard)
+    """Отправить ответ в один диалог; отказ адресату возвращается в результате.
+
+    attachment — строка вложения из upload_message_photo («photo-1_2»).
+    """
+    results = await _send_chunk([peer_id], text, random_id, keyboard, attachment)
     if len(results) != 1:
         raise VkError("VK messages.send: нет результата для одного адресата")
     return results[0]
@@ -170,7 +178,11 @@ async def send_messages(
 
 
 async def _send_chunk(
-    user_ids: list[int], text: str, random_id: int, keyboard: str | None = None
+    user_ids: list[int],
+    text: str,
+    random_id: int,
+    keyboard: str | None = None,
+    attachment: str | None = None,
 ) -> list[SendResult]:
     """Один вызов messages.send на пачку до ста человек."""
     data: dict[str, Any] = {
@@ -188,6 +200,8 @@ async def _send_chunk(
     # Пустой keyboard не отправляем вовсе: VK на "" отвечает ошибкой разбора.
     if keyboard:
         data["keyboard"] = keyboard
+    if attachment:
+        data["attachment"] = attachment
     payload = await _request("messages.send", data)
 
     # На пачку VK отвечает массивом объектов, по одному на адресата. Иногда
@@ -209,6 +223,45 @@ async def _send_chunk(
             )
         )
     return results
+
+
+async def upload_message_photo(peer_id: int, image: bytes) -> str:
+    """Загрузить PNG для сообщения в этот диалог; вернуть строку вложения.
+
+    Три вызова: адрес загрузки → файл → сохранение. Ключу сообщества нужно
+    право «фотографии»; без него VK отвечает ошибкой 15 — это VkError, и
+    вызывающий отправляет сообщение без картинки.
+    """
+    server = await _request("photos.getMessagesUploadServer", {"peer_id": peer_id})
+    upload_url = server.get("upload_url") if isinstance(server, dict) else None
+    if not upload_url:
+        raise VkError("VK photos.getMessagesUploadServer: нет upload_url")
+
+    # Отдельный клиент: адрес загрузки — чужой хост, ключ сообщества ему не шлём.
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(
+                upload_url, files={"photo": ("card.png", image, "image/png")}
+            )
+        uploaded = resp.json()
+    except (httpx.HTTPError, ValueError) as e:
+        raise VkError(f"VK: загрузка фото не удалась: {e}") from e
+    # Пустой photo ("[]") — VK файл не принял: не тот формат или размер.
+    if not isinstance(uploaded, dict) or uploaded.get("photo") in (None, "", "[]"):
+        raise VkError("VK: сервер загрузки не принял фото")
+
+    saved = await _request(
+        "photos.saveMessagesPhoto",
+        {"photo": uploaded["photo"], "server": uploaded.get("server"), "hash": uploaded.get("hash")},
+    )
+    if not isinstance(saved, list) or not saved:
+        raise VkError("VK photos.saveMessagesPhoto: пустой ответ")
+    photo = saved[0]
+    attachment = f"photo{photo['owner_id']}_{photo['id']}"
+    # access_key нужен, когда фото не публичное: без него адресат видит пустое вложение.
+    if photo.get("access_key"):
+        attachment += f"_{photo['access_key']}"
+    return attachment
 
 
 async def is_group_member(user_id: int) -> bool | None:

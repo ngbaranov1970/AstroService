@@ -1,8 +1,10 @@
 """Текст VIP-разбора: черновик, правки владельца и доставка в личку.
 
 Место в цепочке: web/routes/admin.py → ЭТОТ МОДУЛЬ → vip (заказ с картой),
-llm (vip_natal, vip_edit), vip_check, vk. Деньги и статусы оплаты здесь
-только читаются. Черновик живёт в orders.draft_text, вариант от DeepSeek —
+llm (vip_natal, vip_edit, vip_pair), vip_check, vk. Деньги и статусы оплаты
+здесь только читаются. Заказ пары (VipOrder.is_pair) идёт теми же функциями:
+отличаются промпт черновика, проверка фактов и шапка письма; правки
+просьбой к модели у пары нет. Черновик живёт в orders.draft_text, вариант от DeepSeek —
 в draft_candidate до «принять / отказаться» (docs/db-schema.md). Модель
 выбирают на карточке из vip_natal.MODELS.
 Транзакцию функции не коммитят.
@@ -12,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import zlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import ModuleType
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.llm import client as llm
 from app.llm.prompts import vip_edit, vip_natal
-from app.services import vip, vip_check
+from app.llm.prompts import vip_pair as vip_pair_prompt
+from app.services import events, vip, vip_check, vip_pair
 from app.services.vip import VipOrder
 from app.vk import api as vk_api
 
@@ -47,6 +50,8 @@ async def _load(session: AsyncSession, order_id: int) -> VipOrder:
         raise VipDraftError("Разбор уже отправлен — текст менять нельзя")
     if item.chart is None:
         raise VipDraftError("Карта заказа удалена — черновик строить не по чему")
+    if item.is_pair and not item.order.pair_data:
+        raise VipDraftError("Данные партнёра удалены — черновик строить не по чему")
     return item
 
 
@@ -86,7 +91,7 @@ async def _generate(prompt: ModuleType, user_prompt: str, order_id: int, model: 
 
 
 async def make_draft(session: AsyncSession, order_id: int, model: str | None = None) -> VipOrder:
-    """Черновик от vip_natal — в любом статусе оплаты.
+    """Черновик от vip_natal или vip_pair — в любом статусе оплаты.
 
     Первый черновик сразу встаёт в draft_text; повторный — в draft_candidate,
     чтобы не затереть уже вычитанный текст. Вызов модели идёт до двух минут.
@@ -95,10 +100,20 @@ async def make_draft(session: AsyncSession, order_id: int, model: str | None = N
     item = await _load(session, order_id)
     chart, order = item.chart, item.order
     assert chart is not None  # проверено в _load
-    user_prompt = vip_natal.build_user(
-        chart.calc["natal"], order.client_gender, time_known=chart.time_known
-    )
-    text = await _generate(vip_natal, user_prompt, order_id, model)
+    if item.is_pair:
+        pair_data = order.pair_data
+        assert pair_data is not None  # проверено в _load
+        # Имя клиента в промпт не идёт: в боте его не спрашивают, а имя из
+        # профиля VK — не то, как человека зовут дома.
+        user_prompt = vip_pair_prompt.build_user(
+            vip_pair.synastry(chart, pair_data), name_b=pair_data.get("name")
+        )
+        text = await _generate(vip_pair_prompt, user_prompt, order_id, model)
+    else:
+        user_prompt = vip_natal.build_user(
+            chart.calc["natal"], order.client_gender, time_known=chart.time_known
+        )
+        text = await _generate(vip_natal, user_prompt, order_id, model)
     if order.draft_text is None:
         order.draft_text = text
     else:
@@ -120,6 +135,9 @@ async def request_edit(
     item = await _load(session, order_id)
     chart, order = item.chart, item.order
     assert chart is not None
+    if item.is_pair:
+        # vip_edit написан под натал (дома, управители) — пару он испортит.
+        raise VipDraftError("У разбора пары правки моделью нет — правь руками или сделай новый черновик")
     if not order.draft_text:
         raise VipDraftError("Черновика ещё нет — сначала «Сделать черновик»")
     user_prompt = vip_edit.build_user(
@@ -171,6 +189,18 @@ def check_draft(item: VipOrder, text: str | None = None) -> list[vip_check.Findi
     text = item.order.draft_text if text is None else text
     if not text or item.chart is None:
         return []
+    if item.is_pair:
+        pair_data = item.order.pair_data
+        if not pair_data:
+            return []
+        return vip_check.check_pair(
+            text,
+            vip_pair.synastry(item.chart, pair_data),
+            item.chart.calc["natal"],
+            pair_data["natal"],
+            a_time_known=item.chart.time_known,
+            b_time_known=vip_pair.time_known(pair_data),
+        )
     return vip_check.check(text, item.chart.calc["natal"], time_known=item.chart.time_known)
 
 
@@ -178,13 +208,33 @@ def check_draft(item: VipOrder, text: str | None = None) -> list[vip_check.Findi
 
 
 def header(item: VipOrder) -> str:
-    """«Твоя натальная карта: 14.07.1988, 10:20, Судак» — собирает код, не модель."""
+    """«Твоя натальная карта: 14.07.1988, 10:20, Судак» — собирает код, не модель.
+
+    У пары — две строки: «Ты: …» и «Партнёр: …», чтобы клиент сверил обе даты.
+    """
     chart = item.chart
     assert chart is not None
     when = f"{chart.birth_local:%d.%m.%Y}, " + (
         f"{chart.birth_local:%H:%M}" if chart.time_known else "время неизвестно"
     )
-    return f"Твоя натальная карта: {when}, {chart.place_name}"
+    if not item.is_pair:
+        return f"Твоя натальная карта: {when}, {chart.place_name}"
+    return f"Разбор вашей пары\nТы: {when}, {chart.place_name}\nПартнёр: {partner_line(item)}"
+
+
+def partner_line(item: VipOrder) -> str:
+    """«Маша, 11.05.1990, время неизвестно» — партнёр из pair_data для шапки и карточки."""
+    data = item.order.pair_data or {}
+    if not data.get("date"):
+        return "данные удалены"
+    parts = [f"{date.fromisoformat(data['date']):%d.%m.%Y}"]
+    if data.get("time_known"):
+        parts += [data["time"], data["place"]["label"]]
+    else:
+        parts.append("время неизвестно")
+    if data.get("name"):
+        parts.insert(0, data["name"])
+    return ", ".join(parts)
 
 
 def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
@@ -268,5 +318,14 @@ async def deliver(session: AsyncSession, order_id: int) -> VipOrder:
     # В draft_text остаётся ровно отправленное — вместе с шапкой (docs/db-schema.md).
     order.draft_text = text
     order.delivered_at = datetime.now(UTC)
+    if item.is_pair:
+        # Последний шаг воронки ПАРЫ; ref — из заказа, диалога админка не видит.
+        await events.log(
+            session,
+            events.BOT_PAIR_DELIVERED,
+            user_id=order.user_id,
+            order_id=order.id,
+            ref=(order.pair_data or {}).get("ref"),
+        )
     logger.info("Заказ %s: разбор отправлен, %d частей, %d симв.", order_id, len(parts), len(text))
     return item

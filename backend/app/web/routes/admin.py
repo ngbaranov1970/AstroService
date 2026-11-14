@@ -33,7 +33,7 @@ from starlette.responses import Response
 from app import generation
 from app.db import get_session
 from app.llm.prompts import vip_natal
-from app.models import ClientGender, Platform, ReportType
+from app.models import ClientGender, Platform
 from app.schemas.charts import ChartIn
 from app.services import admin as admin_service
 from app.services import broadcast, card, content, events, orders, reports, vip, vip_draft
@@ -158,6 +158,9 @@ async def funnel(
     bot = await admin_service.bot_stats(
         session, since=start, until=end, include_testers=include_testers
     )
+    pair = await admin_service.pair_stats(
+        session, since=start, until=end, include_testers=include_testers
+    )
 
     return templates.TemplateResponse(
         request,
@@ -166,6 +169,7 @@ async def funnel(
             "funnels": funnels,
             "extra": [(title, counts.get(name, 0)) for name, title in FUNNEL_EXTRA.items()],
             "bot": bot,
+            "pair": pair,
             "bot_goal": admin_service.BOT_ALLOWED_GOAL,
             # Строками: они же уходят обратно в поля формы как есть.
             "since": first.isoformat(),
@@ -418,7 +422,10 @@ def _vip_order_response(
         {
             "item": item,
             "pay_url": vip.payment_url(order),
-            "price": orders.price_rub(ReportType.VIP_NATAL),
+            # Цена и название — по типу заказа: у пары свои.
+            "price": orders.price_rub(order.report_type),
+            "title": orders.title(order.report_type),
+            "partner": vip_draft.partner_line(item) if item.is_pair else None,
             "delivery_hours": int(vip.DELIVERY_TIME.total_seconds() // 3600),
             "error": error,
             "edit_request": edit_request,

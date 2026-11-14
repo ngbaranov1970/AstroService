@@ -1,9 +1,10 @@
-"""Картинка к посту в ленту: «небо дня» одной карточкой 1080×1080.
+"""Картинки 1080×1080: «небо дня» к посту в ленту и тизер пары в личку.
 
 Место в цепочке: astro_core/transits.py считает небо, llm/prompts/daily_sky.py
 называет главное событие суток, этот модуль рисует по ним PNG. Базы здесь
 нет — на входе дата и строки «Стоит» / «Подождёт», на выходе байты; достаёт
-их из поста web/routes/admin.py.
+их из поста web/routes/admin.py. Карточку пары (render_pair) зовёт
+services/pair_teaser.py — та же рамка и шрифты, другой текст.
 
 Заголовок собирается из данных, а не у LLM: карточка обязана совпадать с
 зачином поста. Раскладка повторяет макет daily_card.svg.j2 — координаты по
@@ -267,14 +268,17 @@ def build(day: date, moon: dict, event: dict | None, do: str = "", wait: str = "
             draw.text((TEXT_X, y + line_h * i + shift), line, font=body_font,
                       fill=CREAM, anchor="ls")
 
-    # Подвал стоит на месте при любом сдвиге: он привязан к рамке, а не к тексту.
+    _footer(draw)
+    return img
+
+
+def _footer(draw: ImageDraw.ImageDraw) -> None:
+    """Подпись сообщества. Стоит на месте при любом сдвиге: привязана к рамке, а не к тексту."""
     _draw_tracked(draw, 460, 952, "ЗВЕЗДОЧЁТ", _font("Jost.ttf", 26, 400), GOLD, 7)
     url_font = _font("Jost.ttf", 20, 400)
     url = "vk.ru/astrozvezdochet"
     _draw_tracked(draw, 540 - _tracked_width(draw, url, url_font, 1) / 2, 990, url,
                   url_font, FRAME, 1)
-
-    return img
 
 
 def render(day: date, do: str = "", wait: str = "") -> bytes:
@@ -283,4 +287,51 @@ def render(day: date, do: str = "", wait: str = "") -> bytes:
     img = build(day, sky["moon"], main_event(sky), do, wait)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- карточка пары ----------------------------------------------------------
+
+
+def build_pair(sign_a: str, sign_b: str, strong: str, spark: str) -> Image.Image:
+    """Карточка тизера пары: знаки Солнца заголовком и две первые строки тизера.
+
+    Раскладка та же, что у build(): отличается только текст. Третья строка
+    тизера («что в полном разборе») на картинку не идёт — она про покупку.
+    """
+    title_lines, title_font, title_lh = _fit_title(f"{sign_a} и {sign_b}")
+    title_last = TITLE_Y + title_lh * (len(title_lines) - 1)
+    divider_y = title_last + 62
+
+    # «Искрит», а не «Где искрит»: колонка подписей 190 px, длинная наедет на текст.
+    blocks = [(label, text) for label, text in (("Сильное", strong), ("Искрит", spark)) if text]
+    placed, body_font, line_h, bottom = _layout_body(blocks, divider_y + 72)
+    shift = max(0, (CONTENT_LIMIT - bottom) // 2)
+
+    img = Image.new("RGB", (SIZE, SIZE), BG)
+    ornament = _ornament(divider_y + shift if placed else None)
+    img.paste(ornament, (0, 0), ornament)
+    draw = ImageDraw.Draw(img)
+
+    draw.text((540, 172 + shift), "Совместимость", font=_font("Cormorant-Italic.ttf", 38, 500),
+              fill=GOLD, anchor="ms")
+    for i, line in enumerate(title_lines):
+        draw.text((540, TITLE_Y + title_lh * i + shift), line, font=title_font,
+                  fill=CREAM, anchor="ms")
+
+    label_font = _font("Cormorant-Italic.ttf", 42, 500)
+    for label, y, lines in placed:
+        draw.text((LABEL_X, y + shift), label, font=label_font, fill=GOLD, anchor="ls")
+        for i, line in enumerate(lines):
+            draw.text((TEXT_X, y + line_h * i + shift), line, font=body_font,
+                      fill=CREAM, anchor="ls")
+
+    _footer(draw)
+    return img
+
+
+def render_pair(sign_a: str, sign_b: str, strong: str, spark: str) -> bytes:
+    """PNG карточки пары. Синхронная: вызывающий уводит её в поток."""
+    buf = io.BytesIO()
+    build_pair(sign_a, sign_b, strong, spark).save(buf, format="PNG")
     return buf.getvalue()

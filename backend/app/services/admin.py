@@ -618,6 +618,66 @@ async def bot_stats(
     )
 
 
+# --- ПАРА в боте -------------------------------------------------------------
+# Шесть шагов потока ПАРА по ref — откуда человек вошёл (docs/vk-bot-plan.md).
+# Не когорта, как и bot_stats: люди по времени самого события.
+
+_PAIR_STEPS: tuple[tuple[str, str], ...] = (
+    ("Начали", events.BOT_PAIR_STARTED),
+    ("Ввели партнёра", events.BOT_PAIR_PARTNER_GIVEN),
+    ("Получили тизер", events.BOT_PAIR_TEASER_SHOWN),
+    ("Заказ", events.BOT_PAIR_ORDER_CREATED),
+    ("Оплата", events.BOT_PAIR_PAID),
+    ("Отправлен", events.BOT_PAIR_DELIVERED),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PairStats:
+    titles: list[str]
+    # (ref, людей по шагам) — по убыванию первого шага.
+    rows: list[tuple[str, list[int]]]
+    # Люди по шагам без разбивки. Не сумма строк: один человек входит с разных ref.
+    total: list[int]
+
+
+async def pair_stats(
+    session: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime,
+    include_testers: bool = False,
+) -> PairStats:
+    """Воронка ПАРЫ в боте за [since, until): люди по шести шагам и по ref.
+
+    У входа с экрана VIP (ref pair_vip) шага «Получили тизер» нет по
+    устройству потока — ноль там не отвал.
+    """
+    names = [name for _, name in _PAIR_STEPS]
+    stmt = (
+        select(Event.name, Event.user_id, Event.props)
+        .join(User, User.id == Event.user_id)
+        .where(Event.ts >= since, Event.ts < until, Event.name.in_(names))
+    )
+    if not include_testers:
+        stmt = stmt.where(User.is_tester.is_(False))
+
+    by_ref: dict[str, list[set[int]]] = {}
+    total: list[set[int]] = [set() for _ in _PAIR_STEPS]
+    for name, user_id, props in await session.execute(stmt):
+        index = names.index(name)
+        ref = str((props or {}).get("ref") or "—")
+        by_ref.setdefault(ref, [set() for _ in _PAIR_STEPS])[index].add(user_id)
+        total[index].add(user_id)
+
+    rows = [(ref, [len(s) for s in sets]) for ref, sets in by_ref.items()]
+    return PairStats(
+        titles=[title for title, _ in _PAIR_STEPS],
+        rows=sorted(rows, key=lambda row: (-row[1][0], row[0])),
+        total=[len(s) for s in total],
+    )
+
+
 # --- Карточка человека -----------------------------------------------------
 # Связка «сообщество ↔ приложение»: VK id один и тот же в Mini App и в
 # Callback сообщества (docs/astro-context.md, «Карточка человека»).

@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chatbot import router, states, texts
-from app.chatbot.types import AppButton, Incoming, Reply
+from app.chatbot.types import Incoming, Reply
 from app.models import User
 
 
@@ -130,7 +130,7 @@ async def test_karta_starts_natal(
 
 
 @pytest.mark.parametrize("text", ["Пара", "пара", "ПАРА", " пара "])
-async def test_para_opens_pair_branch(
+async def test_para_starts_pair_flow(
     text: str,
     session: FakeSession,
     user: FakeUser,
@@ -139,14 +139,12 @@ async def test_para_opens_pair_branch(
 ) -> None:
     assert patched_storage is dialog
     replies = await _handle(session, user, _incoming(text))
-    assert dialog.state == states.IDLE
-    assert len(replies) == 1
-    assert replies[0].text == texts.PAIR_TEXT
-    assert replies[0].inline is True
-    assert len(replies[0].buttons) == 1
-    button = replies[0].buttons[0][0]
-    assert isinstance(button, AppButton)
-    assert button.hash == "pair"
+    # Своих данных ещё нет — ПАРА начинает со сбора по потоку КАРТЫ.
+    assert dialog.state == states.NATAL_DATE
+    assert dialog.data["purpose"] == "pair"
+    assert dialog.data["pair"]["ref"] == "pair_dm"
+    assert [r.text for r in replies] == [texts.PAIR_ASK_SELF]
+    assert _event_names(session) == ["pair_started"]
 
 
 async def test_unknown_text_in_idle_shows_menu(
@@ -313,8 +311,11 @@ async def test_gate_check_passed_opens_pair(
     [reply] = await _gated(
         session, user, _incoming("", payload={"cmd": "gate_check", "target": "pair"}), check
     )
-    assert reply.text == texts.PAIR_TEXT
-    assert _event_names(session) == ["gate_shown", "gate_passed", "bot_pair_link"]
+    assert reply.text == texts.PAIR_ASK_SELF
+    assert _event_names(session) == ["gate_shown", "gate_passed", "pair_started"]
+    # ref входа пережил гейт: после «Я подписался» он тот же, что до просьбы.
+    assert dialog.data["pair"]["ref"] == "pair_dm"
+    assert "gate" not in dialog.data
 
 
 async def test_gate_does_not_touch_vip(

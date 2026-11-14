@@ -256,7 +256,7 @@ class Order(Base):
     # ответ на него не должен требовать разбора логов вебхука.
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # --- VIP-разбор (только report_type = vip_natal) ------------------------
+    # --- VIP-разбор (только report_type = vip_natal и vip_pair) -------------
     # Черновик лежит здесь, а не в reports: строка reports открыла бы текст
     # в приложении до правки. «В работе» = PAID и delivered_at IS NULL.
     draft_text: Mapped[str | None] = mapped_column(Text)
@@ -264,6 +264,9 @@ class Order(Base):
     # Пока он не принят, draft_text не трогаем: сравнивать надо со старым.
     draft_candidate: Mapped[str | None] = mapped_column(Text)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Партнёр заказа vip_pair: ref, данные рождения, имя и посчитанный натал.
+    # Персональные данные: при удалении человека обнуляется руками (db-schema.md).
+    pair_data: Mapped[dict | None] = mapped_column(JSONB)
     # Пол вводят в форме заказа; у заказов до 09.10.2026 он NULL.
     client_gender: Mapped[ClientGender | None] = mapped_column(
         SAEnum(

@@ -39,6 +39,10 @@ DELIVERY_TIME = timedelta(hours=24)
 # Потолок строк на экране заказов: при паре продаж в день это месяцы.
 LIST_LIMIT = 100
 
+# Заказы, которые владелец готовит руками: натал и пара из бота. Один экран,
+# одна карточка — отличает их VipOrder.is_pair.
+VIP_TYPES = (ReportType.VIP_NATAL, ReportType.VIP_PAIR)
+
 
 @dataclass(frozen=True, slots=True)
 class VipOrder:
@@ -50,6 +54,11 @@ class VipOrder:
     order: Order
     user: User
     chart: Chart | None
+
+    @property
+    def is_pair(self) -> bool:
+        """Разбор пары из бота: партнёр лежит в order.pair_data."""
+        return self.order.report_type is ReportType.VIP_PAIR
 
     @property
     def due_at(self) -> datetime | None:
@@ -122,7 +131,7 @@ async def create_order(
 
 
 async def list_orders(session: AsyncSession, limit: int = LIST_LIMIT) -> list[VipOrder]:
-    """VIP-заказы, свежие первыми, кроме отменённых.
+    """VIP-заказы (натал и пара), свежие первыми, кроме отменённых.
 
     Отменённые прячем: это мёртвые платежи по той же ссылке, за каждым из
     которых уже стоит новый ждущий заказ.
@@ -132,7 +141,7 @@ async def list_orders(session: AsyncSession, limit: int = LIST_LIMIT) -> list[Vi
         .join(User, User.id == Order.user_id)
         .outerjoin(Chart, Chart.id == Order.chart_id)
         .where(
-            Order.report_type == ReportType.VIP_NATAL,
+            Order.report_type.in_(VIP_TYPES),
             Order.status != OrderStatus.CANCELED,
         )
         .order_by(Order.created_at.desc())
@@ -148,7 +157,7 @@ async def get_order(session: AsyncSession, order_id: int) -> VipOrder | None:
             select(Order, User, Chart)
             .join(User, User.id == Order.user_id)
             .outerjoin(Chart, Chart.id == Order.chart_id)
-            .where(Order.id == order_id, Order.report_type == ReportType.VIP_NATAL)
+            .where(Order.id == order_id, Order.report_type.in_(VIP_TYPES))
         )
     ).first()
     if row is None:
@@ -167,6 +176,11 @@ CLIENT_PAID_TEXT = (
     "Ваш VIP-разбор будет готов в течение суток, но, как правило, гораздо быстрее. "
     "Пришлю его сюда, в этот диалог."
 )
+CLIENT_PAID_PAIR_TEXT = (
+    "Оплата получена, спасибо! "
+    "Разбор вашей пары будет готов в течение суток, но, как правило, гораздо быстрее. "
+    "Пришлю его сюда, в этот диалог."
+)
 
 
 def owner_paid_text(item: VipOrder, *, client_note: str) -> str:
@@ -175,7 +189,10 @@ def owner_paid_text(item: VipOrder, *, client_note: str) -> str:
     who = user.platform_username or (item.chart.person_name if item.chart else None) or "без имени"
     due = item.due_at.astimezone(MOSCOW) if item.due_at else None
     lines = [
-        f"Оплачен VIP-заказ №{order.id}: {who}, {order.amount // 100} ₽.",
+        (
+            f"Оплачен VIP-заказ №{order.id}{' (пара)' if item.is_pair else ''}: "
+            f"{who}, {order.amount // 100} ₽."
+        ),
         f"Сдать до {due:%d.%m %H:%M} МСК." if due else "Срок не посчитан: нет paid_at.",
         f"Диалог: https://vk.ru/gim{get_settings().vk_group_id}?sel={user.external_id}",
         client_note,
@@ -214,7 +231,7 @@ async def notify_paid(order_id: int) -> None:
     try:
         [result] = await vk_api.send_messages(
             [int(item.user.external_id)],
-            CLIENT_PAID_TEXT,
+            CLIENT_PAID_PAIR_TEXT if item.is_pair else CLIENT_PAID_TEXT,
             random_id=_random_id(order_id, "client"),
         )
         if not result.delivered:

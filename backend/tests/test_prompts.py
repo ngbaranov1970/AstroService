@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import timedelta
@@ -24,6 +25,8 @@ from app.llm.prompts import (
     pair_full,
     promo,
     sign_lines,
+    vip_natal,
+    vip_pair,
 )
 from app.models import PairKind
 from app.web.templating import md
@@ -241,6 +244,46 @@ def test_pair_full_build_user_stihii_slovami() -> None:
     assert "точек из" not in message
     # Кресты тоже словами: «пять планет в земле» модель цитировала дословно.
     assert "крест" in message
+
+
+def test_pair_full_tekst_ne_izmenilsya_pri_vynose_pair_block() -> None:
+    # pair_block вынесен из build_user ради vip_pair. Отпечаток снят на коде
+    # ДО выноса: сообщение обязано совпасть побайтно, пока VERSION прежняя —
+    # иначе кеш pair_full_v1 хранит тексты по другому промпту.
+    message = pair_full.build_user(_pair_calc(), kind="romance", name_a="Коля", name_b="Маша")
+
+    assert pair_full.VERSION == "pair_full_v1"
+    assert hashlib.sha256(message.encode()).hexdigest()[:16] == "ef38a3fb61f36feb"
+
+
+# --- vip_pair: черновик разбора пары из бота -------------------------------
+
+
+def test_vip_pair_build_user_beryot_blok_rascheta_u_pair_full() -> None:
+    calc = _pair_calc()
+    message = vip_pair.build_user(calc, name_b="Маша")
+
+    # Тот же расчёт, что получает pair_full, — строка в строку.
+    assert "\n".join(pair_full.pair_block(calc, "ты", "Маша")) in message
+    assert "Сторона B: Маша" in message
+    assert "По имени не называй." in message
+    assert "Тип связи: романтические отношения или брак." in message
+
+
+def test_vip_pair_bez_imeni_partnera() -> None:
+    message = vip_pair.build_user(_pair_calc())
+
+    assert "пиши «твой партнёр»" in message
+
+
+def test_vip_pair_system_derzhit_pravila_pary() -> None:
+    # Правила раздела 8: без домов, процентов и предсказаний. VIP-послаблений
+    # про здоровье и деньги у пары нет — запреты обязаны стоять в SYSTEM.
+    for rule in ("Домов в данных нет", "процентов", "расставание", "здоровье", "Не обещаешь денег"):
+        assert rule in vip_pair.SYSTEM, f"правило «{rule}» потеряно в SYSTEM"
+    assert vip_pair.FIRST_TITLE in vip_pair.SYSTEM and vip_pair.LAST_TITLE in vip_pair.SYSTEM
+    # Формат черновика один с vip_natal: карточка и нарезка на сообщения общие.
+    assert vip_pair.parse is vip_natal.parse and vip_pair.to_draft is vip_natal.to_draft
 
 
 # --- Рамки типов связи -----------------------------------------------------

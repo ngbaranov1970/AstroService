@@ -9,12 +9,15 @@
 простые конструкции («Сатурн и Уран в четвёртом доме», «Марс квадрат
 Сатурну»). Где связь неясна, место пропускается: ложная подсветка хуже
 пропуска — её перестают читать. Ничего не исправляет, только находит.
+check_pair() — то же для разбора пары: контакты между картами в любую из
+двух сторон, знаки по обеим картам, любые дома и знак «%» — находки.
 Чистые функции, без базы и сети.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -87,7 +90,7 @@ _CLAUSE_BREAK = _SENTENCE_END | {":", "—", "(", ")", "«", "»"}
 class Finding:
     """Подозрительное место: что сказано (quote), что не так (message), где в тексте."""
 
-    kind: str  # house | sign | cusp | aspect | no_time
+    kind: str  # house | sign | cusp | aspect | no_time | no_house | percent
     quote: str
     message: str
     start: int
@@ -301,9 +304,8 @@ def _cusps(text: str, sent: list[_Tok], planets: dict, cusps: dict[int, float]) 
     return out
 
 
-def _signs(text: str, sent: list[_Tok], planets: dict) -> list[Finding]:
-    """«<планеты> … в Овне» против sign_ru из расчёта."""
-    out = []
+def _sign_claims(text: str, sent: list[_Tok]) -> Iterator[tuple[str, str, str, int, int]]:
+    """Что текст говорит о знаках: (планета, знак, цитата, начало, конец)."""
     for i in range(len(sent) - 1):
         if sent[i].text.lower() not in ("в", "во") or sent[i + 1].text not in _SIGNS_PREP:
             continue
@@ -311,16 +313,28 @@ def _signs(text: str, sent: list[_Tok], planets: dict) -> list[Finding]:
         group, g0 = _group_before(sent, i)
         quote, s, e = _quote(text, sent, g0, i + 1)
         for t in group:
-            real = planets.get(t.planet, {}).get("sign_ru")
-            if real is None or real == sign:
-                continue
-            out.append(Finding("sign", quote, f"{t.planet} по расчёту в знаке {real}, в тексте — {sign}", s, e))
+            if t.planet is not None:
+                yield t.planet, sign, quote, s, e
+
+
+def _signs(text: str, sent: list[_Tok], planets: dict) -> list[Finding]:
+    """«<планеты> … в Овне» против sign_ru из расчёта."""
+    out = []
+    for planet, sign, quote, s, e in _sign_claims(text, sent):
+        real = planets.get(planet, {}).get("sign_ru")
+        if real is None or real == sign:
+            continue
+        out.append(Finding("sign", quote, f"{planet} по расчёту в знаке {real}, в тексте — {sign}", s, e))
     return out
 
 
-def _aspects(text: str, sent: list[_Tok], planets: dict, aspects: dict) -> list[Finding]:
-    """Слово-аспект и планеты вокруг: тип против списка аспектов расчёта."""
-    out = []
+def _aspect_claims(
+    text: str, sent: list[_Tok], known: Collection[str]
+) -> Iterator[tuple[str, str, str, str, int, int]]:
+    """Что текст говорит об аспектах: (планета, планета, тип, цитата, начало, конец).
+
+    known — имена точек, которые есть в расчёте; пары с прочими пропускаются.
+    """
     for i, t in enumerate(sent):
         kind = _aspect_kind(t.text)
         if kind is None:
@@ -344,20 +358,29 @@ def _aspects(text: str, sent: list[_Tok], planets: dict, aspects: dict) -> list[
         last = end - 1 if g2 else j - 1
         quote, s, e = _quote(text, sent, min(b0, i), max(last, i))
         for a, b in pairs:
-            if a.planet == b.planet or a.planet not in planets or b.planet not in planets:
+            if a.planet is None or b.planet is None or a.planet == b.planet:
                 continue
-            real = aspects.get(frozenset((a.planet, b.planet)))
-            if real is None:
-                out.append(Finding("aspect", quote, f"аспекта {a.planet} — {b.planet} в расчёте нет", s, e))
-            elif real["type_ru"] != kind:
-                out.append(
-                    Finding(
-                        "aspect", quote,
-                        f"по расчёту {a.planet} — {b.planet}: {real['type_ru']} "
-                        f"(орб {abs(real['orb']):.1f}°), в тексте — {kind}",
-                        s, e,
-                    )
+            if a.planet not in known or b.planet not in known:
+                continue
+            yield a.planet, b.planet, kind, quote, s, e
+
+
+def _aspects(text: str, sent: list[_Tok], planets: dict, aspects: dict) -> list[Finding]:
+    """Слово-аспект и планеты вокруг: тип против списка аспектов расчёта."""
+    out = []
+    for a, b, kind, quote, s, e in _aspect_claims(text, sent, planets):
+        real = aspects.get(frozenset((a, b)))
+        if real is None:
+            out.append(Finding("aspect", quote, f"аспекта {a} — {b} в расчёте нет", s, e))
+        elif real["type_ru"] != kind:
+            out.append(
+                Finding(
+                    "aspect", quote,
+                    f"по расчёту {a} — {b}: {real['type_ru']} "
+                    f"(орб {abs(real['orb']):.1f}°), в тексте — {kind}",
+                    s, e,
                 )
+            )
     return out
 
 
@@ -374,4 +397,96 @@ def _no_time(text: str, sent: list[_Tok]) -> list[Finding]:
         if hit:
             quote, s, e = _quote(text, sent, max(i - 2, 0), i)
             out.append(Finding("no_time", quote, "время рождения неизвестно — домов и углов в карте нет", s, e))
+    return out
+
+
+# --- разбор пары --------------------------------------------------------------
+
+_PERCENT = re.compile(r"\d+(?:[.,]\d+)?\s*%|%")
+
+
+def check_pair(
+    text: str,
+    calc: dict,
+    natal_a: dict,
+    natal_b: dict,
+    *,
+    a_time_known: bool,
+    b_time_known: bool,
+) -> list[Finding]:
+    """Подозрительные места черновика пары по порядку в тексте.
+
+    calc — синастрия (compute_synastry), natal_a и natal_b — карты сторон.
+    Чья планета, из текста не понять, поэтому контакт верен, если он есть в
+    расчёте в любую из двух сторон, а знак — если так стоит хотя бы у одной.
+    """
+    sides = (_side_points(natal_a, a_time_known), _side_points(natal_b, b_time_known))
+    known = set(sides[0]) | set(sides[1])
+    contacts: dict[frozenset[str], set[str]] = {}
+    for a in calc["aspects"]:
+        contacts.setdefault(frozenset((a["a_ru"], a["b_ru"])), set()).add(a["type_ru"])
+    # Луна стороны без времени приблизительна — её знак не сверяем.
+    moon_unsure = not (a_time_known and b_time_known)
+    no_axes = not (a_time_known or b_time_known)
+
+    found: list[Finding] = []
+    for sent in _sentences(_tokens(text)):
+        found += _pair_houses(text, sent, no_axes=no_axes)
+        for planet, sign, quote, s, e in _sign_claims(text, sent):
+            real = [side[planet] for side in sides if planet in side]
+            if not real or sign in real or (planet == "Луна" and moon_unsure):
+                continue
+            found.append(
+                Finding("sign", quote, f"{planet} по расчёту: {' и '.join(real)}; в тексте — {sign}", s, e)
+            )
+        for a, b, kind, quote, s, e in _aspect_claims(text, sent, known):
+            real_kinds = contacts.get(frozenset((a, b)))
+            if real_kinds is None:
+                found.append(Finding("aspect", quote, f"контакта {a} — {b} между картами нет", s, e))
+            elif kind not in real_kinds:
+                found.append(
+                    Finding(
+                        "aspect", quote,
+                        f"между картами {a} — {b}: {', '.join(sorted(real_kinds))}; в тексте — {kind}",
+                        s, e,
+                    )
+                )
+    for m in _PERCENT.finditer(text):
+        found.append(
+            Finding("percent", m.group(), "процентов и оценок совместимости в разборе нет", m.start(), m.end())
+        )
+
+    unique = {(f.kind, f.start, f.message): f for f in found}
+    return sorted(unique.values(), key=lambda f: f.start)
+
+
+def _side_points(natal: dict, time_known: bool) -> dict[str, str]:
+    """Точки одной стороны: имя → знак. Углы — только при известном времени."""
+    points = {p["name_ru"]: p["sign_ru"] for p in natal["planets"]}
+    if time_known:
+        for key in ("asc", "mc"):
+            angle = natal["angles"][key]
+            points[angle["name_ru"]] = angle["sign_ru"]
+    return points
+
+
+def _pair_houses(text: str, sent: list[_Tok], *, no_axes: bool) -> list[Finding]:
+    """Дома и куспиды в разборе пары — всегда находка: в синастрии их не считали.
+
+    no_axes — времени нет у обеих сторон: тогда находка и асцендент с MC.
+    """
+    out = []
+    for i, t in enumerate(sent):
+        low = t.text.lower()
+        house = low.startswith("куспид") or (
+            low.startswith("дом") and i and _ordinal(sent[i - 1].text) is not None
+        )
+        if house:
+            quote, s, e = _quote(text, sent, max(i - 2, 0), i)
+            out.append(Finding("no_house", quote, "домов в расчёте пары нет — мы их не считали", s, e))
+        elif no_axes and t.planet in _ANGLES:
+            quote, s, e = _quote(text, sent, max(i - 2, 0), i)
+            out.append(
+                Finding("no_time", quote, "время рождения неизвестно у обоих — асцендента и MC нет", s, e)
+            )
     return out

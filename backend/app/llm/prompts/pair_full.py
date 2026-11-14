@@ -368,45 +368,15 @@ def _time_note(side: str, label: str, meta_side: dict) -> str | None:
     )
 
 
-def build_user(
-    calc: dict,
-    *,
-    kind: str,
-    name_a: str | None = None,
-    name_b: str | None = None,
-) -> str:
-    """Собирает user-сообщение из расчёта пары (выход compute_synastry).
+def pair_block(calc: dict, label_a: str, label_b: str) -> list[str]:
+    """Строки расчёта пары для user-сообщения: от разницы возрастов до вовлечённости.
 
-    В отличие от pair_free.build_user отдаёт всю верхушку контактов, кресты и
-    вес вовлечённости: платный разбор на шесть секций должен опираться на
-    расчёт целиком.
-
-    kind — значение PairKind: он меняет текст и потому обязателен. Незнакомое
-    значение не роняет генерацию, рамка типа связи просто не подставляется.
+    Вынесено из build_user, чтобы тот же блок получал черновик vip_pair
+    (llm/prompts/vip_pair.py). Правка формата здесь меняет оба промпта —
+    бампать надо VERSION обоих.
     """
     summary = calc["summary"]
-    label_a = _label(name_a, "ты")
-    label_b = _label(name_b, "партнёр")
-
-    # Указание о голосе стоит рядом с именем, а не только правилом в SYSTEM:
-    # в приёмке v1 модель дважды из девяти уходила в «рассказ о двоих» и
-    # переключалась на вежливое «Вы», а строка при данных держит лучше.
-    named_a = bool((name_a or "").strip())
-    lines = [
-        f"Сторона A: {label_a} — заказчик разбора."
-        if named_a
-        else "Сторона A — заказчик разбора, имени мы не знаем.",
-        "Обращайся к стороне A только на «ты»: «ты», «тебе», «твой». В третьем лице о ней не пиши."
-        + (f" По имени — «{label_a}», изредка." if named_a else " По имени не называй."),
-        f"Сторона B: {label_b} — о ней пиши по имени, в третьем лице."
-        if (name_b or "").strip()
-        else "Сторона B — партнёр, имени мы не знаем: пиши «твой партнёр», в третьем лице.",
-    ]
-
-    frame = _KIND_FRAME.get(kind)
-    if frame is not None:
-        lines.append(f"Тип связи: {frame}")
-
+    lines: list[str] = []
     lines.append(f"Разница возрастов: {summary['age_gap_years']} года.")
 
     for side, label in (("A", label_a), ("B", label_b)):
@@ -462,6 +432,48 @@ def build_user(
     lines.append(
         "Вовлечённость: " + _involvement_phrase(summary["involvement"], label_a, label_b) + "."
     )
+    return lines
+
+
+def build_user(
+    calc: dict,
+    *,
+    kind: str,
+    name_a: str | None = None,
+    name_b: str | None = None,
+) -> str:
+    """Собирает user-сообщение из расчёта пары (выход compute_synastry).
+
+    В отличие от pair_free.build_user отдаёт всю верхушку контактов, кресты и
+    вес вовлечённости: платный разбор на шесть секций должен опираться на
+    расчёт целиком.
+
+    kind — значение PairKind: он меняет текст и потому обязателен. Незнакомое
+    значение не роняет генерацию, рамка типа связи просто не подставляется.
+    """
+    label_a = _label(name_a, "ты")
+    label_b = _label(name_b, "партнёр")
+
+    # Указание о голосе стоит рядом с именем, а не только правилом в SYSTEM:
+    # в приёмке v1 модель дважды из девяти уходила в «рассказ о двоих» и
+    # переключалась на вежливое «Вы», а строка при данных держит лучше.
+    named_a = bool((name_a or "").strip())
+    lines = [
+        f"Сторона A: {label_a} — заказчик разбора."
+        if named_a
+        else "Сторона A — заказчик разбора, имени мы не знаем.",
+        "Обращайся к стороне A только на «ты»: «ты», «тебе», «твой». В третьем лице о ней не пиши."
+        + (f" По имени — «{label_a}», изредка." if named_a else " По имени не называй."),
+        f"Сторона B: {label_b} — о ней пиши по имени, в третьем лице."
+        if (name_b or "").strip()
+        else "Сторона B — партнёр, имени мы не знаем: пиши «твой партнёр», в третьем лице.",
+    ]
+
+    frame = _KIND_FRAME.get(kind)
+    if frame is not None:
+        lines.append(f"Тип связи: {frame}")
+
+    lines += pair_block(calc, label_a, label_b)
 
     lines.append("")
     lines.append(

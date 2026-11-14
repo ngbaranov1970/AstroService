@@ -130,6 +130,44 @@
     VIP в боте.
   </p>
 
+  {# --- ПАРА в боте ----------------------------------------------------------
+     Шесть шагов потока ПАРА по ref — откуда человек вошёл
+     (services/admin.pair_stats). Люди за период, не когорта. #}
+
+  <h2>ПАРА в боте</h2>
+  {% if pair.rows %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Вход (ref)</th>
+            {% for title in pair.titles %}<th class="num">{{ title }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for ref, counts in pair.rows %}
+            <tr>
+              <td>{{ ref }}</td>
+              {% for count in counts %}<td class="num">{{ count }}</td>{% endfor %}
+            </tr>
+          {% endfor %}
+          <tr>
+            <td><strong>Всего людей</strong></td>
+            {% for count in pair.total %}<td class="num"><strong>{{ count }}</strong></td>{% endfor %}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">За период ПАРУ в боте никто не начинал.</p>
+  {% endif %}
+  <p class="muted">
+    pair_menu — кнопка меню, pair_dm — слово в личке, pair_post — комментарий
+    под постом, pair_vip — кнопка на экране «Разбор с астрологом» (без тизера,
+    поэтому «Получили тизер» там всегда 0); прочее — метка из ссылки vk.me.
+    «Всего» — не сумма строк: один человек мог войти с разных меток.
+  </p>
+
   <h2>Откуда пришли в бота (ref)</h2>
   {% if bot.refs %}
     <div class="table-wrap">

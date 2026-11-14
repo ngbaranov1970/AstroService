@@ -20,6 +20,8 @@ from app.main import app
 from app.models import Chart, Order, OrderStatus, ReportType, User
 from app.services import vip, vip_check, vip_draft
 from app.web.deps import require_admin
+from app.web.routes import pay
+from astro_core.natal import compute_natal
 
 URL = "/admin/vip/12"
 
@@ -258,3 +260,78 @@ def test_card_shows_only_allowed_buttons(
 
 def test_missing_order_is_404(client: TestClient, order: dict) -> None:
     assert client.get("/admin/vip/99").status_code == 404
+
+
+# --- заказ пары (vip_pair) -----------------------------------------------------
+
+
+def _pair_item(**order_kw) -> vip.VipOrder:
+    """Заказ пары: карта клиента и партнёр в pair_data, наталы настоящие."""
+    place = (55.3833, 39.0333, "Europe/Moscow")
+    birth = datetime(1987, 3, 9, 14, 30)  # noqa: DTZ001
+    partner_natal = compute_natal(datetime(1990, 5, 11, 12, 0), *place)  # noqa: DTZ001
+    pair_data = {
+        "ref": "pair_post", "name": "Маша", "date": "1990-05-11", "time": None,
+        "time_known": False, "place_known": False,
+        "place": {"label": "Егорьевск, RU", "lat": place[0], "lon": place[1], "tz": place[2]},
+        "natal": partner_natal,
+    }
+    base = {
+        "id": 12, "user_id": 1, "chart_id": 7, "pair_id": None, "token": "tok",
+        "report_type": ReportType.VIP_PAIR, "amount": 39_000,
+        "status": OrderStatus.PAID, "paid_at": datetime(2026, 11, 14, 18, 0, tzinfo=UTC),
+        "created_at": datetime(2026, 11, 14, 17, 0, tzinfo=UTC), "pair_data": pair_data,
+    }
+    chart = Chart(
+        id=7, birth_local=birth, time_known=True, place_name="Егорьевск, RU",
+        tz="Europe/Moscow", token="ct", calc={"natal": compute_natal(birth, *place)},
+    )
+    user = User(id=1, external_id="555", platform_username="Анна Звёздная")
+    return vip.VipOrder(order=Order(**{**base, **order_kw}), user=user, chart=chart)
+
+
+def test_pair_card_shows_both_sides_and_hides_model_edit(client: TestClient, order: dict) -> None:
+    order["item"] = _pair_item(draft_text="Его Марс в твоём седьмом доме. Совместимость 90%.")
+    response = client.get(URL)
+
+    assert response.status_code == 200
+    assert "Партнёр" in response.text and "Маша, 11.05.1990, время неизвестно" in response.text
+    assert "pair_post" in response.text
+    # Находки — от проверки пары, а не от натальной.
+    assert "домов в расчёте пары нет" in response.text
+    assert "процентов и оценок совместимости" in response.text
+    # Правки просьбой к модели у пары нет; новый черновик и отправка — есть.
+    assert "Попросить модель" not in response.text
+    assert "Новый черновик с нуля" in response.text
+    assert f'action="{URL}/deliver"' in response.text
+
+
+def test_pair_pay_page_hides_birth_data(
+    client: TestClient, order: dict, monkeypatch: pytest.MonkeyPatch, session: FakeSession
+) -> None:
+    item = _pair_item(status=OrderStatus.PENDING, paid_at=None)
+
+    async def fake_get_by_token(s, token):
+        return item.order if token == "tok" else None
+
+    async def fake_get(model, ident):
+        return item.chart
+
+    async def fake_user(s, user_id):
+        return item.user
+
+    async def no_paid(s, **kw):
+        return None
+
+    session.get = fake_get  # type: ignore[attr-defined]
+    monkeypatch.setattr(pay.orders, "get_by_token", fake_get_by_token)
+    monkeypatch.setattr(pay.users, "get_by_id", fake_user)
+    monkeypatch.setattr(pay.vip_pair, "find_paid", no_paid)
+
+    response = client.get("/pay/order/tok")
+    assert response.status_code == 200
+    assert "Разбор пары с астрологом" in response.text and "390 ₽" in response.text
+    assert "Разбор совместимости двух карт" in response.text
+    # За парой двое людей: ни даты, ни города на витрине нет.
+    assert "09.03.1987" not in response.text and "Егорьевск" not in response.text
+    assert 'action="/pay/order/tok"' in response.text

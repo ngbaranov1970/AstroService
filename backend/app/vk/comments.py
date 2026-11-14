@@ -119,7 +119,11 @@ async def process_comment(obj: dict[str, Any]) -> None:
             user_id = user.id
 
             if can_message(user):
-                incoming = Incoming(platform="vk", external_id=str(from_id), text=comment["text"])
+                # ref — откуда ПАРА: по нему воронка отличает пост от слова в личке.
+                incoming = Incoming(
+                    platform="vk", external_id=str(from_id), text=comment["text"],
+                    ref="pair_post" if code == "ПАРА" else None,
+                )
                 outgoing = await router.handle(
                     session, user, incoming, is_member=vk_bot.member_check(from_id)
                 )

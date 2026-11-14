@@ -104,7 +104,30 @@ async def test_send_message_uses_existing_transport(monkeypatch):
     send = AsyncMock(return_value=[result])
     monkeypatch.setattr(api, "_send_chunk", send)
     assert await api.send_message(100, "ответ", random_id=12, keyboard="{}") is result
-    send.assert_awaited_once_with([100], "ответ", 12, "{}")
+    send.assert_awaited_once_with([100], "ответ", 12, "{}", None)
+
+
+async def test_reply_image_goes_as_attachment_with_first_part(monkeypatch):
+    upload = AsyncMock(return_value="photo-1_2")
+    send = AsyncMock(return_value=api.SendResult(user_id=100, message_id=42))
+    monkeypatch.setattr(bot.api, "upload_message_photo", upload)
+    monkeypatch.setattr(bot.api, "send_message", send)
+    reply = Reply("а" * 5000, [[Button("Дальше", {"cmd": "pair_full"})]], inline=True, image=b"png")
+    assert await bot._send_replies(100, "k", [reply], 0, 7) == 2
+    upload.assert_awaited_once_with(100, b"png")
+    first, last = send.await_args_list
+    assert first.kwargs["attachment"] == "photo-1_2" and first.kwargs["keyboard"] is None
+    assert "attachment" not in last.kwargs and last.kwargs["keyboard"]
+
+
+async def test_reply_without_photo_right_still_sends_text(monkeypatch):
+    # Ключу сообщества не выдано право «фотографии» — тизер уходит одним текстом.
+    upload = AsyncMock(side_effect=api.VkError("VK photos.getMessagesUploadServer: ошибка 15"))
+    send = AsyncMock(return_value=api.SendResult(user_id=100, message_id=42))
+    monkeypatch.setattr(bot.api, "upload_message_photo", upload)
+    monkeypatch.setattr(bot.api, "send_message", send)
+    assert await bot._send_replies(100, "k", [Reply("тизер", image=b"png")], 0, 7) == 1
+    assert "attachment" not in send.await_args.kwargs
 
 
 @pytest.fixture
