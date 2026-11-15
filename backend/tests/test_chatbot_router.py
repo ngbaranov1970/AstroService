@@ -158,7 +158,8 @@ async def test_unknown_text_in_idle_shows_menu(
     assert dialog.state == states.IDLE
     assert len(replies) == 1
     assert replies[0].text == texts.MENU_TEXT
-    assert len(replies[0].buttons) == 4
+    # Три ряда по две кнопки и две строки «… с астрологом».
+    assert len(replies[0].buttons) == 5
 
 
 async def test_menu_text_resets_state(

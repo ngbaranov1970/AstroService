@@ -273,6 +273,38 @@ async def test_direct_entry_skips_gate_and_teaser(session, user, dialog, service
     assert {props["ref"] for _, props in session.events()} == {"pair_vip"}
 
 
+async def test_astrologer_button_shows_price_then_direct_entry(session, user, dialog, services) -> None:
+    async def not_member() -> bool:
+        raise AssertionError("у «Пары с астрологом» гейта нет")
+
+    # Кнопка меню — сначала описание с ценой, без событий и без смены состояния.
+    [intro] = await _say(session, user, "", {"cmd": "pair_astrologer"}, check=not_member)
+    price = orders.price_rub(ReportType.VIP_PAIR)
+    assert intro.text == texts.PAIR_INTRO.format(price=price)
+    [go] = intro.buttons[0]
+    assert go.payload == {"cmd": "pair_vip", "ref": pair.REF_ASTROLOGER}
+    assert session.event_names() == []
+
+    # «Оформить» — тот же вход без тизера, но со своей меткой для воронки.
+    await _say(session, user, "", go.payload, check=not_member)
+    assert dialog.state == states.PAIR_SELF
+    await _say(session, user, "", {"cmd": "pair_self_ok"}, check=not_member)
+    await _say(session, user, "11.05.1990", check=not_member)
+    await _say(session, user, "", {"cmd": "pair_time_unknown"}, check=not_member)
+    out = await _say(session, user, "", {"cmd": "pair_skip_name"}, check=not_member)
+
+    # Цену человек уже видел — после партнёра сразу сводка, без второго описания.
+    assert dialog.state == states.PAIR_ORDER
+    assert texts.PAIR_INTRO.format(price=price) not in _texts(out)
+    assert _cmds(out[-1]) == ["pair_confirm", "pair_fix"]
+    assert {props["ref"] for _, props in session.events()} == {pair.REF_ASTROLOGER}
+
+
+async def test_direct_entry_ignores_unknown_ref(session, user, dialog, services) -> None:
+    await _say(session, user, "", {"cmd": "pair_vip", "ref": "чужое"})
+    assert [props["ref"] for _, props in session.events()] == [pair.REF_VIP]
+
+
 # --- тизер ---------------------------------------------------------------------
 
 

@@ -33,6 +33,10 @@ REF_MENU = "pair_menu"
 REF_POST = "pair_post"
 REF_DM = "pair_dm"
 REF_VIP = "pair_vip"
+# Кнопка «Пара с астрологом» в меню: платный разбор без тизера.
+REF_ASTROLOGER = "pair_astrologer"
+# Какие ref принимает pair_vip из кнопки — чужое значение в события не пишем.
+_DIRECT_REFS = (REF_VIP, REF_ASTROLOGER)
 
 _KEY = "pair"
 _ASK_DATE, _ASK_TIME, _ASK_CITY, _ASK_NAME = "date", "time", "city", "name"
@@ -107,6 +111,24 @@ async def start(
     return await _ask_self(session, user, dialog, {"ref": ref[:64], "direct": direct})
 
 
+def _astrologer_intro() -> list[Outgoing]:
+    """Экран «Пара с астрологом»: описание и цена, «Оформить» ведёт в заказ без тизера."""
+    if not _for_sale():
+        return [Reply(text=texts.PAIR_NOT_FOR_SALE)]
+    price = _price()
+    go = {"cmd": "pair_vip", "ref": REF_ASTROLOGER}
+    return [
+        Reply(
+            text=texts.PAIR_INTRO.format(price=price),
+            buttons=[
+                [Button(texts.BTN_VIP_GO.format(price=price), go, color="positive")],
+                [Button(texts.BTN_MENU, {"cmd": "menu"})],
+            ],
+            inline=True,
+        )
+    ]
+
+
 async def _ask_self(
     session: AsyncSession, user: User, dialog: BotDialog, pair: dict[str, Any]
 ) -> list[Outgoing]:
@@ -179,8 +201,11 @@ async def dispatch(
 ) -> list[Outgoing] | None:
     """Кнопки ПАРЫ; None — команда не отсюда."""
     cmd = str(payload.get("cmd", ""))
+    if cmd == "pair_astrologer":
+        return _astrologer_intro()
     if cmd == "pair_vip":
-        return await start(session, user, dialog, ref=REF_VIP, direct=True)
+        ref = payload.get("ref") if payload.get("ref") in _DIRECT_REFS else REF_VIP
+        return await start(session, user, dialog, ref=str(ref), direct=True)
     if not cmd.startswith("pair_"):
         return None
 
@@ -352,13 +377,16 @@ async def _ask_partner(
 async def _partner_done(
     session: AsyncSession, user: User, dialog: BotDialog, pair: dict[str, Any]
 ) -> list[Outgoing]:
-    """Партнёр собран: к тизеру, а при прямом входе — сразу к описанию с ценой."""
+    """Партнёр собран: к тизеру, при прямом входе — к описанию с ценой или к сводке."""
     partner = pair["partner"]
     await events.log(
         session, events.BOT_PAIR_PARTNER_GIVEN,
         user_id=user.id, ref=pair.get("ref"), time_known=bool(partner.get("time_known")),
     )
     if pair.get("direct"):
+        # С кнопки «Пара с астрологом» описание с ценой уже показано до сбора данных.
+        if pair.get("ref") == REF_ASTROLOGER:
+            return await _summary(session, dialog, pair)
         return await _offer(session, dialog, pair)
     return await _launch_teaser(session, dialog, pair)
 

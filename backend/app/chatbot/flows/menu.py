@@ -61,6 +61,8 @@ def menu_reply(user: User) -> Reply:
             ],
             # cmd "vip" обрабатывает flows/vip.py — та же витрина, что под разбором карты.
             [Button(texts.BTN_ASTROLOGER, {"cmd": "vip"}, color="primary")],
+            # cmd "pair_astrologer" — flows/pair.py: описание разбора пары и заказ без тизера.
+            [Button(texts.BTN_PAIR_ASTROLOGER, {"cmd": "pair_astrologer"}, color="primary")],
         ],
         inline=False,
     )
