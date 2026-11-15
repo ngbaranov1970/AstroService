@@ -112,7 +112,8 @@ async def test_synastry_drops_axes_of_partner_without_time() -> None:
 async def test_new_order(base: dict[str, Any]) -> None:
     order = await _create(MASHA)
     assert order.report_type is ReportType.VIP_PAIR
-    assert order.amount == orders.price(ReportType.VIP_PAIR) == 39_000
+    # Сумму сверяем с прайсом, а не с числом: цена меняется решением владельца.
+    assert order.amount == orders.price(ReportType.VIP_PAIR)
     assert order.pair_data["ref"] == "pair_dm" and order.chart_id == 7
     assert base["inserted"] == 1
 

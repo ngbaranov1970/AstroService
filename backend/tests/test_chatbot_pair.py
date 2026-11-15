@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot import router, states, texts
 from app.chatbot.flows import pair
 from app.chatbot.types import Button, Incoming, Job, LinkButton, Reply
-from app.models import OrderStatus, User
-from app.services import pair_teaser
+from app.models import OrderStatus, ReportType, User
+from app.services import orders, pair_teaser
 
 LAST = {
     "date": "1987-03-09", "time": "14:30", "time_known": True,
@@ -267,7 +267,7 @@ async def test_direct_entry_skips_gate_and_teaser(session, user, dialog, service
 
     # Сразу описание с ценой: ни Job, ни вызова модели.
     assert not any(isinstance(o, Job) for o in out)
-    assert _texts(out) == [texts.PAIR_INTRO.format(price=390)]
+    assert _texts(out) == [texts.PAIR_INTRO.format(price=orders.price_rub(ReportType.VIP_PAIR))]
     services.make.assert_not_awaited()
     assert session.event_names() == ["pair_started", "pair_partner_given"]
     assert {props["ref"] for _, props in session.events()} == {"pair_vip"}

@@ -18,7 +18,7 @@ from app.db import get_session
 from app.llm import client as llm
 from app.main import app
 from app.models import Chart, Order, OrderStatus, ReportType, User
-from app.services import vip, vip_check, vip_draft
+from app.services import orders, vip, vip_check, vip_draft
 from app.web.deps import require_admin
 from app.web.routes import pay
 from astro_core.natal import compute_natal
@@ -330,7 +330,8 @@ def test_pair_pay_page_hides_birth_data(
 
     response = client.get("/pay/order/tok")
     assert response.status_code == 200
-    assert "Разбор пары с астрологом" in response.text and "390 ₽" in response.text
+    price = orders.price_rub(ReportType.VIP_PAIR)
+    assert "Разбор пары с астрологом" in response.text and f"{price} ₽" in response.text
     assert "Разбор совместимости двух карт" in response.text
     # За парой двое людей: ни даты, ни города на витрине нет.
     assert "09.03.1987" not in response.text and "Егорьевск" not in response.text
