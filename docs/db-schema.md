@@ -108,7 +108,7 @@ erDiagram
         text     draft_candidate "nullable; вариант DeepSeek, ждёт принять/отказаться"
         timestamptz delivered_at "nullable; VIP отправлен в личку"
         enum     client_gender "nullable; female/male, только VIP — для рода в тексте"
-        jsonb    pair_data "nullable; партнёр заказа vip_pair: ref, данные рождения, имя, натал"
+        jsonb    pair_data "nullable; партнёр заказа vip_pair: ref, данные рождения, имя, натал, тизер"
     }
 
     events {
@@ -324,7 +324,10 @@ VIP-промптам (черновик, правка, ответ клиенту)
 `pairs` под него не заводятся, `pair_id` у такого заказа NULL, `chart_id` —
 карта клиента. В `pair_data`: `ref` (откуда человек вошёл в ПАРУ), `date`,
 `time`, `time_known`, `place`, `place_known`, `name` и `natal` — посчитанный
-натал партнёра той же формы, что `charts.calc["natal"]`. Синастрия не
+натал партнёра той же формы, что `charts.calc["natal"]`; у пришедших через
+бесплатный тизер ещё `teaser` — `{text, contacts: {strong, spark}, version}`:
+что клиент видел до покупки и по каким контактам написан каждый пункт (идёт
+в промпт `vip_pair` и на карточку заказа). Синастрия не
 хранится, считается по требованию. Ждущий заказ пары у человека один —
 держит его тот же `uq_orders_one_pending` (тройка `user_id, chart_id,
 report_type` при `pair_id IS NULL`); новая пара с другим партнёром

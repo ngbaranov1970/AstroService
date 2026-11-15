@@ -43,6 +43,7 @@ from app.llm.prompts import pair_free, pair_full, pair_teaser, vip_pair  # noqa:
 # Полдень при неизвестном времени берём у продукта, а не заводим свой: считать
 # приёмкой не то, что потом посчитает сервис, — значит вычитывать чужой текст.
 from app.services.charts import UNKNOWN_TIME  # noqa: E402
+from app.services.pair_teaser import _contact as teaser_contact  # noqa: E402
 from app.services.pair_teaser import facts as teaser_facts  # noqa: E402
 from astro_core.geo import City, search_cities  # noqa: E402
 from astro_core.natal import compute_natal  # noqa: E402
@@ -177,9 +178,19 @@ def main() -> None:
     calc = compute_synastry(natal_a, natal_b, a_time_known=known_a, b_time_known=known_b)
     if args.prompt == "pair_teaser":
         # Тизер получает не весь расчёт, а отобранные факты — как в сервисе.
-        user_message = module.build_user(teaser_facts(calc, natal_a, natal_b), name_b=args.name_b)
+        user_message = module.build_user(teaser_facts(calc), name_b=args.name_b)
     elif args.prompt == "vip_pair":
-        user_message = module.build_user(calc, name_a=args.name_a, name_b=args.name_b)
+        teaser = args.teaser.read_text(encoding="utf-8") if args.teaser else None
+        # Контакты пунктов считаем теми же функциями, что сервис тизера.
+        selected = teaser_facts(calc)
+        contacts = {key: [teaser_contact(a) for a in selected[key]] for key in ("strong", "spark")}
+        user_message = module.build_user(
+            calc,
+            name_a=args.name_a,
+            name_b=args.name_b,
+            teaser=teaser,
+            teaser_contacts=contacts if teaser else None,
+        )
     else:
         user_message = module.build_user(
             calc, kind=args.kind, name_a=args.name_a, name_b=args.name_b
@@ -304,6 +315,12 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUT,
         help=f"каталог для файлов прогонов (по умолчанию {DEFAULT_OUT})",
+    )
+    parser.add_argument(
+        "--teaser",
+        type=Path,
+        default=None,
+        help="файл с текстом тизера, который видел клиент (только для vip_pair)",
     )
     parser.add_argument("--no-save", action="store_true", help="не писать файлы, только stdout")
     parser.add_argument(

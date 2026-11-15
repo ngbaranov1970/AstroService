@@ -106,7 +106,10 @@ async def make_draft(session: AsyncSession, order_id: int, model: str | None = N
         # Имя клиента в промпт не идёт: в боте его не спрашивают, а имя из
         # профиля VK — не то, как человека зовут дома.
         user_prompt = vip_pair_prompt.build_user(
-            vip_pair.synastry(chart, pair_data), name_b=pair_data.get("name")
+            vip_pair.synastry(chart, pair_data),
+            name_b=pair_data.get("name"),
+            teaser=teaser_text(item),
+            teaser_contacts=(pair_data.get("teaser") or {}).get("contacts"),
         )
         text = await _generate(vip_pair_prompt, user_prompt, order_id, model)
     else:
@@ -220,6 +223,12 @@ def header(item: VipOrder) -> str:
     if not item.is_pair:
         return f"Твоя натальная карта: {when}, {chart.place_name}"
     return f"Разбор вашей пары\nТы: {when}, {chart.place_name}\nПартнёр: {partner_line(item)}"
+
+
+def teaser_text(item: VipOrder) -> str | None:
+    """Текст бесплатного тизера из pair_data; None — клиент пришёл без тизера."""
+    teaser = (item.order.pair_data or {}).get("teaser") or {}
+    return teaser.get("text") or None
 
 
 def partner_line(item: VipOrder) -> str:

@@ -293,18 +293,18 @@ def render(day: date, do: str = "", wait: str = "") -> bytes:
 # --- карточка пары ----------------------------------------------------------
 
 
-def build_pair(sign_a: str, sign_b: str, strong: str, spark: str) -> Image.Image:
-    """Карточка тизера пары: знаки Солнца заголовком и две первые строки тизера.
+def build_pair(title: str, strong: str, spark: str) -> Image.Image:
+    """Карточка тизера пары: заголовок («Ты и Маша») и первые пункты двух разделов.
 
-    Раскладка та же, что у build(): отличается только текст. Третья строка
-    тизера («что в полном разборе») на картинку не идёт — она про покупку.
+    Раскладка та же, что у build(): отличается только текст. Знаков зодиака в
+    заголовке нет: тизер считан по датам рождения, а не по знакам.
     """
-    title_lines, title_font, title_lh = _fit_title(f"{sign_a} и {sign_b}")
+    title_lines, title_font, title_lh = _fit_title(title)
     title_last = TITLE_Y + title_lh * (len(title_lines) - 1)
     divider_y = title_last + 62
 
-    # «Искрит», а не «Где искрит»: колонка подписей 190 px, длинная наедет на текст.
-    blocks = [(label, text) for label, text in (("Сильное", strong), ("Искрит", spark)) if text]
+    # «Держит» и «Искрит», а не полные заголовки: колонка подписей 190 px, длинная наедет на текст.
+    blocks = [(label, text) for label, text in (("Держит", strong), ("Искрит", spark)) if text]
     placed, body_font, line_h, bottom = _layout_body(blocks, divider_y + 72)
     shift = max(0, (CONTENT_LIMIT - bottom) // 2)
 
@@ -330,8 +330,8 @@ def build_pair(sign_a: str, sign_b: str, strong: str, spark: str) -> Image.Image
     return img
 
 
-def render_pair(sign_a: str, sign_b: str, strong: str, spark: str) -> bytes:
+def render_pair(title: str, strong: str, spark: str) -> bytes:
     """PNG карточки пары. Синхронная: вызывающий уводит её в поток."""
     buf = io.BytesIO()
-    build_pair(sign_a, sign_b, strong, spark).save(buf, format="PNG")
+    build_pair(title, strong, spark).save(buf, format="PNG")
     return buf.getvalue()

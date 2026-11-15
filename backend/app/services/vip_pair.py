@@ -140,8 +140,12 @@ async def create_order(
     place: charts.Place,
     partner: Partner,
     ref: str | None,
+    teaser: dict[str, Any] | None = None,
 ) -> Order:
     """Заказ vip_pair: оплаченный на того же партнёра, ждущий или новый.
+
+    teaser — {"text", "contacts", "version"} бесплатного тизера, который клиент видел
+    перед покупкой; ложится в pair_data, оттуда — в промпт и на карточку.
 
     Ждущий заказ у клиента один: новая пара с другим партнёром переписывает
     его pair_data и сбрасывает черновик. Оплаченные не трогает.
@@ -157,6 +161,8 @@ async def create_order(
         time_known=birth_time_known,
     )
     data = await partner_data(partner, client_place=place, ref=ref)
+    if teaser is not None:
+        data["teaser"] = teaser
 
     paid = await find_paid(session, user_id=user.id, chart_id=chart.id, pair_data=data)
     if paid is not None:
@@ -209,6 +215,9 @@ async def _upsert_pending(
                 order.draft_text = None
                 order.draft_candidate = None
                 order.chart_id = chart_id
+            # Тизер того же партнёра не теряем: повторный заказ с экрана VIP идёт без него.
+            if same and "teaser" not in data and (order.pair_data or {}).get("teaser"):
+                data = {**data, "teaser": order.pair_data["teaser"]}
             # Имя и ref обновляем и у того же партнёра: повтор исправляет опечатку.
             order.pair_data = data
             logger.info(

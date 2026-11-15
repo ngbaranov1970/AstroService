@@ -1,4 +1,6 @@
-"""Бесплатный тизер пары для VK-бота: три строки и картинка.
+"""Бесплатный тизер пары для VK-бота: короткий пост про пару и картинка.
+
+Пункты пишет модель по контактам, которые выбрал facts(); заголовки разделов и фразу про платный разбор (QUESTION) ставит код.
 
 Место в цепочке: chatbot/flows/pair.py (Job) → ЭТОТ МОДУЛЬ → vip_pair
 (синастрия), llm (pair_teaser), card (PNG). В reports тизер не пишется и не
@@ -26,13 +28,15 @@ from app.services import card, events, reports, vip_pair
 
 logger = logging.getLogger(__name__)
 
-# Луна за сутки проходит около 13°: при неизвестном времени она могла быть на
-# 6,5° в любую сторону от полуденной. Ближе к границе знака — знак не называем.
-MOON_SIGN_MARGIN = 6.5
+# Версия промпта — в заказ вместе с текстом тизера.
+VERSION = prompt.VERSION
 
-LABEL_STRONG = "Сильное"
-LABEL_SPARK = "Где искрит"
-LABEL_MORE = "Что видно только в полном разборе"
+HEAD_SPARK = "🔥 Где искрит"
+HEAD_STRONG = "💎 Что держит"
+BULLET = "▪"
+# Фразу про платный разбор ставит код, а не модель: тизер обещает только то,
+# что разбор содержит всегда — причину и советы.
+QUESTION = "Почему у вас так выходит и что с этим делать — в полном разборе пары."
 
 _PERSONAL = ("Sun", "Moon", "Venus", "Mars")
 
@@ -47,52 +51,67 @@ class TeaserBudgetError(TeaserError):
 
 @dataclass(frozen=True, slots=True)
 class Teaser:
-    strong: str
-    spark: str
-    more: str
+    hook: str
+    strong: tuple[str, ...]
+    spark: tuple[str, ...]
+    outcome: str
     # None — картинку нарисовать не вышло; тизер тогда уходит текстом.
     image: bytes | None
+    # Контакты, по которым написан каждый пункт («Сатурн A — соединение — Солнце B»):
+    # платному разбору они нужны, чтобы объяснить тизер тем же расчётом.
+    strong_contacts: tuple[str, ...] = ()
+    spark_contacts: tuple[str, ...] = ()
 
     @property
     def text(self) -> str:
-        return (
-            f"{LABEL_STRONG}: {self.strong}\n\n"
-            f"{LABEL_SPARK}: {self.spark}\n\n"
-            f"{LABEL_MORE}: {self.more}"
+        def section(head: str, items: tuple[str, ...]) -> str:
+            return "\n\n".join([head, *(f"{BULLET} {item}" for item in items)])
+
+        return "\n\n".join(
+            [
+                # Заголовок начинаем с прописной сами: модель пишет его со строчной.
+                self.hook[:1].upper() + self.hook[1:],
+                section(HEAD_STRONG, self.strong),
+                section(HEAD_SPARK, self.spark),
+                f"Итог: {self.outcome}",
+                QUESTION,
+            ]
         )
 
 
 # --- Отбор фактов ------------------------------------------------------------
 
 
-def _moon_sign(natal: dict[str, Any], *, time_known: bool) -> str | None:
-    """Знак Луны; при неизвестном времени — только вдали от границы знака."""
-    moon = next(p for p in natal["planets"] if p["name"] == "Moon")
-    if not time_known:
-        deg = moon["deg_in_sign"]
-        if deg < MOON_SIGN_MARGIN or deg > 30 - MOON_SIGN_MARGIN:
-            return None
-    return moon["sign_ru"]
+_SOFT = ("trine", "sextile")
+_HARD = ("square", "opposition")
 
 
-def _signs(natal: dict[str, Any], *, time_known: bool) -> dict[str, str]:
-    out = {p["name"]: p["sign_ru"] for p in natal["planets"] if p["name"] in ("Sun", "Venus", "Mars")}
-    moon = _moon_sign(natal, time_known=time_known)
-    if moon is not None:
-        out["Moon"] = moon
-    return out
+def _is_strong(aspect: dict[str, Any]) -> bool:
+    """Годится ли контакт в «Что держит»: трин, секстиль или соединение без Сатурна."""
+    if aspect["type"] == "conjunction":
+        return "Saturn" not in (aspect["a"], aspect["b"])
+    return aspect["type"] in _SOFT
 
 
-def facts(
-    calc: dict[str, Any],
-    natal_a: dict[str, Any],
-    natal_b: dict[str, Any],
-) -> dict[str, Any]:
-    """Что из синастрии уходит в промпт тизера.
+def _is_spark(aspect: dict[str, Any]) -> bool:
+    """Годится ли контакт в «Где искрит»: квадрат, оппозиция или соединение с Сатурном."""
+    if aspect["type"] == "conjunction":
+        return "Saturn" in (aspect["a"], aspect["b"])
+    return aspect["type"] in _HARD
 
-    Берём из полного списка calc["aspects"], а не из верхушки: Венера–Марс
-    туда попадает не всегда. Контакты Луны стороны без времени выбрасываем —
-    её положение приблизительно, от неё остаётся только знак.
+
+def _contact(aspect: dict[str, Any]) -> str:
+    """Контакт строкой, в том же виде, что в расчёте для платного разбора."""
+    return f"{aspect['a_ru']} A — {aspect['type_ru']} — {aspect['b_ru']} B"
+
+
+def facts(calc: dict[str, Any]) -> dict[str, Any]:
+    """Что из синастрии уходит в промпт тизера: контакты на каждый пункт.
+
+    Контакты выбирает код, а не модель: strong — самые весомые гармоничные
+    контакты личных планет, spark — самые весомые напряжённые, до MAX_ITEMS в
+    списке; пустой список — таких в паре нет. Луну стороны без времени не
+    берём: за сутки она проходит около 13°, и контакт мог не сложиться.
     """
     known = {"a": calc["meta"]["a"]["time_known"], "b": calc["meta"]["b"]["time_known"]}
 
@@ -101,36 +120,19 @@ def facts(
             (aspect["a"] == "Moon" and not known["a"]) or (aspect["b"] == "Moon" and not known["b"])
         )
 
-    aspects = [a for a in calc["aspects"] if usable(a)]
+    def personal(aspect: dict[str, Any]) -> bool:
+        # Обе планеты личные, либо Сатурн одного к личной планете другого.
+        pair = (aspect["a"], aspect["b"])
+        if all(name in _PERSONAL for name in pair):
+            return True
+        return "Saturn" in pair and any(name in _PERSONAL for name in pair)
 
-    def between(first: str, second: str) -> list[dict[str, Any]]:
-        return [a for a in aspects if {a["a"], a["b"]} == {first, second}]
-
-    saturn = [
-        a for a in aspects
-        if (a["a"] == "Saturn" and a["b"] in _PERSONAL) or (a["b"] == "Saturn" and a["a"] in _PERSONAL)
-    ]
-
-    summary = calc["summary"]
-    rest = []
-    if any("Mercury" in (a["a"], a["b"]) for a in aspects):
-        rest.append("как вы разговариваете и слышите друг друга (контакты Меркурия)")
-    if summary["reciprocal"]:
-        rest.append("контакты, которые работают в обе стороны")
-    if summary["voids"]["a"] or summary["voids"]["b"]:
-        rest.append("планеты, которые в этой паре молчат")
-    rest.append("как вы ссоритесь и миритесь")
-    rest.append("точка роста пары")
+    # calc["aspects"] отсортирован по весу — первые подходящие и есть сильнейшие.
+    candidates = [a for a in calc["aspects"] if usable(a) and personal(a)]
 
     return {
-        "signs": {
-            "a": _signs(natal_a, time_known=known["a"]),
-            "b": _signs(natal_b, time_known=known["b"]),
-        },
-        "venus_mars": between("Venus", "Mars"),
-        "sun_moon": between("Sun", "Moon"),
-        "saturn": saturn,
-        "rest": rest,
+        "strong": [a for a in candidates if _is_strong(a)][: prompt.MAX_ITEMS],
+        "spark": [a for a in candidates if _is_spark(a)][: prompt.MAX_ITEMS],
     }
 
 
@@ -162,8 +164,9 @@ async def make(session: AsyncSession, chart: Chart, pair_data: dict[str, Any]) -
         raise TeaserBudgetError("Дневной потолок генераций выбран")
 
     calc = vip_pair.synastry(chart, pair_data)
-    selected = facts(calc, chart.calc["natal"], pair_data["natal"])
-    user_prompt = prompt.build_user(selected, name_b=pair_data.get("name"))
+    selected = facts(calc)
+    name = (pair_data.get("name") or "").strip()
+    user_prompt = prompt.build_user(selected, name_b=name)
 
     try:
         result = await llm.chat(
@@ -183,19 +186,31 @@ async def make(session: AsyncSession, chart: Chart, pair_data: dict[str, Any]) -
     )
     if lines is None:
         raise TeaserError("Ответ модели не разобрался")
+    # Пунктов не больше, чем контактов: лишний пункт модель пишет из головы.
+    for key in ("strong", "spark"):
+        lines[key] = lines[key][: max(1, len(selected[key]))]
 
     image: bytes | None
     try:
         # Pillow рисует сотню миллисекунд — в поток, чтобы не держать цикл событий.
         image = await asyncio.to_thread(
             card.render_pair,
-            selected["signs"]["a"]["Sun"],
-            selected["signs"]["b"]["Sun"],
-            lines["strong"],
-            lines["spark"],
+            # Имён в заголовке картинки хватает: тизер считан по датам, а не по знакам.
+            f"Ты и {name}" if name else "Ваша пара",
+            # На картинку — первые пункты разделов: все шесть на 1080×1080 не лягут.
+            lines["strong"][0],
+            lines["spark"][0],
         )
     except Exception as e:  # noqa: BLE001 — картинка не важнее текста тизера
         logger.error("Тизер пары: картинка не нарисовалась, карта %s: %s", chart.id, type(e).__name__)
         image = None
 
-    return Teaser(strong=lines["strong"], spark=lines["spark"], more=lines["more"], image=image)
+    return Teaser(
+        hook=lines["hook"],
+        strong=tuple(lines["strong"]),
+        spark=tuple(lines["spark"]),
+        outcome=lines["outcome"],
+        image=image,
+        strong_contacts=tuple(_contact(a) for a in selected["strong"]),
+        spark_contacts=tuple(_contact(a) for a in selected["spark"]),
+    )

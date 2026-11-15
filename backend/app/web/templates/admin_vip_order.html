@@ -145,7 +145,14 @@
       <article class="column">
         <h3>Сейчас</h3>
         <div style="white-space: pre-wrap">{{ o.draft_text }}</div>
-        <h3>Проверка</h3>
+        {# Тизер клиент видел до покупки: разбор обязан ответить на каждый его пункт. #}
+    {% if teaser %}
+    <h3>Тизер, который видел клиент</h3>
+    <p class="muted">Проверь, что разбор объясняет каждый пункт и не спорит с ним.</p>
+    <p style="white-space: pre-wrap">{{ teaser }}</p>
+    {% endif %}
+
+    <h3>Проверка</h3>
         {{ findings_list(draft_findings) }}
       </article>
       <article class="column">

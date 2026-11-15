@@ -427,7 +427,7 @@ def _failed_reply() -> Reply:
 async def run_teaser(
     session: AsyncSession, user: User, dialog: BotDialog
 ) -> list[Outgoing]:
-    """Job: карта клиента → синастрия → три строки и картинка. Коммитит сам.
+    """Job: карта клиента → синастрия → тизер и картинка. Коммитит сам.
 
     Потолок и авария превращаются в ответ; данные пары в data остаются.
     """
@@ -468,6 +468,19 @@ async def run_teaser(
     # Свои данные кладём под last: следующий сценарий не спросит их снова.
     data = dict(dialog.data or {})
     data["last"] = pair["self"]
+    # Тизер едет в заказ: платный разбор обязан ответить на то, что в нём названо.
+    data[_KEY] = {
+        **pair,
+        "teaser": {
+            "text": teaser.text,
+            "contacts": {
+                "strong": list(teaser.strong_contacts),
+                "spark": list(teaser.spark_contacts),
+            },
+            "version": pair_teaser.VERSION,
+            "for": _teaser_key(pair["partner"]),
+        },
+    }
     await storage.save(session, dialog, state=states.IDLE, data=data)
     await session.commit()
 
@@ -532,6 +545,19 @@ async def _summary(
     ]
 
 
+def _teaser_key(partner: dict[str, Any]) -> list[Any]:
+    """По чему узнаём, что тизер писался про этого партнёра: дата и время."""
+    return [partner.get("date"), partner.get("time")]
+
+
+def _teaser_for(pair: dict[str, Any]) -> dict[str, Any] | None:
+    """Тизер из диалога — только если партнёра с тех пор не поменяли."""
+    teaser = pair.get("teaser")
+    if not isinstance(teaser, dict) or teaser.get("for") != _teaser_key(pair["partner"]):
+        return None
+    return {key: teaser[key] for key in ("text", "contacts", "version") if key in teaser}
+
+
 async def _create(
     session: AsyncSession, user: User, dialog: BotDialog, pair: dict[str, Any]
 ) -> list[Outgoing]:
@@ -546,6 +572,7 @@ async def _create(
             place=place,
             partner=_partner(pair["partner"]),
             ref=ref,
+            teaser=_teaser_for(pair),
         )
     except orders.NotForSaleError:
         await storage.save(session, dialog, state=states.IDLE)

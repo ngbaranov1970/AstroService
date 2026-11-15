@@ -276,11 +276,25 @@ def test_vip_pair_bez_imeni_partnera() -> None:
     assert "пиши «твой партнёр»" in message
 
 
+def test_vip_pair_teaser_idyot_v_prompt() -> None:
+    calc = _pair_calc()
+    # Без тизера блока нет: клиент мог прийти с экрана VIP, минуя тизер.
+    assert "бесплатный тизер" not in vip_pair.build_user(calc)
+    message = vip_pair.build_user(
+        calc,
+        teaser="Оба молчат\n\n▪ ждёте догадки",
+        teaser_contacts={"strong": [], "spark": ["Сатурн A — соединение — Солнце B"]},
+    )
+    assert "▪ ждёте догадки" in message and "Каждый пункт тизера разбор обязан объяснить" in message
+    # Контакт пункта идёт во вход, даже если его нет среди двенадцати сильнейших.
+    assert "1. Сатурн A — соединение — Солнце B" in message and "«Что держит» написаны" not in message
+
+
 def test_vip_pair_system_derzhit_pravila_pary() -> None:
-    # Правила раздела 8: без домов, процентов и предсказаний. VIP-послаблений
-    # про здоровье и деньги у пары нет — запреты обязаны стоять в SYSTEM.
-    for rule in ("Домов в данных нет", "процентов", "расставание", "здоровье", "Не обещаешь денег"):
-        assert rule in vip_pair.SYSTEM, f"правило «{rule}» потеряно в SYSTEM"
+    # Домов в расчёте пары нет — это правило про факты, оно обязано стоять в SYSTEM.
+    assert "Домов в данных нет" in vip_pair.SYSTEM
+    # Блок запретов снят 15.11.2026: текст вычитывает владелец.
+    assert "Что не делаешь" not in vip_pair.SYSTEM
     assert vip_pair.FIRST_TITLE in vip_pair.SYSTEM and vip_pair.LAST_TITLE in vip_pair.SYSTEM
     # Формат черновика один с vip_natal: карточка и нарезка на сообщения общие.
     assert vip_pair.parse is vip_natal.parse and vip_pair.to_draft is vip_natal.to_draft

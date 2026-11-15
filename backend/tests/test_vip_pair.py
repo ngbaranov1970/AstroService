@@ -313,40 +313,79 @@ async def test_teaser_facts_drop_moon_of_side_without_time() -> None:
     item = await _pair_item()
     pair_data = item.order.pair_data
     calc = vip_pair.synastry(item.chart, pair_data)
-    facts = pair_teaser.facts(calc, item.chart.calc["natal"], pair_data["natal"])
+    facts = pair_teaser.facts(calc)
 
-    every = facts["venus_mars"] + facts["sun_moon"] + facts["saturn"]
-    # Луна партнёра без времени в контакты тизера не идёт.
-    assert not any(a["b"] == "Moon" for a in every)
-    assert set(facts["signs"]["a"]) == {"Sun", "Moon", "Venus", "Mars"}
-    # Сатурн — только к личным планетам другой стороны.
-    assert all({a["a"], a["b"]} & {"Sun", "Moon", "Venus", "Mars"} for a in facts["saturn"])
-    assert facts["rest"]
+    anchors = facts["strong"] + facts["spark"]
+    # Луна партнёра без времени в опоры тизера не идёт.
+    assert not any(a["b"] == "Moon" for a in anchors)
+    # Опора — контакт с личной планетой хотя бы с одной стороны.
+    assert all({a["a"], a["b"]} & {"Sun", "Moon", "Venus", "Mars"} for a in anchors)
 
 
-def test_moon_sign_near_border_is_hidden_without_time() -> None:
-    natal = {"planets": [{"name": "Moon", "sign_ru": "Рак", "deg_in_sign": 3.0}]}
-    assert pair_teaser._moon_sign(natal, time_known=True) == "Рак"
-    assert pair_teaser._moon_sign(natal, time_known=False) is None
-    natal["planets"][0]["deg_in_sign"] = 15.0
-    assert pair_teaser._moon_sign(natal, time_known=False) == "Рак"
-    natal["planets"][0]["deg_in_sign"] = 25.0
-    assert pair_teaser._moon_sign(natal, time_known=False) is None
+def _teaser_facts(aspects: list[dict]) -> dict:
+    calc = {
+        "meta": {"a": {"time_known": True}, "b": {"time_known": True}},
+        "aspects": aspects,
+    }
+    return pair_teaser.facts(calc)
+
+
+def test_teaser_anchors_are_two_different_contacts() -> None:
+    def asp(a: str, kind: str, b: str) -> dict:
+        return {"a": a, "b": b, "type": kind}
+
+    # Список идёт по весу: опорой становится первый подходящий сверху.
+    facts = _teaser_facts(
+        [
+            asp("Pluto", "trine", "Sun"),  # не личная пара — мимо
+            asp("Venus", "square", "Mars"),
+            asp("Saturn", "conjunction", "Sun"),
+            asp("Mars", "trine", "Sun"),
+            asp("Venus", "conjunction", "Moon"),
+        ]
+    )
+    assert [(a["a"], a["type"]) for a in facts["strong"]] == [("Mars", "trine"), ("Venus", "conjunction")]
+    assert [(a["a"], a["type"]) for a in facts["spark"]] == [("Venus", "square"), ("Saturn", "conjunction")]
+    # Один контакт в оба списка не попадает.
+    assert not [a for a in facts["strong"] if a in facts["spark"]]
+
+    # Гармоничного нет — список пуст, квадрат в «Что держит» не подставляется.
+    facts = _teaser_facts([asp("Venus", "square", "Mars")])
+    assert facts["strong"] == [] and len(facts["spark"]) == 1
+
+    # В списке не больше трёх контактов — по числу пунктов раздела.
+    facts = _teaser_facts([asp("Venus", "square", "Mars")] * 5)
+    assert len(facts["spark"]) == 3
 
 
 def test_teaser_prompt_has_no_numbers_to_quote() -> None:
     natal_a = compute_natal(BIRTH, PLACE.lat, PLACE.lon, PLACE.tz)
     natal_b = compute_natal(datetime(1990, 5, 11, 12, 0), PLACE.lat, PLACE.lon, PLACE.tz)  # noqa: DTZ001
     calc = compute_synastry(natal_a, natal_b, a_time_known=True, b_time_known=False)
-    message = teaser_prompt.build_user(pair_teaser.facts(calc, natal_a, natal_b), name_b="Маша")
+    message = teaser_prompt.build_user(pair_teaser.facts(calc), name_b="Маша")
     # Ни орбов, ни градусов, ни процентов: процитировать модели нечего.
     assert "°" not in message and "%" not in message and "орб" not in message
-    assert "Сторона B — Маша." in message
+    assert "Партнёра зовут Маша." in message
+    # Планет во входе нет вовсе — только роли сторон.
+    for planet in ("Солнц", "Лун", "Венер", "Марс", "Сатурн"):
+        assert planet not in message
+    # Без имени пол партнёра неизвестен — местоимения закрыты строкой во входе.
+    nameless = teaser_prompt.build_user(pair_teaser.facts(calc))
+    assert "пола партнёра мы не знаем" in nameless
 
 
 def test_teaser_parse() -> None:
-    good = '```json\n{"strong": "вас  тянет", "spark": "он тормозит", "more": "темы"}\n```'
-    assert teaser_prompt.parse(good) == {"strong": "вас тянет", "spark": "он тормозит", "more": "темы"}
-    assert teaser_prompt.parse('{"strong": "совпадение 90%", "spark": "б", "more": "в"}') is None
-    assert teaser_prompt.parse('{"strong": "а", "spark": "б"}') is None
+    good = (
+        '```json\n{"hook": "молчат  третий день.", "spark": ["а", "б", "в", "г"], '
+        '"strong": ["д"], "outcome": "лёгкой не будет. Если один уступит, получится."}\n```'
+    )
+    assert teaser_prompt.parse(good) == {
+        "hook": "молчат третий день", "spark": ["А", "Б", "В"], "strong": ["Д"],
+        # От итога остаётся первая фраза: условие «если…» — уже платный ответ.
+        "outcome": "Лёгкой не будет.",
+    }
+    bad = '{"hook": "а", "spark": ["совпадение 90%"], "strong": ["д"], "outcome": "е"}'
+    assert teaser_prompt.parse(bad) is None
+    assert teaser_prompt.parse('{"hook": "а", "spark": [], "strong": ["д"], "outcome": "е"}') is None
+    assert teaser_prompt.parse('{"hook": "а", "spark": ["б"]}') is None
     assert teaser_prompt.parse("просто текст") is None

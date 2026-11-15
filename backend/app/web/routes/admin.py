@@ -426,6 +426,7 @@ def _vip_order_response(
             "price": orders.price_rub(order.report_type),
             "title": orders.title(order.report_type),
             "partner": vip_draft.partner_line(item) if item.is_pair else None,
+            "teaser": vip_draft.teaser_text(item) if item.is_pair else None,
             "delivery_hours": int(vip.DELIVERY_TIME.total_seconds() // 3600),
             "error": error,
             "edit_request": edit_request,

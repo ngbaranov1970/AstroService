@@ -97,7 +97,10 @@ def patched_storage(monkeypatch: pytest.MonkeyPatch, dialog: FakeDialog) -> None
 def services(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Подмены карты, тизера и заказа; запоминают, с чем их звали."""
     chart = SimpleNamespace(id=7, calc={"natal": {}}, time_known=True)
-    teaser = pair_teaser.Teaser(strong="вас тянет", spark="он тормозит", more="темы", image=b"png")
+    teaser = pair_teaser.Teaser(
+        hook="молчат третий день", strong=("вас тянет",), spark=("он тормозит",),
+        outcome="лёгкой не будет", image=b"png",
+    )
     order = SimpleNamespace(id=31, status=OrderStatus.PENDING, amount=39_000, token="tok")
     ns = SimpleNamespace(
         create_chart=AsyncMock(return_value=chart),
@@ -278,10 +281,19 @@ async def test_teaser_reply_has_three_lines_image_and_button(session, user, dial
     [reply] = await _job(session, user, out)
     assert reply.image == b"png"
     assert reply.text.startswith(texts.PAIR_TEASER_HEADER)
-    for label in ("Сильное: вас тянет", "Где искрит: он тормозит", "Что видно только в полном разборе: темы"):
-        assert label in reply.text
+    for line in (
+        "Молчат третий день", "▪ вас тянет", "▪ он тормозит",
+        "Итог: лёгкой не будет", pair_teaser.QUESTION,
+    ):
+        assert line in reply.text
+    # Сначала хорошее, потом больное.
+    assert reply.text.index("Что держит") < reply.text.index("Где искрит")
     assert _cmds(reply) == ["pair_full"]
     assert dialog.state == states.IDLE and dialog.data["pair"]["partner"]["date"] == "1990-05-11"
+    # Тизер остаётся в диалоге до заказа — с пометкой, про какого партнёра он писан.
+    saved = dialog.data["pair"]["teaser"]
+    assert saved["text"] == services.make.return_value.text
+    assert saved["for"] == ["1990-05-11", None]
     # Партнёр без времени считается в городе клиента: место партнёра не передаём.
     partner = services.partner_data.await_args.args[0]
     assert partner.birth_date == date(1990, 5, 11) and partner.birth_time is None and partner.place is None
