@@ -371,9 +371,7 @@ def _time_note(side: str, label: str, meta_side: dict) -> str | None:
 def pair_block(calc: dict, label_a: str, label_b: str) -> list[str]:
     """Строки расчёта пары для user-сообщения: от разницы возрастов до вовлечённости.
 
-    Вынесено из build_user, чтобы тот же блок получал черновик vip_pair
-    (llm/prompts/vip_pair.py). Правка формата здесь меняет оба промпта —
-    бампать надо VERSION обоих.
+    Правка формата здесь меняет промпт — бампать VERSION.
     """
     summary = calc["summary"]
     lines: list[str] = []

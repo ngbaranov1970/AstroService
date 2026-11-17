@@ -9,8 +9,9 @@
 простые конструкции («Сатурн и Уран в четвёртом доме», «Марс квадрат
 Сатурну»). Где связь неясна, место пропускается: ложная подсветка хуже
 пропуска — её перестают читать. Ничего не исправляет, только находит.
-check_pair() — то же для разбора пары: контакты между картами в любую из
-двух сторон, знаки по обеим картам, любые дома и знак «%» — находки.
+check_pair() — то же для разбора пары: аспект верен, если он есть между
+картами, внутри одной из карт или транзитом; дом — в своей карте или в карте
+партнёра; знак «%» — находка.
 Чистые функции, без базы и сети.
 """
 
@@ -90,7 +91,7 @@ _CLAUSE_BREAK = _SENTENCE_END | {":", "—", "(", ")", "«", "»"}
 class Finding:
     """Подозрительное место: что сказано (quote), что не так (message), где в тексте."""
 
-    kind: str  # house | sign | cusp | aspect | no_time | no_house | percent
+    kind: str  # house | sign | cusp | aspect | no_time | percent
     quote: str
     message: str
     start: int
@@ -410,28 +411,33 @@ def check_pair(
     calc: dict,
     natal_a: dict,
     natal_b: dict,
+    extras: dict,
     *,
     a_time_known: bool,
     b_time_known: bool,
 ) -> list[Finding]:
     """Подозрительные места черновика пары по порядку в тексте.
 
-    calc — синастрия (compute_synastry), natal_a и natal_b — карты сторон.
-    Чья планета, из текста не понять, поэтому контакт верен, если он есть в
-    расчёте в любую из двух сторон, а знак — если так стоит хотя бы у одной.
+    calc — синастрия (compute_synastry), natal_a и natal_b — карты сторон,
+    extras — services/vip_pair.extras. Чья планета, из текста не понять,
+    поэтому факт верен, если он есть в расчёте хотя бы в одном прочтении:
+    аспект — между картами, внутри любой карты или транзитом; дом — в своей
+    карте или в карте партнёра; знак — если так стоит хотя бы у одной стороны.
     """
     sides = (_side_points(natal_a, a_time_known), _side_points(natal_b, b_time_known))
     known = set(sides[0]) | set(sides[1])
-    contacts: dict[frozenset[str], set[str]] = {}
-    for a in calc["aspects"]:
-        contacts.setdefault(frozenset((a["a_ru"], a["b_ru"])), set()).add(a["type_ru"])
+    aspects = _pair_aspects(calc, natal_a, natal_b, extras)
+    houses = _pair_house_map(natal_a, natal_b, extras, a_time_known, b_time_known)
     # Луна стороны без времени приблизительна — её знак не сверяем.
     moon_unsure = not (a_time_known and b_time_known)
     no_axes = not (a_time_known or b_time_known)
 
     found: list[Finding] = []
     for sent in _sentences(_tokens(text)):
-        found += _pair_houses(text, sent, no_axes=no_axes)
+        if no_axes:
+            found += _pair_no_time(text, sent)
+        else:
+            found += _pair_houses(text, sent, houses)
         for planet, sign, quote, s, e in _sign_claims(text, sent):
             real = [side[planet] for side in sides if planet in side]
             if not real or sign in real or (planet == "Луна" and moon_unsure):
@@ -440,14 +446,16 @@ def check_pair(
                 Finding("sign", quote, f"{planet} по расчёту: {' и '.join(real)}; в тексте — {sign}", s, e)
             )
         for a, b, kind, quote, s, e in _aspect_claims(text, sent, known):
-            real_kinds = contacts.get(frozenset((a, b)))
+            real_kinds = aspects.get(frozenset((a, b)))
             if real_kinds is None:
-                found.append(Finding("aspect", quote, f"контакта {a} — {b} между картами нет", s, e))
+                found.append(
+                    Finding("aspect", quote, f"аспекта {a} — {b} нет ни между картами, ни в картах, ни в транзитах", s, e)
+                )
             elif kind not in real_kinds:
                 found.append(
                     Finding(
                         "aspect", quote,
-                        f"между картами {a} — {b}: {', '.join(sorted(real_kinds))}; в тексте — {kind}",
+                        f"по расчёту {a} — {b}: {', '.join(sorted(real_kinds))}; в тексте — {kind}",
                         s, e,
                     )
                 )
@@ -460,6 +468,45 @@ def check_pair(
     return sorted(unique.values(), key=lambda f: f.start)
 
 
+def _pair_aspects(calc: dict, natal_a: dict, natal_b: dict, extras: dict) -> dict[frozenset[str], set[str]]:
+    """Пара точек → типы аспектов, которые текст вправе назвать.
+
+    Источников три: контакты между картами, аспекты внутри каждой карты и
+    транзиты.
+    """
+    out: dict[frozenset[str], set[str]] = {}
+
+    def add(first: str, second: str, kind: str) -> None:
+        out.setdefault(frozenset((first, second)), set()).add(kind)
+
+    for a in calc["aspects"]:
+        add(a["a_ru"], a["b_ru"], a["type_ru"])
+    for natal in (natal_a, natal_b):
+        for a in natal["aspects"]:
+            add(a["p1_ru"], a["p2_ru"], a["type_ru"])
+    for side in ("a", "b"):
+        for t in extras[side]["transits"]:
+            add(t["body_ru"], t["point_ru"], t["aspect_ru"])
+    return out
+
+
+def _pair_house_map(
+    natal_a: dict, natal_b: dict, extras: dict, a_time_known: bool, b_time_known: bool
+) -> dict[str, set[int]]:
+    """Планета → дома, в которых текст вправе её поставить: свой и в карте партнёра."""
+    out: dict[str, set[int]] = {}
+    for natal, known in ((natal_a, a_time_known), (natal_b, b_time_known)):
+        if known:
+            for p in natal["planets"]:
+                if p.get("house"):
+                    out.setdefault(p["name_ru"], set()).add(p["house"])
+    for side in ("a", "b"):
+        for kind, key in (("overlay", "name_ru"), ("sky", "body_ru")):
+            for p in extras[side][kind] or []:
+                out.setdefault(p[key], set()).add(p["house"])
+    return out
+
+
 def _side_points(natal: dict, time_known: bool) -> dict[str, str]:
     """Точки одной стороны: имя → знак. Углы — только при известном времени."""
     points = {p["name_ru"]: p["sign_ru"] for p in natal["planets"]}
@@ -470,23 +517,39 @@ def _side_points(natal: dict, time_known: bool) -> dict[str, str]:
     return points
 
 
-def _pair_houses(text: str, sent: list[_Tok], *, no_axes: bool) -> list[Finding]:
-    """Дома и куспиды в разборе пары — всегда находка: в синастрии их не считали.
+def _pair_houses(text: str, sent: list[_Tok], houses: dict[str, set[int]]) -> list[Finding]:
+    """«<планеты> … в седьмом доме» против домов, допустимых для планеты в паре."""
+    out = []
+    for i in range(len(sent) - 2):
+        if sent[i].text.lower() not in ("в", "во") or not sent[i + 2].text.lower().startswith("дом"):
+            continue
+        num = _ordinal(sent[i + 1].text)
+        if num is None:
+            continue
+        group, g0 = _group_before(sent, i)
+        quote, s, e = _quote(text, sent, g0, i + 2)
+        for t in group:
+            real = houses.get(t.planet or "")
+            if t.planet in _ANGLES or not real or num in real:
+                continue
+            where = ", ".join(str(n) for n in sorted(real))
+            out.append(
+                Finding("house", quote, f"{t.planet} по расчёту в домах: {where}; в тексте — в {num}", s, e)
+            )
+    return out
 
-    no_axes — времени нет у обеих сторон: тогда находка и асцендент с MC.
-    """
+
+def _pair_no_time(text: str, sent: list[_Tok]) -> list[Finding]:
+    """Времени нет у обеих сторон: дома, куспиды, асцендент и MC — выдумка."""
     out = []
     for i, t in enumerate(sent):
         low = t.text.lower()
         house = low.startswith("куспид") or (
             low.startswith("дом") and i and _ordinal(sent[i - 1].text) is not None
         )
-        if house:
-            quote, s, e = _quote(text, sent, max(i - 2, 0), i)
-            out.append(Finding("no_house", quote, "домов в расчёте пары нет — мы их не считали", s, e))
-        elif no_axes and t.planet in _ANGLES:
+        if house or t.planet in _ANGLES:
             quote, s, e = _quote(text, sent, max(i - 2, 0), i)
             out.append(
-                Finding("no_time", quote, "время рождения неизвестно у обоих — асцендента и MC нет", s, e)
+                Finding("no_time", quote, "время рождения неизвестно у обоих — домов, асцендента и MC нет", s, e)
             )
     return out

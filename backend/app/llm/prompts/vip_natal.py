@@ -159,11 +159,18 @@ def build_user(natal: dict, gender: ClientGender | None, *, time_known: bool = T
     return "\n".join(lines)
 
 
-def chart_block(natal: dict, gender: ClientGender | None, *, time_known: bool = True) -> list[str]:
+def chart_block(
+    natal: dict,
+    gender: ClientGender | None,
+    *,
+    time_known: bool = True,
+    no_time_note: str = _NO_TIME_NOTE,
+) -> list[str]:
     """Строки расчёта карты: пол, планеты, углы, дома, аспекты.
 
     Публичная, потому что её зовёт vip_edit: правка обязана видеть карту
-    ровно так, как её видел черновик.
+    ровно так, как её видел черновик. no_time_note подменяет vip_pair: там
+    об отсутствии времени клиенту говорят прямо.
     """
     lines: list[str] = []
     if gender is not None:
@@ -184,7 +191,7 @@ def chart_block(natal: dict, gender: ClientGender | None, *, time_known: bool = 
         lines.append("Дома (куспиды, Placidus) и их управители:")
         lines += [_house_line(h) for h in natal["houses"]]
     else:
-        lines.append(_NO_TIME_NOTE)
+        lines.append(no_time_note)
 
     aspects = natal["aspects"]
     if not time_known:

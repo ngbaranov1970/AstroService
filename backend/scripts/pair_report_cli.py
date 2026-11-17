@@ -30,7 +30,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 # Скрипт запускают из каталога backend; добавляем его в путь импорта, чтобы
@@ -42,9 +42,11 @@ from app.llm.prompts import pair_free, pair_full, pair_teaser, vip_pair  # noqa:
 
 # Полдень при неизвестном времени берём у продукта, а не заводим свой: считать
 # приёмкой не то, что потом посчитает сервис, — значит вычитывать чужой текст.
+from app.models import ClientGender  # noqa: E402
 from app.services.charts import UNKNOWN_TIME  # noqa: E402
 from app.services.pair_teaser import _contact as teaser_contact  # noqa: E402
 from app.services.pair_teaser import facts as teaser_facts  # noqa: E402
+from app.services.vip_pair import extras_of  # noqa: E402
 from astro_core.geo import City, search_cities  # noqa: E402
 from astro_core.natal import compute_natal  # noqa: E402
 from astro_core.synastry import compute_synastry  # noqa: E402
@@ -122,6 +124,15 @@ def _side(date_str: str, time_str: str, city_query: str, pick: int) -> tuple[dic
     return natal, time_known, f"{date_str} {shown} {city.display_name}, {city.tz}"
 
 
+def _sent_contacts(prompt: str, calc: dict) -> int:
+    """Сколько контактов видит модель: у каждого промпта свой отбор."""
+    if prompt == "vip_pair":
+        return len(calc["aspects"])
+    if prompt == "pair_full":
+        return len(calc["summary"]["top"])
+    return pair_free.TOP_ASPECTS
+
+
 def _out_path(out_dir: Path, stamp: str, version: str, args: argparse.Namespace, run: int) -> Path:
     """Имя файла прогона: метка времени, версия промпта, связь, даты, номер.
 
@@ -184,10 +195,18 @@ def main() -> None:
         # Контакты пунктов считаем теми же функциями, что сервис тизера.
         selected = teaser_facts(calc)
         contacts = {key: [teaser_contact(a) for a in selected[key]] for key in ("strong", "spark")}
+        # Дома, транзиты и Луна без времени — той же функцией, что сервис черновика.
+        extras = extras_of(
+            natal_a, natal_b, a_time_known=known_a, b_time_known=known_b, today=date.today()  # noqa: DTZ011
+        )
         user_message = module.build_user(
             calc,
+            natal_a,
+            natal_b,
+            extras,
             name_a=args.name_a,
             name_b=args.name_b,
+            gender_a=ClientGender(args.gender_a) if args.gender_a else None,
             teaser=teaser,
             teaser_contacts=contacts if teaser else None,
         )
@@ -202,8 +221,7 @@ def main() -> None:
     print(f"B: {where_b}", file=sys.stderr)
     print(
         f"Контактов {len(calc['aspects'])}, в промпт идут "
-        f"{len(calc['summary']['top']) if args.prompt == 'pair_full' else pair_free.TOP_ASPECTS}"
-        f"; промпт {version}",
+        f"{_sent_contacts(args.prompt, calc)}; промпт {version}",
         file=sys.stderr,
     )
 
@@ -289,6 +307,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--name-a", help="имя стороны A (в тексте к ней обращаются на «ты»)")
     parser.add_argument("--name-b", help="имя стороны B")
+    parser.add_argument(
+        "--gender-a",
+        choices=[g.value for g in ClientGender],
+        help="род обращения к стороне A (только для vip_pair; в боте его спрашивают перед заказом)",
+    )
     parser.add_argument(
         "--prompt",
         choices=sorted(PROMPTS),

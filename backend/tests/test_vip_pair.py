@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm import client as llm
 from app.llm.prompts import pair_teaser as teaser_prompt
 from app.llm.prompts import vip_pair as vip_pair_prompt
-from app.models import Chart, Order, OrderStatus, ReportType, User
+from app.models import Chart, ClientGender, Order, OrderStatus, ReportType, User
 from app.services import charts, orders, pair_teaser, vip, vip_check, vip_draft, vip_pair
 from app.vk import api as vk_api
 from astro_core.natal import compute_natal
@@ -49,12 +49,12 @@ def base(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         found = [o for o in state["orders"] if o.status is status]
         return sorted(found, key=lambda o: o.id, reverse=True)
 
-    async def fake_insert(session, *, user_id, chart_id, data, amount):
+    async def fake_insert(session, *, user_id, chart_id, data, amount, gender=None):
         state["inserted"] += 1
         order = Order(
             id=100 + state["inserted"], user_id=user_id, chart_id=chart_id,
             report_type=ReportType.VIP_PAIR, amount=amount,
-            status=OrderStatus.PENDING, pair_data=data,
+            status=OrderStatus.PENDING, pair_data=data, client_gender=gender,
         )
         state["orders"].append(order)
         return order
@@ -165,6 +165,21 @@ async def test_paid_is_checked_by_partner_not_by_client_chart(base: dict[str, An
     ) is first
 
 
+async def test_gender_is_saved_and_survives_repeat_and_reopen(base: dict[str, Any]) -> None:
+    kw = {"user": User(id=1), "birth_local": BIRTH, "birth_time_known": True, "place": PLACE,
+          "partner": MASHA, "ref": "pair_dm"}
+    order = await vip_pair.create_order(SESSION, **kw, client_gender=ClientGender.FEMALE)
+    assert order.client_gender is ClientGender.FEMALE
+    # Повтор исправляет ошибочное нажатие; повтор без ответа род не стирает.
+    assert (await vip_pair.create_order(SESSION, **kw, client_gender=ClientGender.MALE)) is order
+    assert order.client_gender is ClientGender.MALE
+    await vip_pair.create_order(SESSION, **kw)
+    assert order.client_gender is ClientGender.MALE
+    # Новый заказ после мёртвого платежа род наследует.
+    order.status = OrderStatus.CANCELED
+    assert (await vip_pair.reopen(SESSION, order)).client_gender is ClientGender.MALE
+
+
 async def test_reopen_returns_live_order_as_is(base: dict[str, Any]) -> None:
     order = await _create(MASHA)
     assert await vip_pair.reopen(SESSION, order) is order
@@ -234,7 +249,9 @@ async def test_draft_for_pair_uses_pair_prompt(monkeypatch: pytest.MonkeyPatch) 
     await vip_draft.make_draft(cast(AsyncSession, _Session()), 12)
     assert seen["system"] == vip_pair_prompt.SYSTEM
     assert "Сторона B: Маша" in seen["user"]
-    assert "Луна стороны B (Маша) приблизительная" in seen["user"]
+    # Дома клиента, Луна партнёра без времени и транзиты доехали до модели.
+    assert "Луна стороны B:" in seen["user"]
+    assert "# Планеты B в домах A" in seen["user"] and "К карте B:" in seen["user"]
     assert item.order.draft_text == "Главное про вас двоих\n\nТекст."
 
 
@@ -282,29 +299,70 @@ async def test_deliver_pair_logs_event_with_ref(monkeypatch: pytest.MonkeyPatch)
 
 async def test_check_pair_findings() -> None:
     item = await _pair_item()
-    calc = vip_pair.synastry(item.chart, item.order.pair_data)
-    natal_a, natal_b = item.chart.calc["natal"], item.order.pair_data["natal"]
+    pair_data = item.order.pair_data
+    calc = vip_pair.synastry(item.chart, pair_data)
+    natal_a, natal_b = item.chart.calc["natal"], pair_data["natal"]
+    today = date(2026, 11, 16)
 
     def kinds(text: str, *, a: bool = True, b: bool = False) -> list[str]:
-        found = vip_check.check_pair(text, calc, natal_a, natal_b, a_time_known=a, b_time_known=b)
+        extras = vip_pair.extras_of(natal_a, natal_b, a_time_known=a, b_time_known=b, today=today)
+        found = vip_check.check_pair(
+            text, calc, natal_a, natal_b, extras, a_time_known=a, b_time_known=b
+        )
         return [f.kind for f in found]
 
     # Солнце A — соединение — Марс B есть в расчёте: в любую сторону верно.
     assert kinds("Твоё Солнце в соединении с Марсом Маши.") == []
     assert kinds("Марс Маши в соединении с твоим Солнцем.") == []
-    # Тот же контакт другого типа и контакт, которого нет вовсе.
+    # Тот же контакт другого типа.
     assert kinds("Твоё Солнце в квадрате к Марсу Маши.") == ["aspect"]
     # Знак верен, если так стоит хотя бы у одной стороны.
     assert kinds("Солнце в Рыбах, а у Маши Солнце в Тельце.") == []
     assert kinds("Солнце в Скорпионе тут ни при чём.") == ["sign"]
-    # Дома и проценты в разборе пары — всегда находка.
-    assert kinds("Его Марс в твоём седьмом доме.") == ["no_house"]
     assert kinds("Совместимость 87% — это много.") == ["percent"]
-    # Асцендент — находка, только если времени нет у обоих.
+    # Асцендент и дома — находка, только если времени нет у обоих.
     assert kinds("Твой Асцендент здесь молчит.") == []
     assert kinds("Твой Асцендент здесь молчит.", a=False) == ["no_time"]
+    assert kinds("Его Марс в твоём седьмом доме.", a=False) == ["no_time"]
     # Луна стороны без времени приблизительна — её знак не сверяем.
     assert kinds("Луна в Весах делает её мягче.") == []
+
+
+async def test_check_pair_houses_and_natal_aspects() -> None:
+    item = await _pair_item()
+    pair_data = item.order.pair_data
+    calc = vip_pair.synastry(item.chart, pair_data)
+    natal_a, natal_b = item.chart.calc["natal"], pair_data["natal"]
+    extras = vip_pair.extras(item.chart, pair_data, date(2026, 11, 16))
+
+    def kinds(text: str) -> list[str]:
+        found = vip_check.check_pair(
+            text, calc, natal_a, natal_b, extras, a_time_known=True, b_time_known=False
+        )
+        return [f.kind for f in found]
+
+    own = {p["name_ru"]: p["house"] for p in natal_a["planets"]}
+    guest = {p["name_ru"]: p["house"] for p in extras["a"]["overlay"]}
+    ordinals = ["", "первом", "втором", "третьем", "четвёртом", "пятом", "шестом", "седьмом",
+                "восьмом", "девятом", "десятом", "одиннадцатом", "двенадцатом"]
+    # Марс верен и в своём доме, и в доме по наложению; в остальных — находка.
+    assert kinds(f"Твой Марс в {ordinals[own['Марс']]} доме.") == []
+    assert kinds(f"Марс Маши в {ordinals[guest['Марс']]} доме твоей карты.") == []
+    wrong = next(n for n in range(1, 13) if n not in (own["Марс"], guest["Марс"]))
+    assert kinds(f"Марс в {ordinals[wrong]} доме.") == ["house"]
+
+    # Аспект внутри карты одной стороны — не находка, хотя между картами его нет.
+    between = {frozenset((a["a_ru"], a["b_ru"])) for a in calc["aspects"]}
+    inner = next(
+        a for a in natal_b["aspects"]
+        if frozenset((a["p1_ru"], a["p2_ru"])) not in between
+        and a["type_ru"] == "квадрат" and "Северный узел" not in (a["p1_ru"], a["p2_ru"])
+        and "Середина неба" not in (a["p1_ru"], a["p2_ru"])
+    )
+    forms = {"Солнце": "Солнцу", "Луна": "Луне", "Меркурий": "Меркурию", "Венера": "Венере",
+             "Марс": "Марсу", "Юпитер": "Юпитеру", "Сатурн": "Сатурну", "Уран": "Урану",
+             "Нептун": "Нептуну", "Плутон": "Плутону", "Хирон": "Хирону", "Асцендент": "Асценденту"}
+    assert kinds(f"У Маши {inner['p1_ru']} в квадрате к {forms[inner['p2_ru']]}.") == []
 
 
 # --- отбор фактов тизера ---------------------------------------------------------

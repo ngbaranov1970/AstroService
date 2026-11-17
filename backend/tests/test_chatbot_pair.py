@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot import router, states, texts
 from app.chatbot.flows import pair
 from app.chatbot.types import Button, Incoming, Job, LinkButton, Reply
-from app.models import OrderStatus, ReportType, User
+from app.models import ClientGender, OrderStatus, ReportType, User
 from app.services import orders, pair_teaser
 
 LAST = {
@@ -293,9 +293,11 @@ async def test_astrologer_button_shows_price_then_direct_entry(session, user, di
     await _say(session, user, "", {"cmd": "pair_time_unknown"}, check=not_member)
     out = await _say(session, user, "", {"cmd": "pair_skip_name"}, check=not_member)
 
-    # Цену человек уже видел — после партнёра сразу сводка, без второго описания.
+    # Цену человек уже видел — после партнёра сразу вопрос о роде и сводка, без второго описания.
     assert dialog.state == states.PAIR_ORDER
     assert texts.PAIR_INTRO.format(price=price) not in _texts(out)
+    assert _cmds(out[-1]) == ["pair_gender", "pair_gender"]
+    out = await _say(session, user, "", {"cmd": "pair_gender", "g": "male"}, check=not_member)
     assert _cmds(out[-1]) == ["pair_confirm", "pair_fix"]
     assert {props["ref"] for _, props in session.events()} == {pair.REF_ASTROLOGER}
 
@@ -361,7 +363,10 @@ async def _to_order(session, user):
     out = await _to_teaser(session, user)
     await _job(session, user, out)
     await _say(session, user, "", {"cmd": "pair_full"})
-    return await _say(session, user, "", {"cmd": "pair_go"})
+    # «Оформить» сначала спрашивает род обращения — отвечаем кнопкой.
+    [ask] = await _say(session, user, "", {"cmd": "pair_go"})
+    assert ask.text == texts.VIP_ASK_GENDER and _cmds(ask) == ["pair_gender", "pair_gender"]
+    return await _say(session, user, "", {"cmd": "pair_gender", "g": "female"})
 
 
 async def test_summary_warns_about_partner_without_time(session, user, dialog, services) -> None:
@@ -369,8 +374,22 @@ async def test_summary_warns_about_partner_without_time(session, user, dialog, s
     assert dialog.state == states.PAIR_ORDER
     assert "Ты: 9 марта 1987, 14:30, Егорьевск, RU" in reply.text
     assert "Партнёр: 11 мая 1990, время неизвестно" in reply.text
+    assert "Обращение к тебе: в женском роде" in reply.text
     assert texts.PAIR_NO_TIME_NOTE in reply.text
     assert _cmds(reply) == ["pair_confirm", "pair_fix"]
+
+
+async def test_confirm_without_gender_asks_it_first(session, user, dialog, services) -> None:
+    out = await _to_teaser(session, user)
+    await _job(session, user, out)
+    await _say(session, user, "", {"cmd": "pair_full"})
+    await _say(session, user, "", {"cmd": "pair_go"})
+    # Текст вместо кнопки и старая кнопка «Всё верно» — вопрос повторяется, заказа нет.
+    [again] = await _say(session, user, "женский")
+    assert again.text == texts.VIP_ASK_GENDER
+    [still] = await _say(session, user, "", {"cmd": "pair_confirm"})
+    assert still.text == texts.VIP_ASK_GENDER
+    services.create_order.assert_not_awaited()
 
 
 async def test_confirm_creates_order_and_gives_pay_link(session, user, dialog, services) -> None:
@@ -383,6 +402,7 @@ async def test_confirm_creates_order_and_gives_pay_link(session, user, dialog, s
     assert button.label == "Оплатить 390 ₽"
     kwargs = services.create_order.await_args.kwargs
     assert kwargs["ref"] == "pair_dm" and kwargs["partner"].birth_date == date(1990, 5, 11)
+    assert kwargs["client_gender"] is ClientGender.FEMALE
     # Партнёр ушёл в заказ, в диалоге остались только свои данные.
     assert dialog.state == states.IDLE and dialog.data == {"last": LAST}
 
@@ -411,6 +431,7 @@ async def test_ref_is_in_every_event(session, user, dialog, services) -> None:
     await _job(session, user, out)
     await _say(session, user, "", {"cmd": "pair_full"})
     await _say(session, user, "", {"cmd": "pair_go"})
+    await _say(session, user, "", {"cmd": "pair_gender", "g": "female"})
     await _say(session, user, "", {"cmd": "pair_confirm"})
     assert session.event_names() == [
         "pair_started", "pair_partner_given", "pair_teaser_shown", "pair_order_created",

@@ -26,6 +26,7 @@ from app.llm.prompts import vip_pair as vip_pair_prompt
 from app.services import events, vip, vip_check, vip_pair
 from app.services.vip import VipOrder
 from app.vk import api as vk_api
+from astro_core import transits
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ PARAGRAPH_SEP = "\n\n"
 
 class VipDraftError(RuntimeError):
     """Действие с текстом невозможно; сообщение — для показа в админке."""
+
+
+def _today() -> date:
+    """Сегодня по Москве: сервер живёт в Europe/Berlin, а даты транзитов московские."""
+    return datetime.now(transits.MSK).date()
 
 
 async def _load(session: AsyncSession, order_id: int) -> VipOrder:
@@ -107,7 +113,12 @@ async def make_draft(session: AsyncSession, order_id: int, model: str | None = N
         # профиля VK — не то, как человека зовут дома.
         user_prompt = vip_pair_prompt.build_user(
             vip_pair.synastry(chart, pair_data),
+            chart.calc["natal"],
+            pair_data["natal"],
+            # Транзиты считаются от сегодняшнего дня: черновик через месяц даст другие даты.
+            vip_pair.extras(chart, pair_data, _today()),
             name_b=pair_data.get("name"),
+            gender_a=order.client_gender,
             teaser=teaser_text(item),
             teaser_contacts=(pair_data.get("teaser") or {}).get("contacts"),
         )
@@ -201,6 +212,7 @@ def check_draft(item: VipOrder, text: str | None = None) -> list[vip_check.Findi
             vip_pair.synastry(item.chart, pair_data),
             item.chart.calc["natal"],
             pair_data["natal"],
+            vip_pair.extras(item.chart, pair_data, _today()),
             a_time_known=item.chart.time_known,
             b_time_known=vip_pair.time_known(pair_data),
         )

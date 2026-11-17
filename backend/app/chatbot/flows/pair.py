@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot import parse, states, storage, texts
 from app.chatbot.flows import natal, vip
 from app.chatbot.types import Button, Incoming, Job, LinkButton, Outgoing, Reply
-from app.models import BotDialog, OrderStatus, ReportType, User
+from app.models import BotDialog, ClientGender, OrderStatus, ReportType, User
 from app.services import charts as charts_service
 from app.services import events, orders, pair_teaser, vip_pair
 from app.services import vip as vip_service
@@ -41,6 +41,11 @@ _DIRECT_REFS = (REF_VIP, REF_ASTROLOGER)
 _KEY = "pair"
 _ASK_DATE, _ASK_TIME, _ASK_CITY, _ASK_NAME = "date", "time", "city", "name"
 _YES = frozenset({"да", "ага", "верно", "все верно", "ок", "+"})
+# Род, в котором разбор обращается к клиенту: значение кнопки → подпись в сводке.
+_GENDERS = {
+    ClientGender.FEMALE.value: texts.GENDER_FEMALE,
+    ClientGender.MALE.value: texts.GENDER_MALE,
+}
 
 # Тизер завис дольше этого (перезапуск процесса посреди Job) — предлагаем повторить.
 _WAIT_STALE = timedelta(minutes=5)
@@ -248,6 +253,8 @@ async def dispatch(
         return await _offer(session, dialog, pair)
     if cmd == "pair_go":
         return await _summary(session, dialog, pair)
+    if cmd == "pair_gender" and payload.get("g") in _GENDERS:
+        return await _summary(session, dialog, {**pair, "gender": payload["g"]})
     if cmd == "pair_fix":
         # Заход на исправление — не новый вход: pair_started второй раз не пишем.
         return await _ask_self(session, user, dialog, pair)
@@ -551,11 +558,16 @@ async def _offer(
 async def _summary(
     session: AsyncSession, dialog: BotDialog, pair: dict[str, Any]
 ) -> list[Outgoing]:
-    """Сводка обеих сторон перед заказом."""
+    """Сводка обеих сторон перед заказом; без ответа о роде сначала спрашивает его."""
     await _save(session, dialog, pair, states.PAIR_ORDER)
+    # Род спрашиваем только на пути к платному заказу: бесплатный тизер он не удлиняет.
+    if pair.get("gender") not in _GENDERS:
+        return [_gender_reply()]
     partner = pair["partner"]
     text = texts.PAIR_CONFIRM.format(
-        me=natal.summary(pair["self"]), partner=partner_summary(partner)
+        me=natal.summary(pair["self"]),
+        partner=partner_summary(partner),
+        gender=_GENDERS[pair["gender"]],
     )
     if not partner.get("time_known"):
         text += "\n\n" + texts.PAIR_NO_TIME_NOTE
@@ -571,6 +583,20 @@ async def _summary(
             inline=True,
         )
     ]
+
+
+def _gender_reply() -> Reply:
+    """«Как к тебе обращаться в тексте?» — те же две кнопки, что в VIP-разборе карты."""
+    return Reply(
+        text=texts.VIP_ASK_GENDER,
+        buttons=[
+            [
+                Button(texts.BTN_FEMALE, {"cmd": "pair_gender", "g": ClientGender.FEMALE.value}),
+                Button(texts.BTN_MALE, {"cmd": "pair_gender", "g": ClientGender.MALE.value}),
+            ]
+        ],
+        inline=True,
+    )
 
 
 def _teaser_key(partner: dict[str, Any]) -> list[Any]:
@@ -589,6 +615,9 @@ def _teaser_for(pair: dict[str, Any]) -> dict[str, Any] | None:
 async def _create(
     session: AsyncSession, user: User, dialog: BotDialog, pair: dict[str, Any]
 ) -> list[Outgoing]:
+    # Кнопка «Всё верно» из сводки до выкатки вопроса о роде: сначала спросим.
+    if pair.get("gender") not in _GENDERS:
+        return await _summary(session, dialog, pair)
     birth_local, time_known, place = natal.birth_values(pair["self"])
     ref = pair.get("ref")
     try:
@@ -601,6 +630,7 @@ async def _create(
             partner=_partner(pair["partner"]),
             ref=ref,
             teaser=_teaser_for(pair),
+            client_gender=ClientGender(pair["gender"]),
         )
     except orders.NotForSaleError:
         await storage.save(session, dialog, state=states.IDLE)

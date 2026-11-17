@@ -13,21 +13,27 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chart, Order, OrderStatus, ReportType, User
+from app.models import Chart, ClientGender, Order, OrderStatus, ReportType, User
 from app.services import charts, events, orders
+from astro_core import personal
 from astro_core.natal import compute_natal
 from astro_core.synastry import compute_synastry
 
 logger = logging.getLogger(__name__)
 
 _NAME_MAX = 60
+
+# Окно транзитов вокруг дня черновика: назад — чтобы видеть уже идущее
+# («Уран прошёл по MC в июле»), вперёд — горизонт прогноза в разборе.
+FORECAST_BACK_DAYS = 180
+FORECAST_AHEAD_DAYS = 540
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +107,51 @@ def synastry(chart: Chart, pair_data: dict[str, Any]) -> dict:
     )
 
 
+def extras(chart: Chart, pair_data: dict[str, Any], today: date) -> dict:
+    """Добавки к синастрии для черновика и проверки фактов: дома, транзиты, Луна.
+
+    Не хранятся, как и синастрия: транзиты зависят от дня, когда пишут черновик.
+    """
+    return extras_of(
+        chart.calc["natal"],
+        pair_data["natal"],
+        a_time_known=chart.time_known,
+        b_time_known=time_known(pair_data),
+        today=today,
+    )
+
+
+def extras_of(
+    natal_a: dict, natal_b: dict, *, a_time_known: bool, b_time_known: bool, today: date
+) -> dict:
+    """То же по двум наталам, без базы — для scripts/pair_report_cli.py.
+
+    По сторонам "a" и "b": overlay — планеты партнёра в домах этой стороны,
+    sky — медленные планеты в её домах сегодня (оба None без времени
+    рождения), transits — транзиты за окно прогноза, moon — диапазон Луны
+    за сутки рождения (None, когда время известно).
+    """
+    start = today - timedelta(days=FORECAST_BACK_DAYS)
+    end = today + timedelta(days=FORECAST_AHEAD_DAYS)
+
+    def side(own: dict, other: dict, known: bool) -> dict:
+        meta = own["meta"]
+        return {
+            "overlay": personal.overlay(own, other) if known else None,
+            "sky": personal.sky_in_houses(own, today) if known else None,
+            "transits": personal.transits_to(own, start, end, time_known=known),
+            "moon": None
+            if known
+            else personal.moon_span(date.fromisoformat(meta["birth_local"][:10]), meta["tz"]),
+        }
+
+    return {
+        "today": today,
+        "a": side(natal_a, natal_b, a_time_known),
+        "b": side(natal_b, natal_a, b_time_known),
+    }
+
+
 async def _orders_of(
     session: AsyncSession, user_id: int, status: OrderStatus
 ) -> list[Order]:
@@ -141,8 +192,12 @@ async def create_order(
     partner: Partner,
     ref: str | None,
     teaser: dict[str, Any] | None = None,
+    client_gender: ClientGender | None = None,
 ) -> Order:
     """Заказ vip_pair: оплаченный на того же партнёра, ждущий или новый.
+
+    client_gender — в каком роде разбор обращается к клиенту; у оплаченного
+    заказа не меняется.
 
     teaser — {"text", "contacts", "version"} бесплатного тизера, который клиент видел
     перед покупкой; ложится в pair_data, оттуда — в промпт и на карточку.
@@ -167,7 +222,9 @@ async def create_order(
     paid = await find_paid(session, user_id=user.id, chart_id=chart.id, pair_data=data)
     if paid is not None:
         return paid
-    return await _upsert_pending(session, user_id=user.id, chart_id=chart.id, data=data)
+    return await _upsert_pending(
+        session, user_id=user.id, chart_id=chart.id, data=data, gender=client_gender
+    )
 
 
 async def reopen(session: AsyncSession, order: Order) -> Order:
@@ -188,7 +245,11 @@ async def reopen(session: AsyncSession, order: Order) -> Order:
     if paid is not None:
         return paid
     live = await _upsert_pending(
-        session, user_id=order.user_id, chart_id=order.chart_id, data=order.pair_data
+        session,
+        user_id=order.user_id,
+        chart_id=order.chart_id,
+        data=order.pair_data,
+        gender=order.client_gender,
     )
     # Вычитанный текст не теряем: у свежего заказа черновика ещё нет.
     if live.draft_text is None:
@@ -197,7 +258,12 @@ async def reopen(session: AsyncSession, order: Order) -> Order:
 
 
 async def _upsert_pending(
-    session: AsyncSession, *, user_id: int, chart_id: int | None, data: dict[str, Any]
+    session: AsyncSession,
+    *,
+    user_id: int,
+    chart_id: int | None,
+    data: dict[str, Any],
+    gender: ClientGender | None,
 ) -> Order:
     """Единственный ждущий заказ пары этого человека: переписать или завести."""
     amount = orders.price(ReportType.VIP_PAIR)
@@ -220,6 +286,8 @@ async def _upsert_pending(
                 data = {**data, "teaser": order.pair_data["teaser"]}
             # Имя и ref обновляем и у того же партнёра: повтор исправляет опечатку.
             order.pair_data = data
+            if gender is not None:
+                order.client_gender = gender
             logger.info(
                 "Заказ пары %s: ждущий, пользователь %s, партнёр %s",
                 order.id, user_id, "тот же" if same else "переписан",
@@ -228,7 +296,7 @@ async def _upsert_pending(
 
         try:
             return await _insert(
-                session, user_id=user_id, chart_id=chart_id, data=data, amount=amount
+                session, user_id=user_id, chart_id=chart_id, data=data, amount=amount, gender=gender
             )
         except IntegrityError:
             # Двойное нажатие: параллельный запрос вставил ждущий заказ первым
@@ -245,6 +313,7 @@ async def _insert(
     chart_id: int | None,
     data: dict[str, Any],
     amount: int,
+    gender: ClientGender | None = None,
 ) -> Order:
     order = Order(
         user_id=user_id,
@@ -253,6 +322,7 @@ async def _insert(
         amount=amount,
         status=OrderStatus.PENDING,
         pair_data=data,
+        client_gender=gender,
     )
     # SAVEPOINT: ошибка уникального индекса иначе обрушила бы всю транзакцию.
     async with session.begin_nested():

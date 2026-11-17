@@ -291,14 +291,14 @@ def _pair_item(**order_kw) -> vip.VipOrder:
 
 
 def test_pair_card_shows_both_sides_and_hides_model_edit(client: TestClient, order: dict) -> None:
-    order["item"] = _pair_item(draft_text="Его Марс в твоём седьмом доме. Совместимость 90%.")
+    order["item"] = _pair_item(draft_text="Солнце в Скорпионе тут ни при чём. Совместимость 90%.")
     response = client.get(URL)
 
     assert response.status_code == 200
     assert "Партнёр" in response.text and "Маша, 11.05.1990, время неизвестно" in response.text
     assert "pair_post" in response.text
     # Находки — от проверки пары, а не от натальной.
-    assert "домов в расчёте пары нет" in response.text
+    assert "Солнце по расчёту: Рыбы и Телец" in response.text
     assert "процентов и оценок совместимости" in response.text
     # Правки просьбой к модели у пары нет; новый черновик и отправка — есть.
     assert "Попросить модель" not in response.text

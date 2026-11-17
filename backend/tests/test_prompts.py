@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -28,8 +28,10 @@ from app.llm.prompts import (
     vip_natal,
     vip_pair,
 )
-from app.models import PairKind
+from app.models import ClientGender, PairKind
+from app.services.vip_pair import extras_of
 from app.web.templating import md
+from astro_core.synastry import compute_synastry
 
 # Богатая пара из эталонов синастрии (43 контакта) — на ней видно все блоки
 # user-сообщения сразу. Читаем файл, а не собираем словарь руками: расчёт
@@ -247,7 +249,7 @@ def test_pair_full_build_user_stihii_slovami() -> None:
 
 
 def test_pair_full_tekst_ne_izmenilsya_pri_vynose_pair_block() -> None:
-    # pair_block вынесен из build_user ради vip_pair. Отпечаток снят на коде
+    # pair_block вынесен из build_user отдельной функцией. Отпечаток снят на коде
     # ДО выноса: сообщение обязано совпасть побайтно, пока VERSION прежняя —
     # иначе кеш pair_full_v1 хранит тексты по другому промпту.
     message = pair_full.build_user(_pair_calc(), kind="romance", name_a="Коля", name_b="Маша")
@@ -259,40 +261,71 @@ def test_pair_full_tekst_ne_izmenilsya_pri_vynose_pair_block() -> None:
 # --- vip_pair: черновик разбора пары из бота -------------------------------
 
 
-def test_vip_pair_build_user_beryot_blok_rascheta_u_pair_full() -> None:
-    calc = _pair_calc()
-    message = vip_pair.build_user(calc, name_b="Маша")
+def _vip_pair_message(*, b_time_known: bool = False, **kw) -> str:
+    """Вход vip_pair по двум золотым картам: синастрия и добавки настоящие."""
+    natal_a = _natal()
+    natal_b = json.loads((_GOLDEN_NATAL.parent / "1992-01-10_moscow.json").read_text(encoding="utf-8"))
+    calc = compute_synastry(natal_a, natal_b, a_time_known=True, b_time_known=b_time_known)
+    extras = extras_of(
+        natal_a, natal_b, a_time_known=True, b_time_known=b_time_known, today=date(2026, 11, 16)
+    )
+    return vip_pair.build_user(calc, natal_a, natal_b, extras, **kw)
 
-    # Тот же расчёт, что получает pair_full, — строка в строку.
-    assert "\n".join(pair_full.pair_block(calc, "ты", "Маша")) in message
-    assert "Сторона B: Маша" in message
-    assert "По имени не называй." in message
+
+def test_vip_pair_build_user_neset_karty_doma_i_tranzity() -> None:
+    message = _vip_pair_message(name_b="Маша")
+
+    assert "Сегодня: 16.11.2026." in message
+    assert "Сторона B: Маша" in message and "По имени не называй." in message
     assert "Тип связи: романтические отношения или брак." in message
+    # Обе карты целиком: у стороны с временем — дома, у стороны без него — пометка.
+    assert "# Карта стороны A (ты)" in message and "# Карта стороны B (Маша)" in message
+    assert "Дома (куспиды, Placidus)" in message
+    assert "асцендента, MC и домов у этой карты нет" in message
+    assert "Луна стороны B:" in message
+    # Наложение считается только на дома стороны с известным временем.
+    assert re.search(r"- Солнце B — \d+ дом A", message)
+    assert "- домов у стороны B нет: время рождения неизвестно" in message
+    assert "Сегодня в домах A:" in message and "Сегодня в домах B:" not in message
+    assert "К карте A:" in message and "К карте B:" in message
+    # Штатная пометка натала велит молчать про время — в паре её быть не должно.
+    assert "не оговаривай отсутствие времени" not in message
+
+
+def test_vip_pair_vremya_u_oboih() -> None:
+    message = _vip_pair_message(b_time_known=True)
+
+    assert "Луна стороны" not in message and "Луна приблизительная" not in message
+    assert re.search(r"- Солнце A — \d+ дом B", message)
+
+
+def test_vip_pair_rod_zakazchika() -> None:
+    # Род спрашивает бот; без него (старые заказы) — запрет форм со скобками.
+    assert "Заказчик — женщина" in _vip_pair_message(gender_a=ClientGender.FEMALE)
+    assert "Заказчик — мужчина" in _vip_pair_message(gender_a=ClientGender.MALE)
+    unknown = _vip_pair_message()
+    assert "Пол заказчика неизвестен" in unknown and "Заказчик —" not in unknown
 
 
 def test_vip_pair_bez_imeni_partnera() -> None:
-    message = vip_pair.build_user(_pair_calc())
-
-    assert "пиши «твой партнёр»" in message
+    assert "пиши «твой партнёр»" in _vip_pair_message()
 
 
 def test_vip_pair_teaser_idyot_v_prompt() -> None:
-    calc = _pair_calc()
     # Без тизера блока нет: клиент мог прийти с экрана VIP, минуя тизер.
-    assert "бесплатный тизер" not in vip_pair.build_user(calc)
-    message = vip_pair.build_user(
-        calc,
+    assert "бесплатный тизер" not in _vip_pair_message()
+    message = _vip_pair_message(
         teaser="Оба молчат\n\n▪ ждёте догадки",
         teaser_contacts={"strong": [], "spark": ["Сатурн A — соединение — Солнце B"]},
     )
     assert "▪ ждёте догадки" in message and "Каждый пункт тизера разбор обязан объяснить" in message
-    # Контакт пункта идёт во вход, даже если его нет среди двенадцати сильнейших.
     assert "1. Сатурн A — соединение — Солнце B" in message and "«Что держит» написаны" not in message
 
 
 def test_vip_pair_system_derzhit_pravila_pary() -> None:
-    # Домов в расчёте пары нет — это правило про факты, оно обязано стоять в SYSTEM.
-    assert "Домов в данных нет" in vip_pair.SYSTEM
+    # Правила про факты обязаны стоять в SYSTEM: дома — только при известном времени.
+    assert "Дома есть только у стороны, чьё время рождения известно" in vip_pair.SYSTEM
+    assert "Транзиты бери только из списка" in vip_pair.SYSTEM
     # Блок запретов снят 15.11.2026: текст вычитывает владелец.
     assert "Что не делаешь" not in vip_pair.SYSTEM
     assert vip_pair.FIRST_TITLE in vip_pair.SYSTEM and vip_pair.LAST_TITLE in vip_pair.SYSTEM
