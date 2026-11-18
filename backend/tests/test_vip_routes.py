@@ -290,7 +290,7 @@ def _pair_item(**order_kw) -> vip.VipOrder:
     return vip.VipOrder(order=Order(**{**base, **order_kw}), user=user, chart=chart)
 
 
-def test_pair_card_shows_both_sides_and_hides_model_edit(client: TestClient, order: dict) -> None:
+def test_pair_card_shows_both_sides_and_model_edit(client: TestClient, order: dict) -> None:
     order["item"] = _pair_item(draft_text="Солнце в Скорпионе тут ни при чём. Совместимость 90%.")
     response = client.get(URL)
 
@@ -300,8 +300,8 @@ def test_pair_card_shows_both_sides_and_hides_model_edit(client: TestClient, ord
     # Находки — от проверки пары, а не от натальной.
     assert "Солнце по расчёту: Рыбы и Телец" in response.text
     assert "процентов и оценок совместимости" in response.text
-    # Правки просьбой к модели у пары нет; новый черновик и отправка — есть.
-    assert "Попросить модель" not in response.text
+    # Правка просьбой к модели, новый черновик и отправка — как у натала.
+    assert f'action="{URL}/edit"' in response.text and "«Слабые места»" in response.text
     assert "Новый черновик с нуля" in response.text
     assert f'action="{URL}/deliver"' in response.text
 

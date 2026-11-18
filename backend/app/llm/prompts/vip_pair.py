@@ -238,7 +238,7 @@ def _teaser_block(teaser: str, contacts: dict | None) -> list[str]:
     ]
 
 
-def build_user(
+def data_lines(
     calc: dict,
     natal_a: dict,
     natal_b: dict,
@@ -249,12 +249,12 @@ def build_user(
     gender_a: ClientGender | None = None,
     teaser: str | None = None,
     teaser_contacts: dict | None = None,
-) -> str:
-    """User-сообщение: синастрия calc, обе карты и extras (services/vip_pair.extras).
+) -> list[str]:
+    """Данные пары для модели: синастрия calc, обе карты и extras (services/vip_pair.extras).
 
-    Тип связи — всегда романтика. gender_a — род обращения к заказчику; None
-    у заказов до вопроса о роде в боте. teaser — текст бесплатного тизера,
-    если клиент пришёл через него.
+    Общие для черновика и правки (vip_pair_edit). Тип связи — всегда романтика.
+    gender_a — род обращения к заказчику; None у заказов до вопроса о роде в
+    боте. teaser — текст бесплатного тизера, если клиент пришёл через него.
     """
     label_a = (name_a or "").strip() or "ты"
     label_b = (name_b or "").strip() or "партнёр"
@@ -318,6 +318,12 @@ def build_user(
 
     if teaser and teaser.strip():
         lines += _teaser_block(teaser, teaser_contacts)
+    return lines
+
+
+def build_user(*args, **kwargs) -> str:
+    """User-сообщение черновика: data_lines (те же аргументы) и просьба написать разбор."""
+    lines = data_lines(*args, **kwargs)
     lines.append("")
     lines.append(
         "Напиши разбор этой пары по правилам из системного сообщения. "

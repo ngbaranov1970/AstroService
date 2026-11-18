@@ -1,10 +1,9 @@
 """Текст VIP-разбора: черновик, правки владельца и доставка в личку.
 
 Место в цепочке: web/routes/admin.py → ЭТОТ МОДУЛЬ → vip (заказ с картой),
-llm (vip_natal, vip_edit, vip_pair), vip_check, vk. Деньги и статусы оплаты
+llm (vip_natal, vip_edit, vip_pair, vip_pair_edit), vip_check, vk. Деньги и статусы оплаты
 здесь только читаются. Заказ пары (VipOrder.is_pair) идёт теми же функциями:
-отличаются промпт черновика, проверка фактов и шапка письма; правки
-просьбой к модели у пары нет. Черновик живёт в orders.draft_text, вариант от DeepSeek —
+отличаются промпты черновика и правки, проверка фактов и шапка письма. Черновик живёт в orders.draft_text, вариант от DeepSeek —
 в draft_candidate до «принять / отказаться» (docs/db-schema.md). Модель
 выбирают на карточке из vip_natal.MODELS.
 Транзакцию функции не коммитят.
@@ -21,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.llm import client as llm
-from app.llm.prompts import vip_edit, vip_natal
+from app.llm.prompts import vip_edit, vip_natal, vip_pair_edit
 from app.llm.prompts import vip_pair as vip_pair_prompt
 from app.services import events, vip, vip_check, vip_pair
 from app.services.vip import VipOrder
@@ -96,6 +95,29 @@ async def _generate(prompt: ModuleType, user_prompt: str, order_id: int, model: 
     return prompt.to_draft(sections)
 
 
+def _pair_args(item: VipOrder) -> tuple[tuple, dict]:
+    """Аргументы vip_pair.data_lines по заказу пары — общие для черновика и правки."""
+    chart, order = item.chart, item.order
+    pair_data = order.pair_data
+    assert chart is not None and pair_data is not None  # проверено в _load
+    args = (
+        vip_pair.synastry(chart, pair_data),
+        chart.calc["natal"],
+        pair_data["natal"],
+        # Транзиты считаются от сегодняшнего дня: черновик через месяц даст другие даты.
+        vip_pair.extras(chart, pair_data, _today()),
+    )
+    # Имя клиента в промпт не идёт: в боте его не спрашивают, а имя из
+    # профиля VK — не то, как человека зовут дома.
+    kwargs = {
+        "name_b": pair_data.get("name"),
+        "gender_a": order.client_gender,
+        "teaser": teaser_text(item),
+        "teaser_contacts": (pair_data.get("teaser") or {}).get("contacts"),
+    }
+    return args, kwargs
+
+
 async def make_draft(session: AsyncSession, order_id: int, model: str | None = None) -> VipOrder:
     """Черновик от vip_natal или vip_pair — в любом статусе оплаты.
 
@@ -107,21 +129,8 @@ async def make_draft(session: AsyncSession, order_id: int, model: str | None = N
     chart, order = item.chart, item.order
     assert chart is not None  # проверено в _load
     if item.is_pair:
-        pair_data = order.pair_data
-        assert pair_data is not None  # проверено в _load
-        # Имя клиента в промпт не идёт: в боте его не спрашивают, а имя из
-        # профиля VK — не то, как человека зовут дома.
-        user_prompt = vip_pair_prompt.build_user(
-            vip_pair.synastry(chart, pair_data),
-            chart.calc["natal"],
-            pair_data["natal"],
-            # Транзиты считаются от сегодняшнего дня: черновик через месяц даст другие даты.
-            vip_pair.extras(chart, pair_data, _today()),
-            name_b=pair_data.get("name"),
-            gender_a=order.client_gender,
-            teaser=teaser_text(item),
-            teaser_contacts=(pair_data.get("teaser") or {}).get("contacts"),
-        )
+        args, kwargs = _pair_args(item)
+        user_prompt = vip_pair_prompt.build_user(*args, **kwargs)
         text = await _generate(vip_pair_prompt, user_prompt, order_id, model)
     else:
         user_prompt = vip_natal.build_user(
@@ -149,19 +158,24 @@ async def request_edit(
     item = await _load(session, order_id)
     chart, order = item.chart, item.order
     assert chart is not None
-    if item.is_pair:
-        # vip_edit написан под натал (дома, управители) — пару он испортит.
-        raise VipDraftError("У разбора пары правки моделью нет — правь руками или сделай новый черновик")
     if not order.draft_text:
         raise VipDraftError("Черновика ещё нет — сначала «Сделать черновик»")
-    user_prompt = vip_edit.build_user(
-        chart.calc["natal"],
-        order.client_gender,
-        draft=order.draft_text,
-        request=request,
-        time_known=chart.time_known,
-    )
-    candidate = await _generate(vip_edit, user_prompt, order_id, model)
+    if item.is_pair:
+        # vip_edit написан под натал (дома, управители) — у пары свой промпт.
+        args, kwargs = _pair_args(item)
+        user_prompt = vip_pair_edit.build_user(
+            *args, draft=order.draft_text, request=request, **kwargs
+        )
+        candidate = await _generate(vip_pair_edit, user_prompt, order_id, model)
+    else:
+        user_prompt = vip_edit.build_user(
+            chart.calc["natal"],
+            order.client_gender,
+            draft=order.draft_text,
+            request=request,
+            time_known=chart.time_known,
+        )
+        candidate = await _generate(vip_edit, user_prompt, order_id, model)
     # Вариант слово в слово равен черновику — не записываем: иначе на карточке
     # две одинаковые колонки. Так модель отвечает на просьбы «короче вдвое».
     if candidate.strip() == order.draft_text.strip():

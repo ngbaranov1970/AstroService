@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm import client as llm
 from app.llm.prompts import pair_teaser as teaser_prompt
 from app.llm.prompts import vip_pair as vip_pair_prompt
+from app.llm.prompts import vip_pair_edit
 from app.models import Chart, ClientGender, Order, OrderStatus, ReportType, User
 from app.services import charts, orders, pair_teaser, vip, vip_check, vip_draft, vip_pair
 from app.vk import api as vk_api
@@ -255,11 +256,26 @@ async def test_draft_for_pair_uses_pair_prompt(monkeypatch: pytest.MonkeyPatch) 
     assert item.order.draft_text == "Главное про вас двоих\n\nТекст."
 
 
-async def test_edit_by_model_is_refused_for_pair(monkeypatch: pytest.MonkeyPatch) -> None:
-    item = await _pair_item(draft_text="черновик")
+async def test_edit_by_model_for_pair_uses_pair_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = await _pair_item(draft_text="Главное\n\nСтарый текст.")
     _patch_get_order(monkeypatch, item)
-    with pytest.raises(vip_draft.VipDraftError, match="пары"):
-        await vip_draft.request_edit(cast(AsyncSession, _Session()), 12, "сделай короче")
+    seen: dict[str, str] = {}
+
+    async def fake_chat(system, user, **kw):
+        seen["system"], seen["user"] = system, user
+        body = json.dumps({"sections": [{"title": "Главное", "body": "Короче."}]})
+        return SimpleNamespace(text=body, usage=SimpleNamespace(completion_tokens=10))
+
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    await vip_draft.request_edit(cast(AsyncSession, _Session()), 12, "сделай короче")
+    assert seen["system"] == vip_pair_edit.SYSTEM
+    # Модель видит данные пары, текущий текст и просьбу.
+    assert "Сторона B: Маша" in seen["user"] and "К карте B:" in seen["user"]
+    assert "<разбор>\nГлавное\n\nСтарый текст.\n</разбор>" in seen["user"]
+    assert "<просьба>\nсделай короче\n</просьба>" in seen["user"]
+    # Вычитанный черновик не затёрт: правка ждёт «принять / отказаться».
+    assert item.order.draft_text == "Главное\n\nСтарый текст."
+    assert item.order.draft_candidate == "Главное\n\nКороче."
 
 
 async def test_deliver_unpaid_pair_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

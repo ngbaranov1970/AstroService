@@ -186,19 +186,17 @@
     <p class="muted">По сохранённому тексту — после ручной правки сначала «Сохранить».</p>
     {{ findings_list(draft_findings) }}
 
-    {# У пары правки моделью нет: vip_edit написан под натал (дома, управители). #}
-    {% if not item.is_pair %}
+    {# Правку натала пишет vip_edit, пары — vip_pair_edit (services/vip_draft.py). #}
     <h3>Попросить модель</h3>
     <form method="post" action="/admin/vip/{{ o.id }}/edit" class="llm" onsubmit="{{ llm_submit }}">
       <textarea name="text" rows="3" style="width: 100%" required
-                placeholder="Например: убери повтор про Луну, раздел о работе сделай короче">{{ edit_request }}</textarea>
+                placeholder="Например: {{ 'убери повтор про Венеру, «Слабые места» сделай короче' if item.is_pair else 'убери повтор про Луну, раздел о работе сделай короче' }}">{{ edit_request }}</textarea>
       <div class="toolbar">
         {{ model_select() }}
         <button type="submit">Попросить</button>
         <span class="waiting" hidden>Модель пишет — до двух минут, не закрывайте страницу.</span>
       </div>
     </form>
-    {% endif %}
     {# Повторный черновик ляжет вариантом рядом с нынешним, не поверх него. #}
     <form method="post" action="/admin/vip/{{ o.id }}/draft" class="llm toolbar" onsubmit="{{ llm_submit }}">
       {{ model_select() }}
