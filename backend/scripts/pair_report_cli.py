@@ -214,7 +214,7 @@ def main() -> None:
         user_message = module.build_user(
             calc, kind=args.kind, name_a=args.name_a, name_b=args.name_b
         )
-    # У vip_pair модель своя (Opus через OpenRouter) и с обязательными размышлениями.
+    # У vip_pair модель своя (Opus через Polza) и с обязательными размышлениями.
     model = args.model or getattr(module, "MODEL", client.DEFAULT_MODEL)
 
     print(f"A: {where_a}", file=sys.stderr)

@@ -1,4 +1,4 @@
-"""Один промпт на нескольких моделях: DeepSeek напрямую, Claude и GPT через OpenRouter.
+"""Один промпт на нескольких моделях: DeepSeek напрямую, Claude и GPT через Polza.ai.
 
 Карта считается один раз, и все модели получают одинаковые system и user
 слово в слово. Каждый ответ сохраняется отдельным файлом в --out, рядом
@@ -6,7 +6,7 @@
 ещё ошибки фактов по vip_check (дом, знак, куспид, аспект). Каждый файл открывается
 с заголовка, где названа модель: файлы перед чтением не обезличены.
 
-Модели OpenRouter требуют OPENROUTER_API_KEY в .env. В них уходит
+Модели Polza требуют POLZA_API_KEY в .env. В них уходит
 натальная карта: гоняем эталонные даты, а не карты клиентов.
 
 Примеры:
@@ -42,7 +42,7 @@ from astro_core.natal import compute_natal
 PROMPTS = {"free_natal": free_natal, "full_natal": full_natal, "vip_natal": vip_natal}
 
 # Принятый на проде DeepSeek против флагманов Anthropic и OpenAI на октябрь 2026.
-# Полный список и цены: https://openrouter.ai/models
+# Полный список и цены: https://polza.ai/models
 DEFAULT_MODELS = [
     "deepseek-v4-pro",
     "anthropic/claude-sonnet-5.5",
@@ -54,22 +54,22 @@ DEFAULT_OUT = Path.home() / "Документы" / "Astro" / "Promt" / "compare"
 
 
 async def _reasoning_efforts(models: list[str]) -> dict[str, str | None]:
-    """Самая низкая допустимая ступень размышлений для каждой модели OpenRouter.
+    """Самая низкая допустимая ступень размышлений для каждой модели Polza.
 
     DeepSeek на проде пишет без размышлений — ставим другие модели в те же
     условия. Где размышления обязательны, берём младшую ступень из списка модели.
     """
-    wanted = [m for m in models if client.is_openrouter(m)]
+    wanted = [m for m in models if client.is_polza(m)]
     if not wanted:
         return {}
     async with httpx.AsyncClient(timeout=30) as http:
-        resp = await http.get(f"{client.OPENROUTER_URL}/models")
+        resp = await http.get(f"{client.POLZA_URL}/models")
         resp.raise_for_status()
     meta = {m["id"]: m.get("reasoning") or {} for m in resp.json()["data"]}
     out: dict[str, str | None] = {}
     for m in wanted:
         if m not in meta:
-            sys.exit(f"OpenRouter не знает модели {m!r}")
+            sys.exit(f"Polza не знает модели {m!r}")
         r = meta[m]
         if not r.get("mandatory"):
             out[m] = "none"
@@ -119,12 +119,12 @@ def main() -> None:
     parser.add_argument("--prompt", choices=sorted(PROMPTS), default="vip_natal")
     parser.add_argument(
         "--models", nargs="+", default=DEFAULT_MODELS,
-        help="модели: без «/» — DeepSeek напрямую, с «/» — OpenRouter",
+        help="модели: без «/» — DeepSeek напрямую, с «/» — Polza",
     )
     parser.add_argument("--runs", type=int, default=1, help="прогонов на модель (разброс)")
     parser.add_argument(
         "--effort", default="auto",
-        help="размышления для OpenRouter: auto (минимум для модели), none, low, medium, high",
+        help="размышления для Polza: auto (минимум для модели), none, low, medium, high",
     )
     parser.add_argument("--temperature", type=float, help="по умолчанию — из промпт-модуля")
     parser.add_argument("--max-tokens", type=int, help="по умолчанию — из промпт-модуля")
@@ -160,7 +160,7 @@ def main() -> None:
                 efforts = {m: args.effort for m in efforts}
             jobs = [(m, run) for m in args.models for run in range(1, args.runs + 1)]
             for m in args.models:
-                note = f", размышления {efforts.get(m)}" if client.is_openrouter(m) else ""
+                note = f", размышления {efforts.get(m)}" if client.is_polza(m) else ""
                 print(f"  → {m}{note}", file=sys.stderr)
             results = await asyncio.gather(*(
                 _run_one(m, prompt, user_prompt, efforts.get(m), temperature, max_tokens)
@@ -204,7 +204,7 @@ def main() -> None:
             findings = vip_check.check(prompt.to_draft(sections), natal, time_known=time_known)
 
         u = result.usage
-        cost = f"{u.cost_usd:.4f}" if u.cost_usd is not None else "—"
+        cost = f"{u.cost_rub:.2f} ₽" if u.cost_rub is not None else "—"
         n_sections = len(sections) if sections else "не JSON"
         n_findings = len(findings) if findings is not None else "—"
         rows.append(
@@ -217,7 +217,7 @@ def main() -> None:
                 + "\n".join(f"- [{f.kind}] «{f.quote}» — {f.message}" for f in findings)
             )
 
-        effort = f", размышления {efforts.get(model)}" if client.is_openrouter(model) else ""
+        effort = f", размышления {efforts.get(model)}" if client.is_polza(model) else ""
         (out_dir / name).write_text(
             f"# {result.model} (запрошена {model}{effort}), прогон {run}\n# {head}\n\n{body}\n",
             encoding="utf-8",

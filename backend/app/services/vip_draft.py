@@ -65,7 +65,7 @@ def _model(model: str | None) -> str:
     """Модель из формы карточки; пусто — по умолчанию, чужое имя — ошибка."""
     if not model:
         return vip_natal.MODEL
-    # Имя приходит из POST: без проверки форма могла бы заказать любую модель OpenRouter.
+    # Имя приходит из POST: без проверки форма могла бы заказать любую модель Polza.
     if model not in vip_natal.MODELS:
         raise VipDraftError(f"Модели {model} нет в списке")
     return model

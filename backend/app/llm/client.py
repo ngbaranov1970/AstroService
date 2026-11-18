@@ -9,8 +9,9 @@
 
 API DeepSeek совместим с OpenAI (POST /chat/completions), поэтому обходимся
 httpx без SDK: меньше зависимостей, видно каждый байт запроса. Модель с «/»
-в имени («anthropic/claude-sonnet-5.5») идёт через OpenRouter тем же
-форматом — для сравнения моделей (scripts/compare_models.py).
+в имени («anthropic/claude-opus-5.5») идёт через агрегатор Polza.ai тем же
+форматом — VIP-разборы и сравнение моделей (scripts/compare_models.py).
+OpenRouter с российского сервера недоступен (403), поэтому Polza.
 
 Расход токенов возвращаем вызывающему (LLMResult.usage) — на нём построен
 контроль затрат: services-слой пишет его в свою таблицу отчётов.
@@ -32,7 +33,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.deepseek.com"
-OPENROUTER_URL = "https://openrouter.ai/api/v1"
+POLZA_URL = "https://polza.ai/api/v1"
 
 # deepseek-v4-flash — основной для отчётов: в разы дешевле pro на выходных
 # токенах и держит 2500 параллельных запросов против 500. v4-pro можно
@@ -69,8 +70,8 @@ class Usage:
     # включён всегда и дешевле в ~10 раз) — метрика для оптимизации промптов:
     # стабильный системный префикс = больше cache hit.
     cached_prompt_tokens: int
-    # Цена запроса в долларах — её считает только OpenRouter; у DeepSeek None.
-    cost_usd: float | None = None
+    # Цена запроса в рублях — её считает только Polza; у DeepSeek None.
+    cost_rub: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,13 +81,13 @@ class LLMResult:
     usage: Usage
 
 
-def is_openrouter(model: str) -> bool:
-    """Модели OpenRouter пишутся как «провайдер/модель», у DeepSeek слэша нет."""
+def is_polza(model: str) -> bool:
+    """Модели Polza пишутся как «провайдер/модель», у DeepSeek слэша нет."""
     return "/" in model
 
 
 def _provider(model: str) -> str:
-    return "OpenRouter" if is_openrouter(model) else "DeepSeek"
+    return "Polza" if is_polza(model) else "DeepSeek"
 
 
 _clients: dict[str, httpx.AsyncClient] = {}
@@ -97,15 +98,15 @@ def _client(model: str) -> httpx.AsyncClient:
 
     Ключ читается здесь, а не на импорте — модуль можно импортировать
     без заполненного .env (тесты, alembic), см. app/config.py.
-    Без OPENROUTER_API_KEY модель со слэшем даёт LLMError.
+    Без POLZA_API_KEY модель со слэшем даёт LLMError.
     """
     provider = _provider(model)
     if provider not in _clients:
         settings = get_settings()
-        if provider == "OpenRouter":
-            if settings.openrouter_api_key is None:
-                raise LLMError("OPENROUTER_API_KEY не задан в .env")
-            base_url, key = OPENROUTER_URL, settings.openrouter_api_key
+        if provider == "Polza":
+            if settings.polza_api_key is None:
+                raise LLMError("POLZA_API_KEY не задан в .env")
+            base_url, key = POLZA_URL, settings.polza_api_key
         else:
             base_url, key = BASE_URL, settings.deepseek_api_key
         _clients[provider] = httpx.AsyncClient(
@@ -114,6 +115,27 @@ def _client(model: str) -> httpx.AsyncClient:
             headers={"Authorization": f"Bearer {key.get_secret_value()}"},
         )
     return _clients[provider]
+
+
+def _reasoning(model: str, effort: str | None) -> dict:
+    """Блок reasoning для Polza.
+
+    Claude Opus 4.7+ и Sonnet 5.x думают в адаптивном режиме: Polza у них
+    игнорирует reasoning.effort, глубину задаёт пара type=adaptive +
+    effort_level (low/medium/high/max). Остальные модели — обычный effort.
+    """
+    out: dict = {"exclude": True}
+    if effort is None:
+        return out
+    if model.startswith("anthropic/"):
+        if effort in ("none", "minimal"):
+            out["type"] = "disabled"
+        else:
+            out["type"] = "adaptive"
+            out["effort_level"] = "max" if effort == "xhigh" else effort
+    else:
+        out["effort"] = effort
+    return out
 
 
 async def close_client() -> None:
@@ -142,7 +164,7 @@ async def chat(
     а для развлекательных текстов он не улучшает результат, но умножает
     выходные токены и время ответа.
 
-    reasoning_effort — только для OpenRouter («none», «low», …); None — дефолт
+    reasoning_effort — только для Polza («none», «low», …); None — дефолт
     модели. У Claude и GPT размышления делят с текстом бюджет max_tokens.
     """
     payload: dict = {
@@ -154,13 +176,11 @@ async def chat(
         "max_tokens": max_tokens,
         "stream": False,
     }
-    if is_openrouter(model):
+    if is_polza(model):
         # Ход размышлений не возвращаем: в тексте разбора он не нужен, а платим за него и так.
-        # temperature отправляем всегда: модели, которые её не принимают, OpenRouter
+        # temperature отправляем всегда: модели, которые её не принимают, Polza
         # выполняет без неё.
-        payload["reasoning"] = {"exclude": True}
-        if reasoning_effort is not None:
-            payload["reasoning"]["effort"] = reasoning_effort
+        payload["reasoning"] = _reasoning(model, reasoning_effort)
         payload["temperature"] = temperature
     else:
         payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
@@ -240,7 +260,7 @@ def _parse(resp: httpx.Response, *, requested_model: str) -> LLMResult:
         choice = data["choices"][0]
         text = choice["message"]["content"]
         u = data["usage"]
-        # Кеш промпта DeepSeek отдаёт своим полем, OpenRouter — в формате OpenAI.
+        # Кеш промпта DeepSeek отдаёт своим полем, Polza — в формате OpenAI.
         cached = u.get("prompt_cache_hit_tokens")
         if cached is None:
             cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
@@ -248,7 +268,7 @@ def _parse(resp: httpx.Response, *, requested_model: str) -> LLMResult:
             prompt_tokens=u["prompt_tokens"],
             completion_tokens=u["completion_tokens"],
             cached_prompt_tokens=cached,
-            cost_usd=u.get("cost"),
+            cost_rub=u.get("cost_rub", u.get("cost")),
         )
     except (KeyError, IndexError, ValueError, TypeError) as e:
         raise LLMError(f"Неожиданный формат ответа {requested_model}: {e}") from e
