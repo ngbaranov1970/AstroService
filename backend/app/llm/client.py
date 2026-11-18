@@ -117,25 +117,15 @@ def _client(model: str) -> httpx.AsyncClient:
     return _clients[provider]
 
 
-def _reasoning(model: str, effort: str | None) -> dict:
-    """Блок reasoning для Polza.
+def _reasoning(effort: str | None) -> dict:
+    """Блок reasoning для Polza: только effort, None — дефолт модели.
 
-    Claude Opus 4.7+ и Sonnet 5.x думают в адаптивном режиме: Polza у них
-    игнорирует reasoning.effort, глубину задаёт пара type=adaptive +
-    effort_level (low/medium/high/max). Остальные модели — обычный effort.
+    type=adaptive не шлём: Polza с ним снимает с Claude ограничение — на
+    vip_pair Opus при effort_level=low тратил 11 тыс. из 12 тыс. токенов на
+    размышления, JSON обрывался (18.11.2026). reasoning.effort=low — 0 токенов
+    размышлений; exclude и reasoning.max_tokens Polza игнорирует.
     """
-    out: dict = {"exclude": True}
-    if effort is None:
-        return out
-    if model.startswith("anthropic/"):
-        if effort in ("none", "minimal"):
-            out["type"] = "disabled"
-        else:
-            out["type"] = "adaptive"
-            out["effort_level"] = "max" if effort == "xhigh" else effort
-    else:
-        out["effort"] = effort
-    return out
+    return {} if effort is None else {"effort": effort}
 
 
 async def close_client() -> None:
@@ -180,7 +170,7 @@ async def chat(
         # Ход размышлений не возвращаем: в тексте разбора он не нужен, а платим за него и так.
         # temperature отправляем всегда: модели, которые её не принимают, Polza
         # выполняет без неё.
-        payload["reasoning"] = _reasoning(model, reasoning_effort)
+        payload["reasoning"] = _reasoning(reasoning_effort)
         payload["temperature"] = temperature
     else:
         payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
