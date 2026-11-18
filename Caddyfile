@@ -3,6 +3,17 @@
 {$SITE_ADDRESS} {
 	encode zstd gzip
 
+	# Заголовки безопасности. X-Frame-Options / frame-ancestors НЕ ставим:
+	# фронт открывается как VK Mini App внутри iframe vk.com.
+	# HSTS без includeSubDomains и preload: поддомены могут понадобиться без HTTPS,
+	# а из preload-списка браузеров домен выводится месяцами.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
 	# Канонический адрес один — astrozvezdochet.ru, остальные имена уводим на
 	# него: одинаковое содержимое на двух адресах делит вес в поиске.
 	# ngbaranov.top не отключаем — на нём ссылки в уже выданных разборах,
