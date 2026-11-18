@@ -281,3 +281,52 @@ async def process_message(obj: dict[str, Any]) -> None:
             type(error).__name__,
             detail,
         )
+
+
+def owner_command(obj: dict[str, Any]) -> tuple[int, int, str] | None:
+    """Исходящее сообщение сообщества со «стоп»/«старт»: (peer_id, cmid, текст), иначе None.
+
+    message_reply приходит и на ответы самого бота — их отсекает текст: таких слов бот не пишет.
+    """
+    # В 5.199 message_reply — сам объект сообщения; вложенный message — на случай смены формы.
+    message = obj.get("message") if isinstance(obj.get("message"), dict) else obj
+    peer_id = message.get("peer_id")
+    message_id = message.get("conversation_message_id")
+    text = message.get("text")
+    if (
+        not isinstance(peer_id, int)
+        or not 0 < peer_id < 2_000_000_000
+        or not isinstance(message_id, int)
+        or not isinstance(text, str)
+        or not router.is_owner_command(text)
+    ):
+        return None
+    return peer_id, message_id, text
+
+
+async def process_owner_message(obj: dict[str, Any]) -> None:
+    """«стоп»/«старт» владельца: пауза бота для этого человека и удаление команды из переписки."""
+    command = owner_command(obj)
+    if command is None:
+        return
+    peer_id, message_id, text = command
+    user_id = None
+    try:
+        async with get_sessionmaker()() as session:
+            user = await users.get_or_create(
+                session,
+                platform=Platform.VK,
+                external_id=str(peer_id),
+                source="vk_group",
+                subscribed=False,
+            )
+            user_id = user.id
+            await router.handle_owner(session, user, text)
+            await session.commit()
+        await api.delete_message(peer_id, message_id)
+    except Exception as error:  # noqa: BLE001 — ошибка фона не должна менять ответ Callback
+        logger.error(
+            "VK-бот: сбой команды владельца user_id=%s error_type=%s",
+            user_id,
+            type(error).__name__,
+        )

@@ -40,6 +40,8 @@ class FakeDialog:
     user_id: int = 1
     state: str = states.IDLE
     data: dict[str, Any] = field(default_factory=dict)
+    paused_until: Any = None
+    menu_shown_at: Any = None
     updated_at: datetime | None = None
 
 

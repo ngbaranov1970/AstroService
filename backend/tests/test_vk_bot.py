@@ -378,3 +378,73 @@ def test_bot_disabled_by_default(monkeypatch):
     monkeypatch.delenv("VK_BOT_ENABLED", raising=False)
     settings = Settings(_env_file=None, deepseek_api_key="test", database_url="test", debug=False)
     assert settings.vk_bot_enabled is False
+
+
+# --- «стоп»/«старт» владельца: message_reply ---------------------------------
+
+
+def owner_reply(text="стоп", **changes):
+    # message_reply в 5.199 — сам объект сообщения, без обёртки message.
+    obj = {
+        "from_id": -456, "peer_id": 100, "out": 1, "admin_author_id": 1,
+        "conversation_message_id": 77, "text": text,
+    }
+    obj.update(changes)
+    return obj
+
+
+@pytest.mark.parametrize("text", ["стоп", " СТАРТ "])
+def test_owner_command_parses_stop_and_start(text):
+    assert bot.owner_command(owner_reply(text)) == (100, 77, text)
+    assert bot.owner_command({"message": owner_reply(text)}) == (100, 77, text)
+
+
+@pytest.mark.parametrize(
+    "obj",
+    [
+        owner_reply("Привет! Я Звездочёт"),
+        owner_reply("стоп, сейчас пришлю"),
+        owner_reply(peer_id=2000000001),
+        owner_reply(conversation_message_id=None),
+        owner_reply(text=None),
+    ],
+)
+def test_owner_command_ignores_other_outgoing(obj):
+    assert bot.owner_command(obj) is None
+
+
+async def test_process_owner_message_pauses_and_deletes(adapter, session, monkeypatch):
+    handle_owner = AsyncMock(return_value=True)
+    delete = AsyncMock(return_value=True)
+    monkeypatch.setattr(bot.router, "handle_owner", handle_owner)
+    monkeypatch.setattr(bot.api, "delete_message", delete)
+    await bot.process_owner_message(owner_reply())
+    assert adapter.create.await_args.kwargs["external_id"] == "100"
+    assert handle_owner.await_args.args[2] == "стоп"
+    session.commit.assert_awaited_once()
+    delete.assert_awaited_once_with(100, 77)
+    adapter.send.assert_not_awaited()
+
+
+async def test_callback_schedules_owner_command(callback_setup, session, monkeypatch):
+    process = AsyncMock()
+    monkeypatch.setattr(callback.vk_bot, "process_owner_message", process)
+    response, background = await invoke_callback(
+        session, type="message_reply", object=owner_reply()
+    )
+    assert response.body == b"ok"
+    session.commit.assert_awaited_once()
+    callback.users.get_or_create.assert_not_awaited()
+    assert len(background.tasks) == 1
+    await background()
+    process.assert_awaited_once_with(owner_reply())
+
+
+async def test_callback_ignores_bot_own_reply(callback_setup, session):
+    response, background = await invoke_callback(
+        session, type="message_reply", object=owner_reply("Привет! Я Звездочёт")
+    )
+    assert response.body == b"ok"
+    assert background.tasks == []
+    callback.storage.seen.assert_not_awaited()
+    callback.users.get_or_create.assert_not_awaited()

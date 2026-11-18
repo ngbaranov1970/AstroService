@@ -139,6 +139,8 @@ erDiagram
         bigint   user_id PK_FK "1:1 с users — шаг FSM бота"
         varchar  state         "idle / natal_date / …"
         jsonb    data          "черновик ввода; уходит CASCADE"
+        timestamptz paused_until  "бот молчит на свободный текст; «стоп» владельца"
+        timestamptz menu_shown_at "последнее приветствие меню"
         timestamptz updated_at
     }
 

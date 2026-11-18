@@ -1,4 +1,4 @@
-"""Вызовы VK API от имени сообщества: messages.send, фото в сообщение, groups.isMember, users.get.
+"""Вызовы VK API от имени сообщества: messages.send/delete, фото в сообщение, groups.isMember, users.get.
 
 Место в слоях: services/рассылка и страница разбора → ЭТОТ ФАЙЛ →
 api.vk.ru. Ни базы, ни наших пользователей здесь нет: на вход идут
@@ -262,6 +262,22 @@ async def upload_message_photo(peer_id: int, image: bytes) -> str:
     if photo.get("access_key"):
         attachment += f"_{photo['access_key']}"
     return attachment
+
+
+async def delete_message(peer_id: int, conversation_message_id: int) -> bool:
+    """Удалить сообщение диалога у обеих сторон. False — VK отказал (лог без id человека).
+
+    VK позволяет удалить для всех только в течение 24 часов после отправки.
+    """
+    try:
+        await _request(
+            "messages.delete",
+            {"peer_id": peer_id, "cmids": conversation_message_id, "delete_for_all": 1},
+        )
+    except VkError as e:
+        logger.warning("VK messages.delete не удалось: %s", e)
+        return False
+    return True
 
 
 async def is_group_member(user_id: int) -> bool | None:

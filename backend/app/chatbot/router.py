@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,12 @@ logger = logging.getLogger(__name__)
 _CODE_KARTA = "карта"
 _CODE_PARA = "пара"
 _RESET_TEXTS = frozenset({"меню", "начать", "старт", "start"})
+# Слова владельца в исходящем сообщении сообщества: «стоп» — бот молчит, «старт» — снова отвечает.
+_OWNER_STOP = "стоп"
+_OWNER_START = "старт"
+PAUSE = timedelta(minutes=30)
+# Повторное приветствие на непонятный текст — не чаще: иначе бот встревает в переписку.
+_MENU_REPEAT = timedelta(days=1)
 _WS = re.compile(r"\s+")
 _VIP_STATES = frozenset({states.VIP_NAME, states.VIP_GENDER, states.VIP_CONFIRM})
 _PAIR_STATES = frozenset(
@@ -62,10 +69,14 @@ async def handle(
 
     if _is_reset(normalized, payload):
         await storage.reset(session, dialog)
-        return [menu.menu_reply(user)]
+        return [_greet(dialog, user)]
 
     if "cmd" in payload:
         return await _dispatch_cmd(session, user, dialog, payload, is_member)
+
+    # Владелец ведёт разговор: кнопки и «Меню» работают, свободный текст — тишина.
+    if _paused(dialog):
+        return []
 
     if normalized == _CODE_PARA:
         # ref из vk.me/…?ref= или из комментария (pair_post); иначе слово в личке.
@@ -93,7 +104,31 @@ async def handle(
         return await _start_natal(
             session, user, dialog, is_member, first_text=incoming.text
         )
-    return [menu.menu_reply(user)]
+    # Непонятный текст («спасибо», «ок»): меню с приветствием — только после перерыва.
+    shown = dialog.menu_shown_at
+    if shown is not None and datetime.now(UTC) - shown < _MENU_REPEAT:
+        return []
+    return [_greet(dialog, user)]
+
+
+def is_owner_command(text: str) -> bool:
+    """«стоп» или «старт» — без обращения к базе, чтобы отсечь обычные исходящие сразу."""
+    return normalize(text) in (_OWNER_STOP, _OWNER_START)
+
+
+async def handle_owner(session: AsyncSession, user: User, text: str) -> bool:
+    """Команда владельца из исходящего сообщения: «стоп» — пауза на PAUSE, «старт» — снять.
+
+    True — текст был командой (адаптер уберёт его из переписки). Сессию не коммитит.
+    """
+    if not is_owner_command(text):
+        return False
+    normalized = normalize(text)
+    dialog = await storage.load(session, user.id)
+    pause = normalized == _OWNER_STOP
+    dialog.paused_until = datetime.now(UTC) + PAUSE if pause else None
+    logger.info("chatbot.owner user_id=%s pause=%s", user.id, pause)
+    return True
 
 
 async def run_job(session: AsyncSession, user: User, job: Job) -> Sequence[Outgoing]:
@@ -105,6 +140,17 @@ async def run_job(session: AsyncSession, user: User, job: Job) -> Sequence[Outgo
         return await pair.run_teaser(session, user, dialog)
     logger.error("chatbot.run_job unknown job=%s user_id=%s", job.name, user.id)
     return []
+
+
+def _paused(dialog: BotDialog) -> bool:
+    until = dialog.paused_until
+    return until is not None and datetime.now(UTC) < until
+
+
+def _greet(dialog: BotDialog, user: User) -> Outgoing:
+    """Меню с приветствием; запоминает время, чтобы не повторять его на каждое слово."""
+    dialog.menu_shown_at = datetime.now(UTC)
+    return menu.menu_reply(user)
 
 
 def _is_reset(normalized: str, payload: dict[str, Any]) -> bool:

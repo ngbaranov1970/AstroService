@@ -124,6 +124,15 @@ async def vk_callback(
                 background.add_task(comments.process_comment, obj)
         return _ok()
 
+    # Исходящее сообщество: «стоп»/«старт» владельца. Разрешений не даёт и в воронку не идёт.
+    if event_type == "message_reply":
+        if settings.vk_bot_enabled and vk_bot.owner_command(obj) is not None:
+            dispatch = await _first_time(session, body)
+            await session.commit()
+            if dispatch:
+                background.add_task(vk_bot.process_owner_message, obj)
+        return _ok()
+
     vk_user_id = _extract_user_id(event_type, obj)
     if vk_user_id is None:
         # Событие не про человека (лайк, запись на стене) или это наше же

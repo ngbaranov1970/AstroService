@@ -49,6 +49,17 @@ class BotDialog(Base):
         JSONB, nullable=False, default=dict, server_default=sql_text("'{}'::jsonb")
     )
 
+    # До этого момента бот молчит на свободный текст: владелец написал «стоп».
+    # Отдельно от data: storage.reset затирает data, а «Меню» паузу снимать не должно.
+    paused_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Когда бот последний раз здоровался меню: повторно на непонятный текст — не чаще раза в сутки.
+    menu_shown_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # onupdate — только ORM; сырой UPDATE в psql метку не тронет.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

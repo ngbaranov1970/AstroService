@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,6 +27,8 @@ class FakeDialog:
     user_id: int = 1
     state: str = states.IDLE
     data: dict[str, Any] = field(default_factory=dict)
+    paused_until: Any = None
+    menu_shown_at: Any = None
 
 
 @dataclass
@@ -328,3 +331,135 @@ async def test_gate_does_not_touch_vip(
     check = _member()
     await _gated(session, user, _incoming("", payload={"cmd": "vip"}), check)
     assert check.calls == 0
+
+
+# --- повторное приветствие и пауза владельца ---
+
+
+async def test_unknown_text_again_within_day_is_silent(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    first = await _handle(session, user, _incoming("здравствуйте"))
+    assert first[0].text == texts.MENU_TEXT
+    assert dialog.menu_shown_at is not None
+    assert await _handle(session, user, _incoming("спасибо")) == []
+
+
+async def test_unknown_text_after_day_greets_again(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    dialog.menu_shown_at = datetime.now(UTC) - timedelta(days=1, minutes=1)
+    replies = await _handle(session, user, _incoming("ок"))
+    assert replies[0].text == texts.MENU_TEXT
+
+
+async def test_menu_word_greets_even_right_after_greeting(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    dialog.menu_shown_at = datetime.now(UTC)
+    replies = await _handle(session, user, _incoming("меню"))
+    assert replies[0].text == texts.MENU_TEXT
+
+
+@pytest.mark.parametrize("text", ["привет", "карта", "пара", "09.03.1987 Егорьевск"])
+async def test_pause_silences_free_text(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+    text: str,
+) -> None:
+    assert patched_storage is dialog
+    dialog.paused_until = datetime.now(UTC) + timedelta(minutes=10)
+    assert await _handle(session, user, _incoming(text)) == []
+
+
+async def test_pause_silences_dialog_step(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    dialog.state = states.NATAL_DATE
+    dialog.paused_until = datetime.now(UTC) + timedelta(minutes=10)
+    assert await _handle(session, user, _incoming("09.03.1987")) == []
+    assert dialog.state == states.NATAL_DATE
+
+
+async def test_pause_keeps_menu_button_and_pause(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    until = datetime.now(UTC) + timedelta(minutes=10)
+    dialog.paused_until = until
+    replies = await _handle(session, user, _incoming("Меню", payload={"cmd": "menu"}))
+    assert replies[0].text == texts.MENU_TEXT
+    assert dialog.paused_until == until
+
+
+async def test_expired_pause_answers_again(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    dialog.paused_until = datetime.now(UTC) - timedelta(seconds=1)
+    replies = await _handle(session, user, _incoming("привет"))
+    assert replies[0].text == texts.MENU_TEXT
+
+
+async def _owner(session: FakeSession, user: FakeUser, text: str) -> bool:
+    return await router.handle_owner(cast(AsyncSession, session), cast(User, user), text)
+
+
+async def test_owner_stop_pauses_for_30_minutes(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    before = datetime.now(UTC)
+    assert await _owner(session, user, " Стоп ")
+    assert dialog.paused_until is not None
+    assert before + router.PAUSE <= dialog.paused_until <= datetime.now(UTC) + router.PAUSE
+
+
+async def test_owner_start_lifts_pause(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    dialog.paused_until = datetime.now(UTC) + timedelta(minutes=10)
+    assert await _owner(session, user, "СТАРТ")
+    assert dialog.paused_until is None
+
+
+async def test_owner_ordinary_text_is_not_command(
+    session: FakeSession,
+    user: FakeUser,
+    dialog: FakeDialog,
+    patched_storage: FakeDialog,
+) -> None:
+    assert patched_storage is dialog
+    assert not await _owner(session, user, "стоп, сейчас пришлю разбор")
+    assert dialog.paused_until is None
